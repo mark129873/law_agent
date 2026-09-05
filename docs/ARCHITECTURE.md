@@ -268,3 +268,22 @@ curl http://127.0.0.1:8000/api/health   # 期望 {"status": "ok"}
 - 服务启动时输出结构化 JSON 日志（见 docs/RELIABILITY.md）。
 - OpenAPI 文档位于 http://127.0.0.1:8000/docs 。
 
+## 14. 配置管理（BE-002）
+
+### 统一配置入口
+所有运行参数通过 `backend/app/config/settings.py` 的 `Settings`（pydantic-settings）读取，业务代码通过 `get_settings()` 获取单例，禁止在业务代码中直接读取环境变量。
+
+### Provider 切换
+通过配置（环境变量或 `.env`）切换 Provider，业务代码零修改：
+
+| 配置项 | 取值 | 默认 |
+|-------|------|------|
+| `DB_PROVIDER` | sqlite / mysql | sqlite |
+| `VECTOR_STORE_PROVIDER` | chroma / milvus | chroma |
+| `LLM_PROVIDER` | ollama / glm | ollama |
+
+其余运行参数：服务地址端口（`HOST`/`PORT`）、日志等级（`LOG_LEVEL`）、SQLite 文件路径（`SQLITE_DB_PATH`）、MySQL 连接串（`MYSQL_URL`）、Chroma 持久化目录（`CHROMA_PERSIST_DIR`）、Milvus 地址（`MILVUS_URI`）、Ollama 地址与模型（`OLLAMA_BASE_URL`/`OLLAMA_MODEL`）、GLM 地址与模型（`GLM_BASE_URL`/`GLM_MODEL`）。
+
+### 敏感配置
+`GLM_API_KEY` 等密钥只通过环境变量或本地 `.env`（已被 .gitignore 排除）注入，禁止硬编码、禁止提交仓库；日志中禁止输出密钥明文。
+

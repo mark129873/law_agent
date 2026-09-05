@@ -4,8 +4,27 @@
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
 - 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 标准验证路径：`cd backend && uv run pytest tests -q`；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：BE-002 后端配置管理
+- 当前最高优先级未完成功能：BE-003 后端分层与依赖注入架构
 - 当前 blocker：无
+
+### Session 002
+- 日期：2026-09-06
+- 本轮目标：BE-002 后端配置管理
+- 技术决策：
+  - 配置统一走 pydantic-settings（`backend/app/config/settings.py`），业务代码通过 `get_settings()`（lru_cache 单例）读取，禁止散读环境变量。
+  - 三个 Provider（DB/向量库/LLM）用 str Enum 表达，非法取值在启动时即被 pydantic 拒绝。
+  - 敏感配置 GLM_API_KEY 只从环境变量注入，不落盘、不进日志；提供 `.env.example` 模板，真实 `.env` 由 gitignore 排除。
+  - 启动时以结构化日志输出当前生效的 Provider（仅名称，无密钥）。
+- 已完成：Settings 配置体系、Provider 枚举、.env.example、main.py 启动配置日志、4 个配置测试
+- 运行过的验证：
+  - `uv run pytest tests -q` → 5 passed
+  - 真实启动：日志 `"Application configured", data={db_provider: sqlite, vector_store_provider: chroma, llm_provider: ollama}`，`curl /api/health` → ok
+  - 环境变量切换 smoke：`DB_PROVIDER=mysql VECTOR_STORE_PROVIDER=milvus LLM_PROVIDER=glm` 启动后日志显示三者已切换，业务代码零修改
+- 已记录证据：见 feature_list.json BE-002 evidence
+- 提交记录：feat: BE-002 unified configuration management
+- 更新过的文件或工件：docs/ARCHITECTURE.md（新增第 14 节）、backend/app/config/settings.py、backend/app/main.py、backend/.env.example、backend/tests/test_settings.py、progress.md、feature_list.json、session-handoff.md、clean-state-checklist.md
+- 已知风险或未解决问题：无
+- 下一步最佳动作：BE-003 后端分层与依赖注入架构
 
 ### Session 001
 - 日期：2026-09-06

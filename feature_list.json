@@ -25,9 +25,9 @@
       "id": "BE-002",
       "name": "后端配置管理",
       "description": "建立统一配置系统，管理服务配置、SQLite/MySQL 数据库 Provider、Chroma/Milvus 向量数据库 Provider、Ollama/GLM LLM Provider、模型名称、服务地址和其他运行参数。敏感配置通过环境变量提供。",
-      "status": "planned",
-      "evidence": "待实现：应用能够从统一配置入口读取运行配置，并可以通过配置切换 Provider，而无需修改业务代码。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：backend/app/config/settings.py 基于 pydantic-settings 实现统一 Settings（get_settings() 单例）；uv run pytest tests -q → 5 passed（默认值、环境变量切换 Provider、敏感配置仅从环境注入、非法 Provider 拒绝）；真实启动日志记录 \"Application configured\" 且默认 provider 为 sqlite/chroma/ollama；设置 DB_PROVIDER=mysql VECTOR_STORE_PROVIDER=milvus LLM_PROVIDER=glm 后启动日志显示三者切换成功，业务代码零修改；敏感字段 GLM_API_KEY 无文件持久化，.env 被 gitignore 排除，提供 .env.example 模板。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-003",

@@ -12,6 +12,7 @@ import logging
 from fastapi import FastAPI
 
 from app.common.logging import setup_logging
+from app.config.settings import get_settings
 
 # 启动时初始化结构化 JSON 日志，确保后续所有服务日志格式一致
 setup_logging()
@@ -24,6 +25,19 @@ def create_app() -> FastAPI:
     为什么用工厂函数：便于测试中按需构建应用实例，
     也为后续根据配置装配不同 Provider（SQLite/MySQL、Chroma/Milvus 等）留出扩展点。
     """
+    settings = get_settings()
+    # 启动即记录当前生效的 Provider，方便从日志确认配置是否按预期切换；
+    # 注意：只输出 Provider 名称等非敏感信息，密钥一律不进日志。
+    logger.info(
+        "Application configured",
+        extra={
+            "service": "system",
+            "db_provider": settings.db_provider.value,
+            "vector_store_provider": settings.vector_store_provider.value,
+            "llm_provider": settings.llm_provider.value,
+        },
+    )
+
     app = FastAPI(
         title="Legal Knowledge Agent",
         description="法律知识库与法律问答 Agent 后端服务",
