@@ -17,9 +17,9 @@
       "id": "BE-001",
       "name": "后端项目基础框架",
       "description": "建立 Python 3.11.15 后端项目，使用 uv 管理依赖并使用 .venv 作为虚拟环境；引入 FastAPI，建立清晰的应用入口、模块目录和基础启动方式，为后续 Agent、数据库、向量库和 API 开发提供统一基础。",
-      "status": "planned",
-      "evidence": "待实现：后端项目可以通过 uv 创建/同步环境并正常启动 FastAPI 服务，项目目录具备清晰的模块边界。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：cd backend && uv sync 成功创建 .venv（Python 3.11.15，fastapi/uvicorn 已安装）；uv run pytest tests -q → 1 passed（健康检查测试）；uv run uvicorn app.main:app 真实启动成功，curl http://127.0.0.1:8000/api/health 返回 {\"status\":\"ok\"}；启动与请求日志均为符合 RELIABILITY.md 的单行 JSON 结构化日志（LOG_LEVEL=INFO 验证）。目录结构：backend/app 下 api/application/domain/infrastructure/agent/config/common 分层边界已建立。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-002",

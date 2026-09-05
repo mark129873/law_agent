@@ -252,3 +252,19 @@ React State
 
 整体交互参考 Codex Web UI。
 
+## 13. 标准启动与验证路径
+
+### 后端启动路径（BE-001 起生效）
+```bash
+cd backend
+uv sync                 # 创建/同步 .venv 虚拟环境（Python 3.11.15）
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+### 后端验证路径
+```bash
+curl http://127.0.0.1:8000/api/health   # 期望 {"status": "ok"}
+```
+- 服务启动时输出结构化 JSON 日志（见 docs/RELIABILITY.md）。
+- OpenAPI 文档位于 http://127.0.0.1:8000/docs 。
+
