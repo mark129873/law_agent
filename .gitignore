@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+node_modules/
 .eggs/
 
 # 虚拟环境
@@ -28,8 +29,6 @@ htmlcov/
 
 # 日志与临时文件
 *.log
-tmp/
-temp/
 
 # 系统文件
 .DS_Store
