@@ -1,0 +1,273 @@
+{
+  "project": "legal-knowledge-agent",
+  "description": "法律知识库与助手 Agent：基于 LangGraph 构建法律问答 Agent，支持 Ollama 本地模型和 GLM API，支持用户上传 PDF、TXT 等文档构建法律知识库，通过向量检索增强生成法律问题回答；支持多会话、历史消息、流式回答和对话删除。后端采用 Python 3.11.15 + FastAPI + SQLite + Chroma，并通过抽象接口为未来切换 MySQL 8.0、Milvus 和其他 LLM Provider 做好架构准备；前端采用 React + TypeScript + Vite + Tailwind CSS + Fetch + React Router，整体交互和视觉风格参考 Codex Web。",
+  "rules": {
+    "single_active_feature": true,
+    "passing_requires_evidence": true,
+    "do_not_skip_verification": true
+  },
+  "status_legend": {
+    "planned": "功能还没开始做。",
+    "in_progress": "这个功能是当前唯一正在进行的任务。",
+    "blocked": "因为已记录的阻塞问题，当前无法继续推进。",
+    "passing": "要求的验证已经通过，并且证据已经记录。"
+  },
+  "features": [
+    {
+      "id": "BE-001",
+      "name": "后端项目基础框架",
+      "description": "建立 Python 3.11.15 后端项目，使用 uv 管理依赖并使用 .venv 作为虚拟环境；引入 FastAPI，建立清晰的应用入口、模块目录和基础启动方式，为后续 Agent、数据库、向量库和 API 开发提供统一基础。",
+      "status": "planned",
+      "evidence": "待实现：后端项目可以通过 uv 创建/同步环境并正常启动 FastAPI 服务，项目目录具备清晰的模块边界。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-002",
+      "name": "后端配置管理",
+      "description": "建立统一配置系统，管理服务配置、SQLite/MySQL 数据库 Provider、Chroma/Milvus 向量数据库 Provider、Ollama/GLM LLM Provider、模型名称、服务地址和其他运行参数。敏感配置通过环境变量提供。",
+      "status": "planned",
+      "evidence": "待实现：应用能够从统一配置入口读取运行配置，并可以通过配置切换 Provider，而无需修改业务代码。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-003",
+      "name": "后端分层与依赖注入架构",
+      "description": "建立 API、Service、Agent、Repository、VectorStore、LLM Provider、Document 等核心模块边界，并通过依赖注入或等价机制管理组件依赖，避免业务代码直接绑定具体基础设施。",
+      "status": "planned",
+      "evidence": "待实现：核心业务层不直接依赖 SQLite、Chroma、Ollama 或 GLM 的具体实现。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-004",
+      "name": "数据库抽象层",
+      "description": "设计统一数据库接口，包括 Repository、事务、CRUD 等基础能力，使业务层可以独立于具体数据库实现。当前实现 SQLite3，架构上预留 MySQL 8.0。",
+      "status": "planned",
+      "evidence": "待实现：业务层通过数据库抽象接口访问数据，并存在独立的 SQLite 实现；后续可以增加 MySQL 实现而无需修改业务层。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-005",
+      "name": "SQLite 数据库实现与数据模型",
+      "description": "实现当前版本 SQLite 数据库，建立 Conversation、Message、Document 等核心业务数据模型，并提供数据库初始化机制。",
+      "status": "planned",
+      "evidence": "待实现：应用首次启动可以自动初始化 SQLite 数据库，并能够持久化核心业务数据。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-006",
+      "name": "向量数据库抽象层",
+      "description": "设计统一 VectorStore 接口，定义文档向量写入、相似度检索、删除等核心能力，使 RAG 和 Agent 业务逻辑不直接依赖具体向量数据库。",
+      "status": "planned",
+      "evidence": "待实现：RAG 业务代码只依赖 VectorStore 抽象接口，不直接调用 Chroma API。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-007",
+      "name": "Chroma 向量数据库实现",
+      "description": "实现 Chroma VectorStore，负责保存文档 chunk、embedding 和 metadata，并支持根据用户问题进行相似度检索。",
+      "status": "planned",
+      "evidence": "待实现：文本及其向量能够写入 Chroma，并能够通过查询获取相关文档 chunk。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-008",
+      "name": "Milvus 扩展架构",
+      "description": "基于 VectorStore 抽象层预留 Milvus 实现能力，并使向量数据库 Provider 可以通过配置进行选择。第一版不要求完整实现 Milvus。",
+      "status": "planned",
+      "evidence": "待实现：配置和架构可以表达 Chroma/Milvus Provider，核心 RAG 代码不存在 Chroma 强耦合。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-009",
+      "name": "LLM Provider 抽象层",
+      "description": "建立统一的大模型 Provider 接口，抽象同步调用、流式调用以及必要的模型参数，使 LangGraph Agent 不直接依赖具体模型服务。",
+      "status": "planned",
+      "evidence": "待实现：Agent 可以通过统一 LLM 接口调用模型，并能够独立替换具体 LLM Provider。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-010",
+      "name": "Ollama 与 GLM 实现",
+      "description": "实现 Ollama 本地模型和 GLM API 两种 LLM Provider，并支持通过配置选择当前使用的模型服务。",
+      "status": "planned",
+      "evidence": "待实现：分别配置 Ollama 和 GLM 后，可以调用对应模型完成一次正常的模型问答。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-011",
+      "name": "文档处理 Pipeline",
+      "description": "建立统一文档处理流程：文件接收、格式识别、文本解析、文本清洗、Chunk 切分、metadata 构建，为后续 Embedding 和向量存储提供标准输入。",
+      "status": "planned",
+      "evidence": "待实现：输入支持的文档后能够经过统一 Pipeline 转换为标准化 document chunks。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-012",
+      "name": "PDF 与 TXT 文档解析",
+      "description": "实现 PDF、TXT 文档解析能力，并将不同格式统一转换为内部标准文档结构；处理常见解析失败和编码异常。",
+      "status": "planned",
+      "evidence": "待实现：PDF 和 TXT 测试文件均能够正确提取文本，并进入统一文档处理流程。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-013",
+      "name": "Embedding 与知识库入库",
+      "description": "对文档 chunks 生成 embedding，并通过 VectorStore 接口写入 Chroma，同时保存文档来源、chunk、文件名等 metadata。",
+      "status": "planned",
+      "evidence": "待实现：上传文档后可以完成解析、分块、Embedding 和 Chroma 入库，并可以查询对应 metadata。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-014",
+      "name": "RAG 检索服务",
+      "description": "建立独立 RAG Service，根据用户问题生成查询向量并从 VectorStore 检索相关法律知识，将检索结果整理成 Agent 可使用的上下文。",
+      "status": "planned",
+      "evidence": "待实现：针对测试知识库中的明确内容进行查询，可以返回相关 document chunks 和来源信息。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-015",
+      "name": "LangGraph Agent 基础工作流",
+      "description": "使用 LangGraph 建立 Agent 基础工作流，明确用户问题进入、上下文处理、模型调用和结果输出等节点，为后续 RAG 能力集成提供工作流基础。",
+      "status": "planned",
+      "evidence": "待实现：LangGraph 工作流可以被成功创建并执行，能够完成一次基础法律问答。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-016",
+      "name": "RAG Agent 工作流",
+      "description": "将 RAG 检索能力集成到 LangGraph Agent，在模型回答前获取相关知识库内容，并将检索上下文传递给 LLM。",
+      "status": "planned",
+      "evidence": "待实现：针对知识库中的测试法律资料提问时，Agent 能够检索并利用相关资料生成回答。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-017",
+      "name": "法律问答 Prompt 与回答策略",
+      "description": "建立法律问答 Prompt 和回答策略，要求模型优先依据知识库内容回答，在缺少依据时明确说明信息不足，并避免无依据虚构法律条文、案例或结论。",
+      "status": "planned",
+      "evidence": "待实现：针对知识库无相关依据的问题，Agent 能够明确表达信息不足，而不是强制生成虚假依据。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-018",
+      "name": "对话服务",
+      "description": "建立 Conversation/Message Service，实现创建对话、查询历史对话、查询消息、删除对话以及保存用户问题和 Agent 回答。",
+      "status": "planned",
+      "evidence": "待实现：服务层可以完成完整的对话生命周期管理，并正确持久化用户问题和模型回答。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-019",
+      "name": "FastAPI 核心 API",
+      "description": "提供对话、消息、知识库文档等核心 REST API，所有 API 使用异步函数，并建立统一的请求、响应和错误处理结构。",
+      "status": "planned",
+      "evidence": "待实现：核心 API 可以通过 Swagger/OpenAPI 调用并获得符合预期的响应。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-020",
+      "name": "Chat 流式 API",
+      "description": "提供用户问题提交和 Agent 流式回答接口，将 LLM/Agent 的增量输出转换为前端可以持续消费的 HTTP 流。",
+      "status": "planned",
+      "evidence": "待实现：客户端请求 Chat API 后可以在模型生成过程中持续收到增量内容，而无需等待完整回答。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-021",
+      "name": "Document Upload API",
+      "description": "提供 PDF/TXT 等文档上传 API，完成文件校验、解析、Chunk、Embedding、向量入库和处理结果返回。",
+      "status": "planned",
+      "evidence": "待实现：通过 API 上传测试 PDF/TXT 后，可以完成完整知识库入库流程。",
+      "testedAt": null
+    },
+    {
+      "id": "BE-022",
+      "name": "后端异常处理与测试",
+      "description": "完善模型调用失败、数据库异常、向量数据库异常、文档解析失败、非法文件等错误处理，并为核心 Service、Repository、RAG、Agent 和 API 建立自动化测试。",
+      "status": "planned",
+      "evidence": "待实现：核心后端测试可以稳定运行，主要异常场景具有明确的错误响应，不会导致服务异常退出。",
+      "testedAt": null
+    },
+    {
+      "id": "FE-001",
+      "name": "前端项目基础框架",
+      "description": "建立 React + TypeScript + Vite 前端项目，集成 Tailwind CSS、Fetch 和 React Router，建立基础目录结构、入口和开发配置。",
+      "status": "planned",
+      "evidence": "待实现：前端可以正常启动、构建，并能够访问基础路由。",
+      "testedAt": null
+    },
+    {
+      "id": "FE-002",
+      "name": "前端 API 与状态基础层",
+      "description": "建立统一 Fetch API Service、类型定义和必要的前端状态管理方式，为对话、历史记录、知识库等页面提供统一数据访问能力。",
+      "status": "planned",
+      "evidence": "待实现：页面通过统一 API Service 与后端通信，不在 UI 组件中散落 API 请求逻辑。",
+      "testedAt": null
+    },
+    {
+      "id": "FE-003",
+      "name": "Codex 风格应用 Shell",
+      "description": "实现类似 Codex Web 的整体应用布局，包括左侧导航/会话区域、主内容区域、顶部区域和统一交互样式，重点保证简洁、高级和低干扰的视觉体验。",
+      "status": "planned",
+      "evidence": "待实现：主要页面使用统一 Shell，布局、间距、字体、按钮和交互风格保持一致。",
+      "testedAt": null
+    },
+    {
+      "id": "FE-004",
+      "name": "对话页面与新建会话",
+      "description": "实现核心聊天页面，包括新建对话、消息区域、输入框、发送按钮、空状态以及当前会话状态。",
+      "status": "planned",
+      "evidence": "待实现：用户进入应用后可以创建新对话并进入聊天页面。",
+      "testedAt": null
+    },
+    {
+      "id": "FE-005",
+      "name": "历史对话与会话切换",
+      "description": "在侧边栏展示历史对话，支持在不同 conversation 之间切换，并加载对应历史消息。",
+      "status": "planned",
+      "evidence": "待实现：创建多个对话后，可以切换会话并正确恢复每个会话的消息。",
+      "testedAt": null
+    },
+    {
+      "id": "FE-006",
+      "name": "删除对话",
+      "description": "提供删除历史对话的交互，并在删除后同步更新前端状态和后端数据。",
+      "status": "planned",
+      "evidence": "待实现：删除会话后，该会话从列表中消失，刷新页面后也不会重新出现。",
+      "testedAt": null
+    },
+    {
+      "id": "FE-007",
+      "name": "流式聊天交互",
+      "description": "使用 Fetch 消费 Chat 流式 API，将 Agent 回复逐步渲染到消息区域，并处理发送中、生成中、完成和异常等状态。",
+      "status": "planned",
+      "evidence": "待实现：模型生成过程中 UI 能够实时显示新增内容，并在生成完成后正确保存和展示完整回答。",
+      "testedAt": null
+    },
+    {
+      "id": "FE-008",
+      "name": "知识库管理页面",
+      "description": "实现知识库管理入口和文档上传 UI，支持选择 PDF/TXT 文件、上传、处理状态显示以及成功/失败反馈。",
+      "status": "planned",
+      "evidence": "待实现：用户可以在前端选择并上传 PDF/TXT，并能够看到文档处理结果。",
+      "testedAt": null
+    },
+    {
+      "id": "FE-009",
+      "name": "前后端完整联调",
+      "description": "完成前端与后端核心功能联调，打通创建对话、发送问题、Agent 处理、流式回答、历史消息恢复、删除对话以及知识库上传和 RAG 问答。",
+      "status": "planned",
+      "evidence": "待实现：从浏览器实际操作可以完整跑通对话和知识库两个核心业务闭环。",
+      "testedAt": null
+    },
+    {
+      "id": "FE-010",
+      "name": "最终体验优化与全链路测试",
+      "description": "统一优化前端视觉、交互、加载状态、错误提示、空状态、滚动行为和异常场景，并进行前后端全链路测试和生产构建验证。",
+      "status": "planned",
+      "evidence": "待实现：核心功能全部通过验收，前端可以正常 build，后端可以正常启动，核心用户流程不存在阻断性问题。",
+      "testedAt": null
+    }
+  ]
+}
