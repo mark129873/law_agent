@@ -129,25 +129,25 @@
       "id": "BE-015",
       "name": "LangGraph Agent 基础工作流",
       "description": "使用 LangGraph 建立 Agent 基础工作流，明确用户问题进入、上下文处理、模型调用和结果输出等节点，为后续 RAG 能力集成提供工作流基础。",
-      "status": "planned",
-      "evidence": "待实现：LangGraph 工作流可以被成功创建并执行，能够完成一次基础法律问答。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：backend/app/agent/（state.py/graph.py/prompts.py）基于 LangGraph StateGraph 建立 START→generate→END 异步工作流，build_qa_graph(llm, rag=None) 可扩展 RAG；Agent 仅依赖 LLMProvider 抽象。验证：test_agent_graph.py 基础工作流 2 passed（问答完成+系统策略 Prompt+历史消息组装）；真实 Ollama qwen3.5:4b 端到端执行一次法律问答成功。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-016",
       "name": "RAG Agent 工作流",
       "description": "将 RAG 检索能力集成到 LangGraph Agent，在模型回答前获取相关知识库内容，并将检索上下文传递给 LLM。",
-      "status": "planned",
-      "evidence": "待实现：针对知识库中的测试法律资料提问时，Agent 能够检索并利用相关资料生成回答。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：build_qa_graph 传入 rag 即升级为 START→retrieve→generate→END 工作流；RagService 新增 min_score 相似度阈值过滤（弱命中视为无依据）。验证：test_agent_graph.py RAG 工作流 3 passed（知识库上下文注入 Prompt 含来源标注、空知识库不含参考依据段、min_score 过滤弱命中）；真实端到端（nomic-embed-text + Chroma + qwen3.5:4b）：问\"签三年劳动合同试用期最长多久\"，回答正确引用《劳动法手册.txt》劳动合同法第十九条\"不超过六个月\"。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-017",
       "name": "法律问答 Prompt 与回答策略",
       "description": "建立法律问答 Prompt 和回答策略，要求模型优先依据知识库内容回答，在缺少依据时明确说明信息不足，并避免无依据虚构法律条文、案例或结论。",
-      "status": "planned",
-      "evidence": "待实现：针对知识库无相关依据的问题，Agent 能够明确表达信息不足，而不是强制生成虚假依据。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：backend/app/agent/prompts.py 定义 LEGAL_SYSTEM_PROMPT（优先依据知识库并注明来源/无依据时明确声明\"知识库中暂无相关依据，建议咨询专业律师\"/严禁虚构法条）与 build_messages（有依据注入【参考依据】段，无依据透传原问题）。验证：test_answer_strategy.py 3 passed + test_agent_graph 策略断言；真实行为验证（qwen3.5:4b）：无知识库时回答\"知识库中暂无相关依据，建议咨询专业律师\"而非编造；检索到无关内容（量子力学问题）时模型明确声明该问题无相关依据且拒绝误用法律条文。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-018",

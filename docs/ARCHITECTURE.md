@@ -436,3 +436,22 @@ SQLite 实现（BE-005）与未来 MySQL 实现均实现此抽象，业务层通
 - 另提供 `build_context(results)`：把检索结果格式化为供 LLM 使用的上下文文本（含来源文件名），空结果返回空串。
 - 依赖仅抽象接口（EmbeddingService、VectorStore），检索过程输出结构化日志（query 长度、命中数、最高分）。
 
+## 27. LangGraph Agent 工作流（BE-015/BE-016）
+
+### 状态
+- `AgentState`（agent/state.py）：question（用户问题）、history（历史消息）、context（检索上下文）、answer（模型回答）。
+
+### 基础工作流（BE-015）
+```text
+START → generate（组装消息调用 LLMProvider）→ END
+```
+
+### RAG 工作流（BE-016）
+```text
+START → retrieve（RagService.build_context 写入 state.context）
+      → generate（上下文 + 问题组装 Prompt 调用 LLM）→ END
+```
+
+- `build_qa_graph(llm, rag=None)`（agent/graph.py）：rag 为 None 时为基础工作流，传入即为 RAG 工作流；节点全异步，LLM 调用只经过 LLMProvider 抽象。
+- Prompt 组装集中在 `agent/prompts.py`，回答策略（BE-017）只改该文件。
+

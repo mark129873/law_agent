@@ -22,24 +22,34 @@ _SOURCE_TEMPLATE = "【来源：{filename}】\n{content}"
 class RagService:
     """根据用户问题从知识库检索相关法律知识。"""
 
-    def __init__(self, embedding_service: EmbeddingService, vector_store: VectorStore) -> None:
+    def __init__(
+        self,
+        embedding_service: EmbeddingService,
+        vector_store: VectorStore,
+        min_score: float = 0.0,
+    ) -> None:
         self._embedding = embedding_service
         self._vector_store = vector_store
+        # 相似度下限：低于该分数的命中视为不相关并丢弃。
+        # 为什么默认 0.0：合适的阈值依赖具体 embedding 模型的分数分布，
+        # 应结合真实模型实测后配置，而非拍脑袋写死。
+        self._min_score = min_score
 
     async def retrieve(self, query: str, top_k: int = 4) -> list[RetrievedChunk]:
         """向量化查询并检索最相关的知识 chunk。"""
         query_vector = await self._embedding.embed_query(query)
         results = await self._vector_store.search(query_vector, top_k=top_k)
+        filtered = [r for r in results if r.score >= self._min_score]
         logger.info(
             "RAG retrieval completed",
             extra={
                 "service": "rag",
                 "query_length": len(query),
-                "hit_count": len(results),
-                "top_score": results[0].score if results else 0.0,
+                "hit_count": len(filtered),
+                "top_score": filtered[0].score if filtered else 0.0,
             },
         )
-        return results
+        return filtered
 
     async def build_context(self, query: str, top_k: int = 4) -> str:
         """检索并格式化为 LLM 上下文文本；知识库无相关内容时返回空串。

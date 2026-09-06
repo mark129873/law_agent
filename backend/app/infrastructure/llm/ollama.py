@@ -49,7 +49,7 @@ class OllamaProvider(LLMProvider):
             "Ollama chat requested",
             extra={"service": "llm", "model": self._model, "message_count": len(messages)},
         )
-        async with httpx.AsyncClient(timeout=120, transport=self._transport) as client:
+        async with httpx.AsyncClient(timeout=300, transport=self._transport) as client:
             response = await client.post(f"{self._base_url}/api/chat", json=payload)
             response.raise_for_status()
             content = response.json()["message"]["content"]
@@ -69,7 +69,7 @@ class OllamaProvider(LLMProvider):
             extra={"service": "llm", "model": self._model, "message_count": len(messages)},
         )
         # Ollama 流式返回为逐行 JSON（NDJSON），按行解析出增量 content
-        async with httpx.AsyncClient(timeout=120, transport=self._transport) as client:
+        async with httpx.AsyncClient(timeout=300, transport=self._transport) as client:
             async with client.stream("POST", f"{self._base_url}/api/chat", json=payload) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():

@@ -57,7 +57,7 @@ class GLMProvider(LLMProvider):
             "GLM chat requested",
             extra={"service": "llm", "model": self._model, "message_count": len(messages)},
         )
-        async with httpx.AsyncClient(timeout=120, transport=self._transport) as client:
+        async with httpx.AsyncClient(timeout=300, transport=self._transport) as client:
             response = await client.post(
                 f"{self._base_url}/chat/completions", json=payload, headers=self._headers()
             )
@@ -78,7 +78,7 @@ class GLMProvider(LLMProvider):
             "GLM stream requested",
             extra={"service": "llm", "model": self._model, "message_count": len(messages)},
         )
-        async with httpx.AsyncClient(timeout=120, transport=self._transport) as client:
+        async with httpx.AsyncClient(timeout=300, transport=self._transport) as client:
             async with client.stream(
                 "POST", f"{self._base_url}/chat/completions", json=payload, headers=self._headers()
             ) as response:
