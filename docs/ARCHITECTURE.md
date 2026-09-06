@@ -333,3 +333,22 @@ SQLite 实现（BE-005）与未来 MySQL 实现均实现此抽象，业务层通
 - 表结构：`conversations`、`messages`（外键 conversation_id，级联删除，需开启 `PRAGMA foreign_keys`）、`documents`。
 - 容器装配点按 `DB_PROVIDER` 注册：sqlite → `SQLiteDatabase`；mysql → 明确的"未实现"错误（预留）。
 
+## 18. 向量数据库抽象层（BE-006）
+
+### 数据契约
+- `DocumentChunk`（domain/entities）：chunk_id、document_id、content、chunk_index、metadata（文件名等来源信息）
+- `RetrievedChunk`：chunk + score（相似度得分，越高越相关）
+
+### VectorStore 抽象接口（domain/repositories/vector_store.py）
+- `add_chunks(chunks, embeddings) -> list[str]`：写入 chunk 及其向量，返回生成的 chunk id
+- `search(query_embedding, top_k) -> list[RetrievedChunk]`：按向量相似度检索
+- `delete_by_document(document_id) -> int`：删除某文档的全部 chunk，返回删除数量
+- `initialize()` / `close()`：生命周期方法
+
+### 实现与选择
+- Chroma 实现（BE-007）：`infrastructure/vector_store/chroma.py`
+- Milvus 预留（BE-008）：`infrastructure/vector_store/milvus.py`
+- Embedding 由调用方（BE-013 EmbeddingService）生成后传入，向量库抽象不关心 embedding 模型；
+  这保证向量库实现与 embedding 模型彻底解耦。
+- 容器装配点按 `VECTOR_STORE_PROVIDER` 注册实现。
+

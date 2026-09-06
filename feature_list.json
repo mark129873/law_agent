@@ -57,9 +57,9 @@
       "id": "BE-006",
       "name": "向量数据库抽象层",
       "description": "设计统一 VectorStore 接口，定义文档向量写入、相似度检索、删除等核心能力，使 RAG 和 Agent 业务逻辑不直接依赖具体向量数据库。",
-      "status": "planned",
-      "evidence": "待实现：RAG 业务代码只依赖 VectorStore 抽象接口，不直接调用 Chroma API。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：backend/app/domain/entities/chunk.py 定义 DocumentChunk/RetrievedChunk 数据契约；backend/app/domain/repositories/vector_store.py 定义 VectorStore 抽象（initialize/close/add_chunks/search/delete_by_document），embedding 由调用方传入实现与向量库解耦。测试用与 Chroma 无关的内存 Fake（余弦相似度）跑通写入-检索-删除流程（test_vector_store_abstraction.py 3 passed），证明 RAG 业务代码只依赖抽象接口。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-007",
