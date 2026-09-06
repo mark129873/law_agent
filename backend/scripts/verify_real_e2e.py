@@ -35,6 +35,7 @@ async def main() -> None:
         # 3. 新建会话并流式提问（真实 Ollama RAG）
         conversation_id = (await client.post(f"{BASE}/api/conversations", json={"title": "专利法咨询"})).json()["id"]
         answer = []
+        sources = []
         async with client.stream(
             "POST",
             f"{BASE}/api/chat/stream",
@@ -45,17 +46,25 @@ async def main() -> None:
                     event = __import__("json").loads(line[6:])
                     if event["type"] == "delta":
                         answer.append(event["content"])
+                    elif event["type"] == "sources":
+                        sources = event["sources"]
                     elif event["type"] == "error":
                         print("STREAM ERROR:", event["message"])
         full = "".join(answer)
         print("=== RAG ANSWER ===")
         print(full[:400])
+        print("=== SOURCES ===", __import__("json").dumps(sources, ensure_ascii=False)[:300])
         assert "20" in full or "二十" in full, "回答应包含 20 年保护期限"
         assert "专利法" in full, "回答应引用专利法来源"
+        # sources 事件（BE-023）：RAG 检索有命中时必须先于 delta 推送参考来源
+        assert sources, "RAG 检索有命中时应推送 sources 事件"
+        assert all("source" in s and "content" in s for s in sources), "sources 每项应含 source/content"
 
-        # 4. 消息已持久化
+        # 4. 消息已持久化，且 assistant 消息携带参考来源（刷新后前端仍可展示）
         messages = (await client.get(f"{BASE}/api/conversations/{conversation_id}/messages")).json()
         print("persisted messages:", [m["role"] for m in messages])
+        assert messages[1]["sources"], "持久化的 assistant 消息应带 sources"
+        assert messages[1]["sources"] == sources, "持久化来源应与流内 sources 一致"
 
 
 asyncio.run(main())

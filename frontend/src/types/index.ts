@@ -18,6 +18,14 @@ export interface Message {
   role: MessageRole
   content: string
   created_at: string
+  /** 参考文档来源：仅 RAG 检索有命中的回答携带（后端持久化，历史消息同样可展示） */
+  sources?: ReferenceSource[] | null
+}
+
+/** 参考文档来源：RAG 回答引用的一条知识库片段（数组顺序即展示序号） */
+export interface ReferenceSource {
+  source: string
+  content: string
 }
 
 /** 文档处理状态：pending/processing 处理中，ready 已入库可检索，failed 处理失败 */
@@ -46,5 +54,6 @@ export interface ApiErrorBody {
 /** 流式问答接口的 SSE 事件（即每条 data: {...} 里的 JSON） */
 export type ChatStreamEvent =
   | { type: 'delta'; content: string } // 一小段增量回答文本
+  | { type: 'sources'; sources: ReferenceSource[] } // RAG 检索命中：参考文档来源（先于 delta 出现一次）
   | { type: 'done'; conversation_id: string } // 回答正常结束
   | { type: 'error'; message: string } // 服务端处理出错

@@ -66,6 +66,27 @@ body {
   @apply bg-app font-sans text-ink antialiased;
 }
 
+/* 参考文档面板入场：轻微下落淡入，表达"展开"的状态过渡（FE-011）；
+   系统开启"减少动态效果"时静止显示（与全站 motion-reduce 约定一致） */
+@keyframes ref-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.ref-panel-in {
+  animation: ref-panel-in 0.18s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ref-panel-in {
+    animation: none;
+  }
+}
+
 /* 细滚动条：低调、不抢视觉 */
 *::-webkit-scrollbar {
   width: 8px;

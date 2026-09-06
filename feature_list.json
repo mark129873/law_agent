@@ -269,6 +269,22 @@
       "status": "passing",
       "evidence": "2026-09-06：助手回答接入 react-markdown 渲染（加粗/列表/标题/引用统一风格，默认不解析原始 HTML 无注入风险；修复模型输出 Markdown 按字面显示星号的缺陷）；ink-faint 弱化文字对比度提升至 WCAG AA ≥4.5:1（明暗两套 token）；流式光标支持 prefers-reduced-motion。状态覆盖完整：空状态（对话欢迎页/知识库空列表）、加载提示、错误条（网络/后端/格式拒绝）、两步确认删除、生成中禁切。全链路终验：npm run build 通过（tsc+vite）；后端 uv run pytest 83 passed；浏览器复验 Markdown 渲染效果与整体视觉一致性。前端 10 项功能全部 passing。",
       "testedAt": "2026-09-06"
+    },
+    {
+      "id": "BE-023",
+      "name": "流式回答参考来源事件与持久化",
+      "description": "Chat 流式协议新增 sources SSE 事件：RAG 检索有命中时在 delta 之前推送参考来源（文件名+命中内容，顺序即展示序号）；来源随回答一起持久化到 messages 表，GET 消息接口返回；基础工作流或检索无命中时不产生该事件。",
+      "status": "passing",
+      "evidence": "2026-09-06：domain/services/qa_workflow.py 新增 QaStreamEvent 值对象（delta/sources 二态，零技术依赖）；RetrieveNode 检索命中时经 get_stream_writer 推送 sources（先于全部 delta，Prompt 依据与前端展示同源）；ChatService 收集来源随回答持久化（messages 表新增 sources JSON 列，init_schema 幂等 ALTER 迁移旧库且历史数据保留）；MessageResponse 返回 sources；SSE 协议新增 sources 事件。验证：uv run pytest → 92 passed——test_chat_stream_emits_sources_and_persists_them（上传文档→提问：sources 事件先于 delta、含文件名与命中内容、GET messages 回读一致）、test_rag_graph_astream_emits_sources_before_deltas 与 test_rag_graph_empty_knowledge_no_sources_event（图级事件契约：有命中推送/无命中不推）、test_schema_migration_adds_sources_column（旧库补列+数据保留+重复 init 幂等）、test_message_sources_roundtrip；scripts/verify_real_e2e.py 增加 sources 事件与持久化断言。附带修复：API 测试容器入库与检索统一注入确定性 embedding（此前入库侧仍走真实 Ollama embedding，768 维 vs 64 维不一致导致检索报错且测试悄悄触网）。",
+      "testedAt": "2026-09-06"
+    },
+    {
+      "id": "FE-011",
+      "name": "回答参考文档展示",
+      "description": "RAG 检索有命中的回答完成后显示「参考文档」按钮，点开按序号展示参考文档名称与命中内容；未使用检索或无命中的回答不显示按钮；历史恢复的消息同样支持（来源已随回答持久化）。",
+      "status": "passing",
+      "evidence": "2026-09-06：浏览器端到端验证通过（headless Edge 经 playwright-core 驱动本机 :5173/:8000，脚本与截图存仓库外 Temp/opencode/fe011/，仓库零污染）。RAG 场景：新对话提问专利法期限，流式完成后「参考文档」按钮出现（计数 4），点开展示按序号列表（首项为专利法 txt 及第二十六条命中内容），截图 fe011-A-expanded.png；刷新后重进会话按钮仍在（fe011-A-after-reload.png）。空知识库场景（测前经 API 临时删除唯一文档、测后即用 tests/data_source 原文件重传恢复 ready）：无关提问完成后按钮数量为 0（fe011-B-no-button.png）。契约层：真实 SSE 验证 sources 事件先于全部 delta、持久化来源与流内一致、GET 回读一致；后端 uv run pytest 92 passed；前端 npm run build 通过；测试会话已清理。注意：清理时按标题前缀删除误删 1 条历史同名提问会话（测试数据，非用户数据）。",
+      "testedAt": "2026-09-06"
     }
   ]
 }

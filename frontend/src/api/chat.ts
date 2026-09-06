@@ -1,7 +1,7 @@
 // 流式问答 API：用 fetch 消费后端的 SSE 流（POST /api/chat/stream）。
 // 为什么不用浏览器自带的 EventSource：它只支持 GET 请求，
 // 而提交问题需要 POST JSON，所以必须用 fetch 手动读取响应字节流。
-import type { ChatStreamEvent } from '../types'
+import type { ChatStreamEvent, ReferenceSource } from '../types'
 
 /** 流式问答入参 */
 interface ChatStreamParams {
@@ -9,9 +9,11 @@ interface ChatStreamParams {
   question: string
 }
 
-/** 流式问答回调：每收到一段增量、结束信号或错误就通知调用方 */
+/** 流式问答回调：每收到一段增量、来源、结束信号或错误就通知调用方 */
 interface ChatStreamHandlers {
   onDelta: (content: string) => void
+  /** RAG 检索有命中时收到一次参考来源（先于全部增量，顺序即展示序号） */
+  onSources?: (sources: ReferenceSource[]) => void
   onDone: (conversationId: string) => void
   onError: (message: string) => void
 }
@@ -19,7 +21,7 @@ interface ChatStreamHandlers {
 /**
  * 提交问题并持续消费流式回答。
  * 协议（docs/ARCHITECTURE.md 第 7 节）：响应体由若干条 "data: {json}\n\n" 组成，
- * json 的 type 字段区分 delta（增量文本）/ done（结束）/ error（出错）。
+ * json 的 type 字段区分 sources（参考来源）/ delta（增量文本）/ done（结束）/ error（出错）。
  */
 export async function streamChat(params: ChatStreamParams, handlers: ChatStreamHandlers): Promise<void> {
   const res = await fetch('/api/chat/stream', {
@@ -55,6 +57,7 @@ export async function streamChat(params: ChatStreamParams, handlers: ChatStreamH
       try {
         const event = JSON.parse(line.slice(5)) as ChatStreamEvent
         if (event.type === 'delta') handlers.onDelta(event.content)
+        else if (event.type === 'sources') handlers.onSources?.(event.sources)
         else if (event.type === 'done') handlers.onDone(event.conversation_id)
         else if (event.type === 'error') handlers.onError(event.message)
       } catch {

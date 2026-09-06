@@ -41,6 +41,21 @@ async def test_message_roundtrip_and_ordering(service: ConversationService) -> N
 
 
 @pytest.mark.asyncio
+async def test_add_message_with_sources_roundtrip(service: ConversationService) -> None:
+    """带参考来源的助手消息经服务层写入后可完整恢复（FE-023 持久化契约）。"""
+    conversation = await service.create_conversation("RAG 咨询")
+    sources = [{"source": "劳动合同法.txt", "content": "试用期不得超过六个月。"}]
+    await service.add_message(conversation.id, MessageRole.USER, "试用期最长多久？")
+    await service.add_message(
+        conversation.id, MessageRole.ASSISTANT, "不超过六个月。", sources=sources
+    )
+
+    messages = await service.get_messages(conversation.id)
+    assert messages[0].sources is None
+    assert messages[1].sources == sources
+
+
+@pytest.mark.asyncio
 async def test_operations_on_missing_conversation_raise(service: ConversationService) -> None:
     """对不存在的会话读写/删除都应抛业务异常，防止产生孤儿数据。"""
     with pytest.raises(ConversationNotFoundError):

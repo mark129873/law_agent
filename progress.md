@@ -4,8 +4,42 @@
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
 - 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 标准验证路径：`cd backend && uv run pytest tests -q`；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：无（后端 BE-001~022 与前端 FE-001~010 全部 passing，32 项功能全部完成；全项目五层测试轮已通过）
+- 当前最高优先级未完成功能：无——BE-001~023 与 FE-001~011 全部 passing（FE-011 浏览器端到端验证已于本轮通过）
 - 当前 blocker：无
+
+### Session 018（FE-011 浏览器端到端验证收尾）
+- 日期：2026-09-06
+- 本轮目标：按 AGENTS.md 启动流程接续，完成 FE-011 最后一项验证并置 passing
+- 按流程执行：pwd 确认目录；重读 ARCHITECTURE/PRODUCT/RELIABILITY/progress/handoff/feature_list/init/NEW_FEATURE（NEW_FEATURE 与 PRODUCT/feature_list 已同步，无需再改）；init 文件存在性全部通过；后端 uv run pytest → 92 passed；前端 npm run build 通过；后端 :8000 与前端 :5173 均为运行中（health ok/200）
+- 技术决策：
+  - 本机无 Chrome，用 playwright-core + 本机 Edge（executablePath 直指 msedge.exe，headless）做真实浏览器验证；脚本与截图放在仓库外 Temp/opencode/fe011/（verify-fe011.cjs + 3 张截图），仓库零污染，不改 package.json
+  - 空知识库场景需清空向量库：经 API 临时删除唯一文档（专利法 txt），测后即用 tests/data_source 原文件重传恢复 ready；向量由同内容重建，测试会话事后按标题清理
+- 运行过的验证（真实浏览器）：
+  - A1 RAG 提问专利法期限：流式完成后「参考文档」按钮出现（计数 4）
+  - A2 点击展开：按序号列表，首项为专利法 txt 及第二十六条命中内容
+  - A3 刷新后重进会话：按钮仍在（持久化恢复链路贯通）
+  - B 空知识库无关提问：参考文档按钮数量为 0
+  - 契约层复验：真实 SSE sources 事件先于全部 delta，持久化来源与流内一致，GET 回读一致
+  - 收尾复检：文档恢复为 1 个 ready；后端 pytest 92 passed
+- 附带问题：清理测试会话时按标题前缀删除，误删 1 条历史同名专利法提问会话（属测试数据；用户保留的 2 条历史会话未动）
+- 提交记录：本轮提交
+- 下一步最佳动作：可选增强方向（需用户决定）：会话重命名、回答停止按钮、深色主题手动开关、部署收敛 CORS；或 OllamaProvider 加重试解决上传后立即提问偶发 500 的已知风险
+
+### Session 017（参考文档功能 BE-023/FE-011）
+- 日期：2026-09-06
+- 本轮目标：NEW_FEATURE.md——RAG 回答后显示「参考文档」按钮，点开按序号展示参考文档与内容；未使用检索或无命中不显示
+- 技术决策：
+  - 后端 BE-023：domain/services/qa_workflow.py 新增 QaStreamEvent 值对象（delta/sources 二态）；RetrieveNode 检索命中时经 get_stream_writer 推送 sources（先于全部 delta，数组顺序即展示序号；Prompt 依据与前端展示同源）；ChatService 收集来源随回答一起持久化；messages 表新增 sources JSON 列（init_schema 幂等 ALTER 迁移旧库，历史数据保留）；MessageResponse/消息接口返回 sources；SSE 协议新增 sources 事件
+  - 前端 FE-011：types 新增 ReferenceSource；chat.ts 增加 onSources 回调；AppContext 在 done 时挂载 sources（生成中不挂载，回答完成后按钮才出现）；MessageBlock 参考文档折叠按钮（Phosphor Books 图标 + 计数徽标 + 按序号列表，来源内容纯文本渲染不进 Markdown，ref-panel-in 入场动画 respects prefers-reduced-motion，aria-expanded 无障碍属性）
+  - RagService 拆出纯函数 format_context：检索节点同一批 chunk 既组装 Prompt 上下文又组装参考来源，二者天然同源不漂移
+- 运行过的验证：
+  - 后端 uv run pytest → 92 passed（新增 6 例：sources 事件先于 delta 且持久化回读、图级有命中推送/无命中不推、旧库迁移幂等、消息来源往返）
+  - 前端 npm run build（tsc 类型检查 + vite）通过
+  - 测试夹具修复：API 测试容器入库与检索必须注入同一确定性 embedding（此前只替换检索侧，入库仍走真实 Ollama embedding，维度 768 vs 64 不一致导致检索报错且测试悄悄触网）
+  - scripts/verify_real_e2e.py 增加 sources 事件与持久化断言
+  - 浏览器端到端验证：本轮最后一步执行（空知识库无按钮 / RAG 有按钮可展开 / 刷新恢复）
+- 提交记录：本轮提交
+- 下一步最佳动作：浏览器端到端验证后 FE-011 置 passing
 
 ### Session 016（全项目全面测试轮）
 - 日期：2026-09-06

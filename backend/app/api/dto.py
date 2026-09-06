@@ -28,11 +28,17 @@ class ConversationResponse(BaseModel):
 
 
 class MessageResponse(BaseModel):
-    """消息响应：role 以字符串输出，避免枚举类型泄漏到 JSON。"""
+    """消息响应：role 以字符串输出，避免枚举类型泄漏到 JSON。
+
+    sources 仅 RAG 回答携带（参考文档展示数据源）；
+    None 序列化为 null，前端据此判断是否渲染「参考文档」按钮。
+    """
+
     id: str
     role: str
     content: str
     created_at: str
+    sources: list[dict[str, str]] | None = None
 
 
 class DocumentResponse(BaseModel):

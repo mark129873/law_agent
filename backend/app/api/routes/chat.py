@@ -60,13 +60,18 @@ async def chat_stream(payload: ChatStreamRequest, request: Request) -> Streaming
         raise ConversationNotFoundApiError(str(error)) from error
 
     async def event_stream():
-        # 生成器内逐 token 编码为 delta 事件：
+        # 领域事件 → SSE 帧的映射只存在这一份：
+        # - sources：RAG 检索有命中时先于 delta 出现一次（参考文档数据源）
+        # - delta：逐段增量文本
         # - 正常结束追加 done 事件（带会话 id，前端可据此刷新会话列表）
         # - 任何异常（模型超时/服务内部错误）都转为 error 事件后正常
         #   结束流——已经推给前端的内容仍然有效，剩余部分以错误提示收尾
         try:
-            async for chunk in chat_service.stream_answer(payload.conversation_id, payload.question):
-                yield _sse_event({"type": "delta", "content": chunk})
+            async for event in chat_service.stream_answer(payload.conversation_id, payload.question):
+                if event.type == "sources":
+                    yield _sse_event({"type": "sources", "sources": list(event.sources)})
+                else:
+                    yield _sse_event({"type": "delta", "content": event.content})
             yield _sse_event({"type": "done", "conversation_id": payload.conversation_id})
         except Exception as error:
             yield _sse_event({"type": "error", "message": f"生成回答失败：{error}"})

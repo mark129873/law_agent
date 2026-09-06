@@ -58,6 +58,16 @@ class RagService:
         （BE-017）能够明确区分"有依据"与"无依据"两种路径。
         """
         results = await self.retrieve(query, top_k=top_k)
+        return self.format_context(results)
+
+    def format_context(self, results: list[RetrievedChunk]) -> str:
+        """把检索结果格式化为 LLM 上下文文本（纯函数，无 IO）。
+
+        为什么从 build_context 拆出：检索节点（RetrieveNode）需要
+        "检索 + 格式化"分开两步——格式化结果进 Prompt 的同时，
+        还要用同一批 chunk 组装参考来源事件推送给前端（FE-011）；
+        拆出后 Prompt 上下文与参考文档展示天然同源，不会各写一份格式化。
+        """
         if not results:
             return ""
         return "\n\n".join(

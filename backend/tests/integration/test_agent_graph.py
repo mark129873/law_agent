@@ -186,14 +186,18 @@ class MultiChunkLLM(RecordingFakeLLM):
 
 @pytest.mark.asyncio
 async def test_graph_astream_custom_emits_llm_tokens() -> None:
-    """流式问答必须经由图（astream custom 模式）产出 token，而不是绕过图直连 LLM。"""
+    """流式问答必须经由图（astream custom 模式）产出 delta 事件，而不是绕过图直连 LLM。"""
     llm = MultiChunkLLM("依据知识库回答。")
     graph = build_qa_graph(llm, rag=None)
-    chunks = [chunk async for chunk in graph.astream(
-        {"question": "试用期多长？", "history": []}, stream_mode="custom"
-    )]
-    assert "".join(chunks) == "依据知识库回答。"
-    assert len(chunks) > 1  # 逐 token 推送
+    events = [
+        event
+        async for event in graph.astream({"question": "试用期多长？", "history": []}, stream_mode="custom")
+    ]
+    deltas = [e.content for e in events if e.type == "delta"]
+    assert "".join(deltas) == "依据知识库回答。"
+    assert len(deltas) > 1  # 逐 token 推送
+    # 基础工作流（无 RAG）不产生 sources 事件：前端据此不渲染参考文档按钮
+    assert all(e.type == "delta" for e in events)
 
 
 @pytest.mark.asyncio
@@ -203,6 +207,45 @@ async def test_non_stream_invoke_ignores_stream_events() -> None:
     graph = build_qa_graph(llm, rag=None)
     answer = await run_qa(graph, "任何问题")
     assert answer == "完整回答。"
+
+
+# ---- 流式参考来源事件（BE-023）----
+
+
+@pytest.mark.asyncio
+async def test_rag_graph_astream_emits_sources_before_deltas(rag_graph_factory) -> None:
+    """RAG 检索有命中时：sources 事件先于全部 delta，内容与知识库一致。"""
+    llm = MultiChunkLLM("依据知识库回答。")
+    graph = rag_graph_factory(llm)
+    events = [
+        event
+        async for event in graph.astream({"question": "违反服务期约定怎么赔偿", "history": []}, stream_mode="custom")
+    ]
+    assert events[0].type == "sources"  # 检索节点先执行：sources 永远在 delta 之前
+    sources = events[0].sources
+    assert len(sources) == 1
+    assert sources[0]["source"] == "劳动法问答.txt"
+    assert "违约金" in sources[0]["content"]
+    deltas = [e.content for e in events if e.type == "delta"]
+    assert "".join(deltas) == "依据知识库回答。"
+
+
+@pytest.mark.asyncio
+async def test_rag_graph_empty_knowledge_no_sources_event(tmp_path) -> None:
+    """检索无命中时不应产生 sources 事件（等价于"无参考文档"契约）。"""
+    store = ChromaVectorStore(str(tmp_path / "empty_stream_chroma"))
+    await store.initialize()
+    llm = MultiChunkLLM("知识库中暂无相关依据。")
+    graph = build_qa_graph(llm, rag=RagService(DeterministicEmbedding(), store))
+    try:
+        events = [
+            event
+            async for event in graph.astream({"question": "量子力学是什么", "history": []}, stream_mode="custom")
+        ]
+        assert all(e.type == "delta" for e in events)
+        assert "".join(e.content for e in events) == "知识库中暂无相关依据。"
+    finally:
+        await store.close()
 
 def test_compiled_graph_satisfies_qa_workflow_port() -> None:
     """装配守卫：LangGraph 编译产物必须满足 QaWorkflow 领域端口。"""

@@ -57,7 +57,13 @@ async def list_messages(conversation_id: str, request: Request) -> list[MessageR
         raise ConversationNotFoundApiError(str(error)) from error
     # role 是枚举：取 .value 转字符串，避免枚举类型泄漏到 JSON
     return [
-        MessageResponse(id=m.id, role=m.role.value, content=m.content, created_at=m.created_at.isoformat())
+        MessageResponse(
+            id=m.id,
+            role=m.role.value,
+            content=m.content,
+            created_at=m.created_at.isoformat(),
+            sources=m.sources,
+        )
         for m in messages
     ]
 

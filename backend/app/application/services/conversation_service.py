@@ -53,11 +53,17 @@ class ConversationService:
         await self.get_conversation(conversation_id)
         return await self._db.messages.list_by_conversation(conversation_id)
 
-    async def add_message(self, conversation_id: str, role: MessageRole, content: str) -> Message:
-        """向指定会话追加一条消息。"""
+    async def add_message(
+        self,
+        conversation_id: str,
+        role: MessageRole,
+        content: str,
+        sources: list[dict[str, str]] | None = None,
+    ) -> Message:
+        """向指定会话追加一条消息；sources 为助手回答的参考来源（可选）。"""
         await self.get_conversation(conversation_id)  # 保证不产生孤儿消息
         return await self._db.messages.add(
-            Message(conversation_id=conversation_id, role=role, content=content)
+            Message(conversation_id=conversation_id, role=role, content=content, sources=sources)
         )
 
     async def delete_conversation(self, conversation_id: str) -> None:

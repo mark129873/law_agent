@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -89,7 +90,8 @@ class SQLiteDatabase(Database):
                 conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                sources TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_messages_conversation
                 ON messages(conversation_id);
@@ -102,7 +104,21 @@ class SQLiteDatabase(Database):
             );
             """
         )
+        await self._migrate_schema()
         await self._conn.commit()
+
+    async def _migrate_schema(self) -> None:
+        """历史库的轻量迁移：为旧 messages 表补齐 sources 列（FE-023）。
+
+        为什么用 ALTER 而不是要求重建库：已有用户的对话数据必须原样保留；
+        CREATE TABLE IF NOT EXISTS 不会修改已存在的表，因此对老库
+        检查列缺失后补列是唯一幂等路径。迁移在每次启动时执行，开销可忽略。
+        """
+        assert self._conn is not None, "必须先调用 connect()"
+        async with self._conn.execute("PRAGMA table_info(messages)") as cursor:
+            columns = {row[1] for row in await cursor.fetchall()}
+        if "sources" not in columns:
+            await self._conn.execute("ALTER TABLE messages ADD COLUMN sources TEXT")
 
     async def close(self) -> None:
         if self._conn is not None:
@@ -202,14 +218,19 @@ class _SQLiteMessageRepository(MessageRepository):
 
     async def add(self, message: Message) -> Message:
         message.id = message.id or _new_id()
+        # 参考来源序列化为 JSON 文本存储：SQLite 无原生 JSON 列类型，
+        # ensure_ascii=False 保证中文原样可读，便于排查问题
+        sources_json = json.dumps(message.sources, ensure_ascii=False) if message.sources else None
         await self._db._require_conn().execute(
-            "INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO messages (id, conversation_id, role, content, created_at, sources) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
             (
                 message.id,
                 message.conversation_id,
                 message.role.value,
                 message.content,
                 _to_iso(message.created_at),
+                sources_json,
             ),
         )
         await self._db._commit()
@@ -217,7 +238,7 @@ class _SQLiteMessageRepository(MessageRepository):
 
     async def list_by_conversation(self, conversation_id: str) -> list[Message]:
         async with self._db._require_conn().execute(
-            "SELECT id, conversation_id, role, content, created_at FROM messages "
+            "SELECT id, conversation_id, role, content, created_at, sources FROM messages "
             "WHERE conversation_id = ? ORDER BY created_at ASC, rowid ASC",
             (conversation_id,),
         ) as cursor:
@@ -229,6 +250,8 @@ class _SQLiteMessageRepository(MessageRepository):
                 role=MessageRole(r[2]),
                 content=r[3],
                 created_at=_from_iso(r[4]),
+                # 空值/空串统一还原为 None：实体层"无来源"只有一种表示
+                sources=json.loads(r[5]) if r[5] else None,
             )
             for r in rows
         ]

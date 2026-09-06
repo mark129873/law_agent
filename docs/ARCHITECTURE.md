@@ -121,6 +121,7 @@ frontend/                        # 前端独立项目（React + TS + Vite）
 - 错误契约：后端非 2xx 统一 `{code,message}`，`api/client.ts` 解析为 `ApiError` 抛出，UI 展示 `message`。
 - 提问数据流（FE-004）：ChatPage 输入框 → `AppContext.sendQuestion` →（无会话时先 `POST /api/conversations`，title=提问截短 20 字）→ 本地乐观插入 user 消息与空 assistant 消息 → `api/chat.ts` 消费 SSE，delta 增量写回 messages → done 后由后端持久化；error 移除空占位并展示错误条。
 - 回答渲染（FE-010）：助手消息经 `react-markdown` 渲染（模型输出含 Markdown 格式；默认不解析原始 HTML，无 XSS 风险）；用户消息保持纯文本。流式过程中的未闭合标记会短暂显示为字面字符，完成后即正常渲染。
+- 参考文档（FE-011）：`api/chat.ts` 消费 `sources` 事件暂存来源，done 后随助手消息写入本地状态；消息带 `sources`（含历史恢复的消息）且不在流式生成中时渲染「参考文档」折叠按钮，点开按序号显示文档名与命中内容；来源内容按纯文本渲染（不进 Markdown 解析）。
 - 图标统一使用 `@phosphor-icons/react`；不手绘 SVG 图标，不引入第二套图标族。
 
 ## 3. 分层架构与领域端口
@@ -160,10 +161,12 @@ Agent（工作流实现，独立模块）──▶ Domain 端口 + Application �
 ```text
 POST /api/chat/stream {conversation_id, question}
   ▼ ChatService：历史快照 → 保存用户消息 → astream(stream_mode="custom")
-  ▼ LangGraph 图：retrieve（RagService.build_context）→ generate（build_messages → LLMProvider.stream）
-  ▼ generate 节点经 get_stream_writer 逐 token 推送
-  ▼ SSE：data: {"type":"delta","content":"增量"} ... {"type":"done"} / {"type":"error"}
-  ▼ 流正常结束：完整回答持久化为 assistant 消息（异常中断不落库）
+  ▼ LangGraph 图：retrieve（RagService 检索 + build_context）→ generate（build_messages → LLMProvider.stream）
+  ▼ retrieve 命中时经 get_stream_writer 推送 sources 事件（参考来源，先于一切 delta）
+  ▼ generate 节点逐 token 推送 delta 事件（领域事件 QaStreamEvent 统一承载）
+  ▼ SSE：data: {"type":"sources","sources":[...]}（仅检索有命中时出现）
+       data: {"type":"delta","content":"增量"} ... {"type":"done"} / {"type":"error"}
+  ▼ 流正常结束：完整回答与参考来源一起持久化为 assistant 消息（异常中断不落库）
 ```
 - **所有 LLM 问答必须走图**：流式与非流式执行同一节点，检索、Prompt 组装、模型调用只有一份实现；禁止在图外直连 LLMProvider 做问答。
 - ChatService 只依赖 `QaWorkflow` 端口，负责会话持久化，不直接依赖 RAG/LLM。
@@ -239,10 +242,13 @@ RAG： START → retrieve → generate → END
 
 Chat 流式协议（SSE，`data: {json}\n\n`）：
 ```json
+{"type": "sources", "sources": [{"source": "文件名", "content": "命中内容"}]}
 {"type": "delta", "content": "增量文本"}
 {"type": "done", "conversation_id": "..."}
 {"type": "error", "message": "..."}
 ```
+- `sources` 事件最多出现一次且先于全部 delta：仅当 RAG 检索有命中时由 retrieve 节点发出（数组顺序即展示序号）；基础工作流或检索无命中时不出现，前端据此决定是否渲染「参考文档」按钮。
+- 参考来源随回答持久化（messages 表 `sources` JSON 列，旧库启动时自动 ALTER 迁移），`GET /api/conversations/{id}/messages` 原样返回，历史消息同样可展示参考文档。
 CORS 当前 `allow_origins=["*"]`（开发态，生产需收敛）。OpenAPI 文档：`http://127.0.0.1:8000/docs`。
 
 ## 8. 启动与验证

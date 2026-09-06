@@ -97,6 +97,78 @@ async def test_data_persists_across_reconnect(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_message_sources_roundtrip(db: SQLiteDatabase) -> None:
+    """参考来源随消息持久化：带 sources 写入后回读一致，无来源消息回读 None。"""
+    conversation = await db.conversations.create(Conversation(title="来源测试"))
+    sources = [
+        {"source": "劳动法.txt", "content": "劳动合同违约金条款……"},
+        {"source": "劳动法.txt", "content": "服务期约定条款……"},
+    ]
+    await db.messages.add(
+        Message(conversation_id=conversation.id, role=MessageRole.USER, content="问题")
+    )
+    await db.messages.add(
+        Message(conversation_id=conversation.id, role=MessageRole.ASSISTANT, content="回答", sources=sources)
+    )
+
+    messages = await db.messages.list_by_conversation(conversation.id)
+    assert messages[0].sources is None  # 用户消息无来源
+    assert messages[1].sources == sources  # 助手消息来源原样还原（含中文与顺序）
+
+
+@pytest.mark.asyncio
+async def test_schema_migration_adds_sources_column(tmp_path) -> None:
+    """旧库迁移：无 sources 列的历史 messages 表在 init_schema 后自动补列且数据保留。"""
+    import aiosqlite
+
+    db_path = str(tmp_path / "legacy.db")
+    # 1) 手工构造 FE-023 之前的旧 schema 并写入一条历史消息
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute(
+            """
+            CREATE TABLE messages (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        await conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, created_at) "
+            "VALUES ('m1', 'c1', 'assistant', '历史回答', '2026-01-01T00:00:00+00:00')"
+        )
+        await conn.commit()
+
+    # 2) 新版本 connect + init_schema：应幂等补齐 sources 列
+    database = SQLiteDatabase(db_path)
+    await database.connect()
+    await database.init_schema()
+    try:
+        rows = await database.messages.list_by_conversation("c1")
+        assert rows[0].content == "历史回答"
+        assert rows[0].sources is None
+
+        # 3) 迁移后的表可以正常写入带来源的新消息
+        await database.messages.add(
+            Message(
+                conversation_id="c1",
+                role=MessageRole.ASSISTANT,
+                content="新回答",
+                sources=[{"source": "专利法.txt", "content": "第四十二条……"}],
+            )
+        )
+        rows = await database.messages.list_by_conversation("c1")
+        assert rows[1].sources == [{"source": "专利法.txt", "content": "第四十二条……"}]
+
+        # 4) 幂等：再次 init_schema 不应报错（列已存在不再 ALTER）
+        await database.init_schema()
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
 async def test_transaction_rollback_with_real_sqlite(db: SQLiteDatabase) -> None:
     """事务异常回滚：事务内写入不应残留到数据库。"""
     conversation = await db.conversations.create(Conversation(title="事务测试"))

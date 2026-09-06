@@ -16,6 +16,7 @@ from app.agent.prompts import build_messages
 from app.agent.state import AgentState
 from app.application.services.rag_service import RagService
 from app.domain.repositories.llm_provider import LLMProvider
+from app.domain.services.qa_workflow import QaStreamEvent
 
 logger = logging.getLogger("app.agent.nodes")
 
@@ -29,13 +30,31 @@ class AgentNode(ABC):
 
 
 class RetrieveNode(AgentNode):
-    """检索节点：调用 RAG 服务把知识库上下文写入状态。"""
+    """检索节点：调用 RAG 服务把知识库上下文写入状态，并推送参考来源事件。
+
+    为什么在此推送 sources 事件：检索命中的 chunk 是"参考文档"展示的
+    唯一事实来源（FE-011），在检索发生地推送保证 Prompt 依据与前端
+    展示天然同源，不会出现"回答引用了 A、参考面板却是 B"的漂移。
+    """
 
     def __init__(self, rag: RagService) -> None:
         self._rag = rag
 
     async def __call__(self, state: AgentState) -> dict:
-        context = await self._rag.build_context(state["question"])
+        chunks = await self._rag.retrieve(state["question"])
+        context = self._rag.format_context(chunks)
+        if chunks:
+            # 检索有命中才推送 sources 事件：无命中（含被 min_score 过滤）时
+            # 前端不应展示参考文档按钮，事件缺位即契约（数组顺序即展示序号）
+            sources = tuple(
+                {
+                    "source": chunk.chunk.metadata.get("filename", "未知来源"),
+                    "content": chunk.chunk.content,
+                }
+                for chunk in chunks
+            )
+            # astream(stream_mode="custom") 时事件推送给调用方；ainvoke 时被忽略
+            get_stream_writer()(QaStreamEvent(type="sources", sources=sources))
         return {"context": context}
 
 
@@ -64,8 +83,9 @@ class GenerateNode(AgentNode):
         collected: list[str] = []
         async for chunk in self._llm.stream(messages):
             collected.append(chunk)
-            # astream(stream_mode="custom") 时事件会推送给调用方；ainvoke 时被忽略
-            writer(chunk)
+            # 统一以领域事件推送（与 RetrieveNode 的 sources 事件同构），
+            # 消费方按 event.type 分流，不再猜测裸字符串含义
+            writer(QaStreamEvent(type="delta", content=chunk))
         answer = "".join(collected)
         logger.info(
             "Agent generate completed",

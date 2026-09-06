@@ -82,9 +82,13 @@ def client(tmp_path, monkeypatch):
     app = create_app(settings)
     container = app.state.container
     llm = ScriptedLLM()
-    # 在启动前替换 LLM 与 RAG 检索（避免测试触网）
+    # 在启动前替换 LLM 与 Embedding/RAG 检索（避免测试触网）：
+    # 入库（KnowledgeIngestionService）与检索（RagService）必须用同一个
+    # 确定性 embedding，否则向量维度不一致会导致检索报错（曾踩坑）
+    embedding = DeterministicEmbedding()
     container.register(LLMProvider, lambda c: llm)
-    container.register(RagService, lambda c: RagService(DeterministicEmbedding(), c.resolve(VectorStore)))
+    container.register(EmbeddingService, lambda c: embedding)
+    container.register(RagService, lambda c: RagService(embedding, c.resolve(VectorStore)))
 
     with TestClient(app) as test_client:
         test_client.llm = llm  # type: ignore[attr-defined]
@@ -119,7 +123,11 @@ def test_messages_and_delete(client: TestClient) -> None:
 
 
 def test_chat_stream_sse_protocol(client: TestClient) -> None:
-    """SSE 协议：delta 事件增量到达，done 收尾，完整回答已持久化。"""
+    """SSE 协议：delta 事件增量到达，done 收尾，完整回答已持久化。
+
+    知识库为空（未上传文档）：不应出现 sources 事件——这是
+    "无检索命中 → 无参考文档"的协议契约。
+    """
     conversation_id = client.post("/api/conversations", json={"title": "流式"}).json()["id"]
 
     with client.stream(
@@ -133,13 +141,49 @@ def test_chat_stream_sse_protocol(client: TestClient) -> None:
                 events.append(json.loads(line[len("data: "):]))
 
     assert events[-1]["type"] == "done"
+    assert all(e["type"] != "sources" for e in events)  # 空知识库无来源事件
     deltas = [e["content"] for e in events if e["type"] == "delta"]
     assert "".join(deltas) == "依据知识库：试用期最长不超过六个月。"
 
-    # 流结束后回答必须已持久化
+    # 流结束后回答必须已持久化；无检索命中 → 来源为 null
     messages = client.get(f"/api/conversations/{conversation_id}/messages").json()
     assert [m["role"] for m in messages] == ["user", "assistant"]
     assert messages[1]["content"] == "依据知识库：试用期最长不超过六个月。"
+    assert messages[1]["sources"] is None
+
+
+def test_chat_stream_emits_sources_and_persists_them(client: TestClient) -> None:
+    """RAG 检索有命中：sources 事件先于 delta 出现，且随回答持久化可回读。"""
+    # 上传文档入知识库（测试容器的 RagService 使用确定性 embedding，不触网）
+    upload = client.post(
+        "/api/documents",
+        files={"file": ("劳动法.txt", "劳动合同违约金条款：违反服务期约定应支付违约金。".encode("utf-8"))},
+    )
+    assert upload.status_code == 201
+
+    conversation_id = client.post("/api/conversations", json={"title": "来源流"}).json()["id"]
+    with client.stream(
+        "POST", "/api/chat/stream", json={"conversation_id": conversation_id, "question": "违反服务期约定怎么赔偿"}
+    ) as response:
+        assert response.status_code == 200
+        events = []
+        for line in response.iter_lines():
+            if line.startswith("data: "):
+                events.append(json.loads(line[len("data: "):]))
+
+    sources_events = [e for e in events if e["type"] == "sources"]
+    assert len(sources_events) == 1  # 最多一次
+    # sources 先于第一个 delta 到达（检索节点先于生成节点执行）
+    first_delta_index = events.index(next(e for e in events if e["type"] == "delta"))
+    assert events.index(sources_events[0]) < first_delta_index
+    source_items = sources_events[0]["sources"]
+    assert source_items and source_items[0]["source"] == "劳动法.txt"
+    assert "违约金" in source_items[0]["content"]
+
+    # 来源随回答持久化：历史消息接口原样返回，前端刷新后仍可展示参考文档
+    messages = client.get(f"/api/conversations/{conversation_id}/messages").json()
+    assert messages[0]["sources"] is None  # 用户消息无来源
+    assert messages[1]["sources"] == source_items
 
 
 def test_chat_stream_missing_conversation_404(client: TestClient) -> None:

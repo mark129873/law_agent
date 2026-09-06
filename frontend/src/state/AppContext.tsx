@@ -5,7 +5,7 @@
 // 所有网络请求都发生在 state/api 层，UI 组件不直接 fetch，保证数据访问只有一份实现。
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { Conversation, KnowledgeDocument, Message } from '../types'
+import type { Conversation, KnowledgeDocument, Message, ReferenceSource } from '../types'
 import * as conversationsApi from '../api/conversations'
 import * as documentsApi from '../api/documents'
 import { streamChat } from '../api/chat'
@@ -169,7 +169,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           { id: assistantId, role: 'assistant', content: '', created_at: now },
         ])
 
-        // 3) 消费 SSE 流：每段增量追加到助手消息；完成后后端已持久化完整回答
+        // 3) 消费 SSE 流：每段增量追加到助手消息；完成后后端已持久化完整回答。
+        //    sources 变量承接参考来源事件：后端在增量开始前推送（检索先于生成），
+        //    done 时随助手消息一起写入状态 —— 生成过程中不挂载，
+        //    保证「参考文档」按钮只在回答完成后出现（PRODUCT.md 行为约定）。
+        let sources: ReferenceSource[] = []
         await streamChat(
           { conversationId, question },
           {
@@ -177,10 +181,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
               setMessages((prev) =>
                 prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + content } : m)),
               ),
+            onSources: (received) => {
+              sources = received
+            },
             onDone: () => {
               // 换掉临时 id（移除流式光标标记），本地内容与后端持久化内容一致，无需重新拉取
               setMessages((prev) =>
-                prev.map((m) => (m.id === assistantId ? { ...m, id: `assistant-${Date.now()}` } : m)),
+                prev.map((m) => (m.id === assistantId ? { ...m, id: `assistant-${Date.now()}`, sources } : m)),
               )
             },
             onError: (message) => {
