@@ -39,7 +39,12 @@ class RecordingFakeLLM(LLMProvider):
         return self._answer
 
     async def stream(self, messages: list[ChatMessage], params: LlmParams | None = None):
-        yield self._answer
+        # 生成节点已统一走 stream，必须在此记录消息供断言
+        self.received.append(messages)
+        words = self._answer.split(" ")
+        for i, word in enumerate(words):
+            # 最后一个词不加尾随空格，保证流式拼接与非流式回答逐字符一致
+            yield word + (" " if i < len(words) - 1 else "")
 
 
 class DeterministicEmbedding(EmbeddingService):
@@ -165,3 +170,35 @@ async def test_rag_service_min_score_filters_weak_hits(tmp_path) -> None:
         assert context == ""
     finally:
         await store.close()
+
+# ---- 流式统一走图 ----
+
+
+class MultiChunkLLM(RecordingFakeLLM):
+    """按固定片段产出，模拟真实 token 流。"""
+
+    async def stream(self, messages: list[ChatMessage], params: LlmParams | None = None):
+        self.received.append(messages)
+        for part in [self._answer[i : i + 3] for i in range(0, len(self._answer), 3)]:
+            yield part
+
+
+@pytest.mark.asyncio
+async def test_graph_astream_custom_emits_llm_tokens() -> None:
+    """流式问答必须经由图（astream custom 模式）产出 token，而不是绕过图直连 LLM。"""
+    llm = MultiChunkLLM("依据知识库回答。")
+    graph = build_qa_graph(llm, rag=None)
+    chunks = [chunk async for chunk in graph.astream(
+        {"question": "试用期多长？", "history": []}, stream_mode="custom"
+    )]
+    assert "".join(chunks) == "依据知识库回答。"
+    assert len(chunks) > 1  # 逐 token 推送
+
+
+@pytest.mark.asyncio
+async def test_non_stream_invoke_ignores_stream_events() -> None:
+    """非流式 ainvoke 与流式走同一节点：answer 完整产出且不受流事件影响。"""
+    llm = RecordingFakeLLM("完整回答。")
+    graph = build_qa_graph(llm, rag=None)
+    answer = await run_qa(graph, "任何问题")
+    assert answer == "完整回答。"

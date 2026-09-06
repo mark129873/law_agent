@@ -8,6 +8,13 @@
 - 当前 blocker：无
 - 当前 blocker：BE-010 真实 GLM 调用需用户提供 GLM_API_KEY（代码与协议测试已完成）
 
+### Session 009
+- 日期：2026-09-06
+- 本轮目标：所有 LLM 问答统一走 LangGraph 图（应用户要求）
+- 技术决策：generate 节点内经 get_stream_writer() 推送 token；非流式 ainvoke、流式 astream(stream_mode=custom) 执行同一节点；ChatService 精简为（会话服务 + 图），不再直接依赖 RAG/LLM——检索与 Prompt 组装只在图内一份实现
+- 运行过的验证：全量 pytest 77 passed（新增 2 个 astream custom 用例）；真实服务器 E2E：专利法提问 SSE 55 个 delta 经图产出，回答引用第四十二条，消息持久化正常
+- 提交记录：本轮提交
+
 ### Session 008
 - 日期：2026-09-06
 - 本轮目标：后端全面检查 + 测试分层重组 + 完整测试

@@ -194,18 +194,6 @@ ChatService
 LangGraph Agent
    │
    ▼
-VectorStore.search()
-   │
-   ▼
-Retrieved Knowledge
-   │
-   ▼
-LLMProvider.stream()
-   │
-   ├── Ollama
-   └── GLM
-   │
-   ▼
 SSE Stream
    │
    ▼
@@ -455,6 +443,12 @@ START → retrieve（RagService.build_context 写入 state.context）
 
 - `build_qa_graph(llm, rag=None)`（agent/graph.py）：rag 为 None 时为基础工作流，传入即为 RAG 工作流；节点全异步，LLM 调用只经过 LLMProvider 抽象。
 - Prompt 组装集中在 `agent/prompts.py`，回答策略（BE-017）只改该文件。
+
+### 统一执行路径（所有 LLM 问答必须走图）
+- generate 节点内通过 `LLMProvider.stream` 生成，并经 `get_stream_writer()` 推送 token。
+- 非流式：`graph.ainvoke(...)`（writer 事件无人消费，行为不变）；流式：`graph.astream(..., stream_mode="custom")` 逐 token 产出。
+- 禁止在图外直连 LLMProvider 做问答——保证检索、Prompt、模型调用只有一份实现。
+- ChatService 是图的唯一消费方：负责会话历史快照与问答持久化，不再直接依赖 RAG/LLM。
 
 ## 28. 对话服务（BE-018）
 

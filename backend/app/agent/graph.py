@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 
+from langgraph.config import get_stream_writer
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 
@@ -22,7 +23,13 @@ logger = logging.getLogger("app.agent.graph")
 
 
 def _make_generate_node(llm: LLMProvider):
-    """生成节点：组装 Prompt 并调用 LLM。"""
+    """生成节点：组装 Prompt 并调用 LLM。
+
+    为什么在节点内通过 stream writer 推送 token：所有问答统一走 LangGraph 图
+    后，流式路径（astream + custom 模式）与非流式路径（ainvoke）执行同一个
+    节点，Prompt 组装与检索逻辑只有一份；非流式调用时 writer 事件无人消费，
+    行为不变。
+    """
 
     async def generate(state: AgentState) -> dict:
         messages = build_messages(
@@ -34,7 +41,13 @@ def _make_generate_node(llm: LLMProvider):
             "Agent generate started",
             extra={"service": "agent", "model": llm.model_name, "message_count": len(messages)},
         )
-        answer = await llm.chat(messages)
+        writer = get_stream_writer()
+        collected: list[str] = []
+        async for chunk in llm.stream(messages):
+            collected.append(chunk)
+            # astream(stream_mode="custom") 时事件会推送给调用方；ainvoke 时被忽略
+            writer(chunk)
+        answer = "".join(collected)
         logger.info("Agent generate completed", extra={"service": "agent", "model": llm.model_name})
         return {"answer": answer, "history": messages}
 

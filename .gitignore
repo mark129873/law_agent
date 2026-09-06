@@ -34,5 +34,5 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# 运行时数据（数据库/向量库），位置见 backend/data
+# 运行时数据（数据库/向量库），位置见 data
 data/

@@ -170,7 +170,7 @@
       "name": "Chat 流式 API",
       "description": "提供用户问题提交和 Agent 流式回答接口，将 LLM/Agent 的增量输出转换为前端可以持续消费的 HTTP 流。",
       "status": "passing",
-      "evidence": "2026-09-06：POST /api/chat/stream（SSE，StreamingResponse）+ ChatService.stream_answer（逐 token 推送，正常完成才持久化完整回答，异常中断不落库）；会话不存在时进入流之前返回 404。验证：test_api.py test_chat_stream_sse_protocol passed——delta 事件按序到达、done 收尾、完整回答已持久化到会话消息；流式过程输出结构化日志（answer_length/model）。",
+      "evidence": "2026-09-06：POST /api/chat/stream（SSE，StreamingResponse）+ ChatService.stream_answer——流式与非流式统一经 LangGraph 图执行（generate 节点经 get_stream_writer 推送 token，astream stream_mode=custom 消费），完成才持久化完整回答，异常中断不落库；会话不存在时进入流之前返回 404。验证：test_api.py test_chat_stream_sse_protocol passed——delta 事件按序到达、done 收尾、完整回答已持久化；test_agent_graph 新增 astream custom 用例证明 token 经图产出（全量 77 passed）。",
       "testedAt": "2026-09-06"
     },
     {
