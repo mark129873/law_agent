@@ -234,8 +234,8 @@
       "id": "FE-006",
       "name": "删除对话",
       "description": "提供删除历史对话的交互，并在删除后同步更新前端状态和后端数据。",
-      "status": "planned",
-      "evidence": "待实现：删除会话后，该会话从列表中消失，刷新页面后也不会重新出现。",
+      "status": "passing",
+      "evidence": "2026-09-06：ConversationList 增加删除交互——悬停条目显示删除图标（opacity 过渡）→ 点击展开二次确认态（删除该对话？+ 删除/取消，防误触）→ 确认后调 AppContext.removeConversation（DELETE /api/conversations/{id}，级联删消息）；index.css 新增 danger 语义色 token（明暗双主题），ChatPage 错误条同步迁移到 token。验证：npm run build 通过；真实浏览器实测——确认删除后条目 4→3 消失，刷新页面后仍为 3（后端已删不复活）；删除当前打开的会话后主区域自动回到「新对话」空状态。",
       "testedAt": null
     },
     {

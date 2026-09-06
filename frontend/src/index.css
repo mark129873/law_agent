@@ -16,6 +16,8 @@
   --color-accent: var(--accent); /* 全站唯一强调色 */
   --color-accent-contrast: var(--accent-contrast); /* 强调色背景上的文字 */
   --color-accent-soft: var(--accent-soft); /* 强调色的浅色底（选中态、状态底色） */
+  --color-danger: var(--danger); /* 危险操作文字/图标（删除等） */
+  --color-danger-soft: var(--danger-soft); /* 危险提示的浅色底（错误条） */
 }
 
 /* 字体：中文优先系统字体栈，不下载 webfont（加载快，渲染符合操作系统习惯） */
@@ -37,6 +39,8 @@
   --accent: #047857;
   --accent-contrast: #fefefe;
   --accent-soft: #e8f5ef;
+  --danger: #dc2626;
+  --danger-soft: #fef2f2;
 }
 
 /* 深色主题：跟随系统设置自动生效，层级关系与浅色一一对应 */
@@ -52,6 +56,8 @@
     --accent: #34d399;
     --accent-contrast: #0c0a09;
     --accent-soft: #122a20;
+    --danger: #f87171;
+    --danger-soft: #2a1512;
   }
 }
 

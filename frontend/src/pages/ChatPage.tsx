@@ -99,14 +99,14 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* 错误提示条：提问或生成失败时显示，可手动关闭 */}
+      {/* 错误提示条：提问或生成失败时显示，可手动关闭。颜色用主题 danger token，明暗主题都成立 */}
       {streamError && (
-        <div className="mx-auto mb-2 flex w-full max-w-3xl items-center justify-between gap-3 rounded-lg border border-red-300 bg-red-50 px-4 py-2.5 text-sm text-red-700">
+        <div className="mx-auto mb-2 flex w-full max-w-3xl items-center justify-between gap-3 rounded-lg border border-danger/30 bg-danger-soft px-4 py-2.5 text-sm text-danger">
           <span className="truncate">{streamError}</span>
           <button
             type="button"
             onClick={clearStreamError}
-            className="shrink-0 text-xs text-red-600 underline-offset-2 hover:underline"
+            className="shrink-0 text-xs underline-offset-2 hover:underline"
           >
             关闭
           </button>
