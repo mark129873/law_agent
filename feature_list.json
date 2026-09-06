@@ -89,9 +89,9 @@
       "id": "BE-010",
       "name": "Ollama 与 GLM 实现",
       "description": "实现 Ollama 本地模型和 GLM API 两种 LLM Provider，并支持通过配置选择当前使用的模型服务。",
-      "status": "planned",
-      "evidence": "待实现：分别配置 Ollama 和 GLM 后，可以调用对应模型完成一次正常的模型问答。",
-      "testedAt": null
+      "status": "in_progress",
+      "evidence": "2026-09-06 部分验证：OllamaProvider（/api/chat，NDJSON 流式解析）与 GLMProvider（OpenAI 兼容 /chat/completions，SSE 解析）已实现，容器按 LLM_PROVIDER 注册（glm 缺密钥时装配即报错）；协议级测试 6 passed（test_llm_providers.py：请求构造/响应解析/流式拆包/错误抛出/参数透传）。Ollama 真实调用通过：本机 Ollama + qwen3.5:9b（经 OLLAMA_MODEL 覆盖）chat 与流式问答均正常（scripts/verify_ollama_stream.py，流式 15 个增量片段）。剩余：GLM 真实调用验证被阻塞——环境未配置 GLM_API_KEY，需用户提供密钥后执行真实问答验证方可置 passing。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-011",

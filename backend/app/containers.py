@@ -9,11 +9,14 @@ from __future__ import annotations
 
 from app.common.di import DIContainer
 from app.config.settings import Settings, get_settings
+from app.domain.repositories.llm_provider import LLMProvider
+from app.domain.repositories.vector_store import VectorStore
 from app.infrastructure.database.base import Database
 from app.infrastructure.database.sqlite.database import SQLiteDatabase
+from app.infrastructure.llm.glm import GLMProvider
+from app.infrastructure.llm.ollama import OllamaProvider
 from app.infrastructure.vector_store.chroma import ChromaVectorStore
 from app.infrastructure.vector_store.milvus import MilvusVectorStore
-from app.domain.repositories.vector_store import VectorStore
 
 
 def _build_database(settings: Settings) -> Database:
@@ -45,6 +48,18 @@ def _build_vector_store(settings: Settings) -> VectorStore:
     raise NotImplementedError(f"向量库 Provider '{settings.vector_store_provider.value}' 尚未实现")
 
 
+def _build_llm_provider(settings: Settings) -> LLMProvider:
+    """按配置构造大模型 Provider（工厂函数，BE-010）。"""
+    if settings.llm_provider.value == "ollama":
+        return OllamaProvider(settings.ollama_base_url, settings.ollama_model)
+    if settings.llm_provider.value == "glm":
+        if not settings.glm_api_key:
+            # 密钥缺失时尽早失败，而不是等到第一次请求才报 401
+            raise ValueError("LLM_PROVIDER=glm 但未配置 GLM_API_KEY 环境变量")
+        return GLMProvider(settings.glm_base_url, settings.glm_api_key, settings.glm_model)
+    raise NotImplementedError(f"大模型 Provider '{settings.llm_provider.value}' 尚未实现")
+
+
 def create_container(settings: Settings | None = None) -> DIContainer:
     """创建并装配应用容器。
 
@@ -59,4 +74,6 @@ def create_container(settings: Settings | None = None) -> DIContainer:
     container.register(Database, lambda c: _build_database(settings), singleton=True)
     # 向量库：按 VECTOR_STORE_PROVIDER 配置注册对应实现（BE-006~008）
     container.register(VectorStore, lambda c: _build_vector_store(settings), singleton=True)
+    # 大模型：按 LLM_PROVIDER 配置注册对应实现（BE-010）
+    container.register(LLMProvider, lambda c: _build_llm_provider(settings), singleton=True)
     return container

@@ -380,3 +380,17 @@ SQLite 实现（BE-005）与未来 MySQL 实现均实现此抽象，业务层通
 - GLM（BE-010）：`infrastructure/llm/glm.py`
 - 容器装配点按 `LLM_PROVIDER` 注册实现；LangGraph Agent 只依赖抽象接口。
 
+## 22. Ollama 与 GLM 实现（BE-010）
+
+### OllamaProvider（infrastructure/llm/ollama.py）
+- `POST {OLLAMA_BASE_URL}/api/chat`：`stream:false` 一次性返回；`stream:true` 返回 NDJSON，逐行解析 `message.content`。
+- 模型来自 `OLLAMA_MODEL`，服务地址来自 `OLLAMA_BASE_URL`。
+
+### GLMProvider（infrastructure/llm/glm.py）
+- `POST {GLM_BASE_URL}/chat/completions`（OpenAI 兼容协议），`Authorization: Bearer {GLM_API_KEY}`。
+- `stream:false` 取 `choices[0].message.content`；`stream:true` 解析 SSE `data:` 行中的 `choices[0].delta.content`。
+
+### 通用要求
+- 网络调用基于 httpx.AsyncClient，全链路异步；敏感的 `GLM_API_KEY` 只从环境变量注入，日志中禁止输出。
+- 模型产出前先输出结构化日志（服务、模型名、消息数），失败时输出 ERROR 日志并抛出可识别异常。
+
