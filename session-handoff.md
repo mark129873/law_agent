@@ -23,7 +23,7 @@
 - 已知缺陷：无
 - 未验证路径：uvicorn 多 worker 并发下的 SQLite 写入竞争（当前单 worker，暂不构成问题）；MySQL 分支在容器中会抛 NotImplementedError（符合预期）
 - 下一轮会话需要注意的风险：
-  - 本机 Ollama 有 qwen3.5:9b，但配置默认 OLLAMA_MODEL=qwen2.5:7b（BE-010 验证前需对齐或下载）
+  - 本机 Ollama 当前实际模型为 qwen3.5:9b，配置默认已改为 qwen3.5:4b（BE-010 验证前需拉取该模型或本机已存在时直接使用）
   - GLM_API_KEY 未设置（BE-010 的 GLM 真实调用验证可能受阻）
   - 本会话中 `cd xxx && uv run pytest` 复合命令偶发挂起（疑似 shell 权限确认），可用 `uv run --project backend` 或 python os.chdir 规避
 
