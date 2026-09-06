@@ -12,7 +12,7 @@ import logging
 from app.application.services.document_pipeline import DocumentParserFactory, UnsupportedFormatError
 from app.application.services.knowledge_service import KnowledgeIngestionService
 from app.domain.entities.document import Document, DocumentStatus
-from app.infrastructure.database.base import Database
+from app.domain.repositories.database import Database
 from app.domain.repositories.vector_store import VectorStore
 
 logger = logging.getLogger("app.document.service")

@@ -11,7 +11,7 @@ import logging
 
 from app.domain.entities.conversation import Conversation
 from app.domain.entities.message import Message, MessageRole
-from app.infrastructure.database.base import Database
+from app.domain.repositories.database import Database
 
 logger = logging.getLogger("app.conversation.service")
 

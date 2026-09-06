@@ -13,7 +13,7 @@ import pytest
 from app.domain.entities.conversation import Conversation
 from app.domain.entities.document import Document, DocumentStatus
 from app.domain.entities.message import Message, MessageRole
-from app.infrastructure.database.base import Database, TransactionContext
+from app.domain.repositories.database import Database, TransactionContext
 from app.domain.repositories.conversation import ConversationRepository
 from app.domain.repositories.document import DocumentRepository
 from app.domain.repositories.message import MessageRepository

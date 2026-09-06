@@ -10,12 +10,10 @@ from __future__ import annotations
 import logging
 from typing import AsyncIterator
 
-from langgraph.graph.state import CompiledStateGraph
-
-from app.agent.graph import run_qa
 from app.application.services.conversation_service import ConversationService
 from app.domain.entities.llm import ChatMessage
 from app.domain.entities.message import MessageRole
+from app.domain.services.qa_workflow import QaWorkflow
 
 logger = logging.getLogger("app.chat.service")
 
@@ -26,9 +24,10 @@ class ChatService:
     def __init__(
         self,
         conversation_service: ConversationService,
-        qa_graph: CompiledStateGraph,
+        qa_graph: QaWorkflow,
     ) -> None:
         self._conversations = conversation_service
+        # 只依赖工作流端口：LangGraph 是可整体替换的实现细节
         self._graph = qa_graph
 
     async def ensure_conversation(self, conversation_id: str) -> None:
@@ -48,7 +47,9 @@ class ChatService:
         """
         history = await self._snapshot_history(conversation_id)
         await self._conversations.add_message(conversation_id, MessageRole.USER, question)
-        return await run_qa(self._graph, question, history=history)
+        # 只经端口调用工作流：answer 字段由图状态返回（见 AgentState）
+        result = await self._graph.ainvoke({"question": question, "history": history})
+        return result["answer"]
 
     async def stream_answer(self, conversation_id: str, question: str) -> AsyncIterator[str]:
         """流式问答：走 Agent 图（astream + custom 模式），逐 token 推送增量。

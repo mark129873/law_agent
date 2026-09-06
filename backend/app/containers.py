@@ -19,7 +19,7 @@ from app.config.settings import Settings, get_settings
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
 from app.domain.services.embedding import EmbeddingService
-from app.infrastructure.database.base import Database
+from app.domain.repositories.database import Database
 from app.infrastructure.database.sqlite.database import SQLiteDatabase
 from app.infrastructure.document_parser.pdf_parser import PdfParser
 from app.infrastructure.document_parser.text_parser import TextParser

@@ -18,7 +18,7 @@ from app.common.logging import setup_logging
 from app.config.settings import Settings, get_settings
 from app.containers import create_container
 from app.domain.repositories.vector_store import VectorStore
-from app.infrastructure.database.base import Database
+from app.domain.repositories.database import Database
 
 # 启动时初始化结构化 JSON 日志，确保后续所有服务日志格式一致
 setup_logging()

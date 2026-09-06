@@ -46,59 +46,92 @@
 backend/
 ├── app/
 │   ├── api/                    # API / Controller 层
+│   │   ├── dto.py              # 请求/响应模型（pydantic）
+│   │   ├── errors.py           # 统一 AppError 体系与全局异常处理器
+│   │   └── routes/             # conversations / chat / documents 路由
 │   │
-│   ├── application/            # Application 层
-│   │   ├── services/
-│   │   └── dto/
-│   │
-│   ├── domain/                 # Domain 层，核心业务
-│   │   ├── entities/
-│   │   ├── repositories/
+│   ├── application/            # Application 层：业务流程编排
 │   │   └── services/
+│   │       ├── chat_service.py          # 问答编排（会话持久化 + 工作流端口）
+│   │       ├── conversation_service.py  # 会话生命周期与消息持久化
+│   │       ├── document_pipeline.py     # 文档解析→清洗→切分（解析器工厂）
+│   │       ├── document_service.py      # 文档元数据状态机 + 入库/删除
+│   │       ├── knowledge_service.py     # Pipeline→Embedding→VectorStore 入库
+│   │       └── rag_service.py           # 检索与上下文构建
 │   │
-│   ├── infrastructure/         # 基础设施实现
+│   ├── domain/                 # Domain 层：实体 + 端口（零技术依赖）
+│   │   ├── entities/           # conversation / message / document / chunk / llm
+│   │   ├── repositories/       # Database / Conversation / Message / Document / VectorStore / LLMProvider 端口
+│   │   └── services/           # document_parser / embedding / qa_workflow 端口
+│   │
+│   ├── infrastructure/         # 基础设施实现（实现领域端口）
 │   │   ├── database/
-│   │   │   ├── sqlite/
-│   │   │   └── mysql/
+│   │   │   ├── sqlite/         # SQLiteDatabase（aiosqlite）
+│   │   │   └── mysql/          # 预留
 │   │   ├── vector_store/
-│   │   │   ├── chroma.py
-│   │   │   └── milvus.py
+│   │   │   ├── chroma.py       # ChromaVectorStore
+│   │   │   └── milvus.py       # Milvus 骨架（预留）
 │   │   ├── llm/
-│   │   │   ├── ollama.py
-│   │   │   └── glm.py
+│   │   │   ├── ollama.py       # OllamaProvider
+│   │   │   └── glm.py          # GLMProvider
 │   │   ├── document_parser/
-│   │   │   ├── pdf_parser.py
-│   │   │   └── text_parser.py
+│   │   │   ├── pdf_parser.py   # PdfParser（pypdf）
+│   │   │   └── text_parser.py  # TextParser（txt/md，多编码回退）
 │   │   └── embedding/
+│   │       └── ollama_embedding.py  # OllamaEmbeddingService
 │   │
-│   ├── agent/                  # LangGraph Agent
-│   │   ├── graph.py
-│   │   ├── state.py
-│   │   ├── nodes/
-│   │   └── tools/
+│   ├── agent/                  # LangGraph Agent（问答工作流，实现 QaWorkflow 端口）
+│   │   ├── graph.py            # 工作流构建（retrieve?→generate，流式经 stream writer）
+│   │   ├── prompts.py          # 法律问答策略 Prompt
+│   │   └── state.py            # AgentState
 │   │
-│   ├── config/                 # 配置
-│   │   └── settings.py
+│   ├── common/                 # 横切基础设施
+│   │   ├── di.py               # 轻量 DI 容器
+│   │   └── logging.py          # 结构化 JSON 日志
 │   │
-│   └── main.py
+│   ├── config/
+│   │   └── settings.py         # 统一配置（pydantic-settings，相对路径锚定 backend/）
+│   │
+│   ├── containers.py           # 唯一依赖装配点（工厂 + 单例注册）
+│   └── main.py                 # 应用入口（lifespan / CORS / 路由 / 异常处理）
 │
 ├── tests/
+│   ├── unit/                   # 单元测试：纯逻辑与抽象层，无外部 IO
+│   ├── integration/            # 集成测试：真实 SQLite/Chroma/MockTransport/完整应用
+│   └── data_source/            # RAG 测试数据源（真实法律文档）
+├── scripts/                    # 手工验证脚本（Ollama 流式 / 真实 embedding / E2E）
 ├── pyproject.toml
 ├── uv.lock
-└── .env
-└── xxx
+└── .env                        # 本地敏感配置（gitignore，模板见 .env.example）
 ```
 
 ### 分层依赖原则
 ```text
 API
  ↓
-Application
+Application（经领域端口使用工作流/基础设施能力）
  ↓
-Domain
+Domain（实体 + 端口，零技术依赖）
  ↑
-Infrastructure implements Domain interfaces
+Infrastructure implements Domain ports
 ```
+
+### 领域端口清单（抽象定义位置）
+| 端口 | 定义位置 | 当前实现 |
+|------|---------|---------|
+| `Database` / `TransactionContext` | domain/repositories/database.py | SQLiteDatabase |
+| `ConversationRepository` / `MessageRepository` / `DocumentRepository` | domain/repositories/ | SQLiteDatabase 内置仓库 |
+| `VectorStore` | domain/repositories/vector_store.py | ChromaVectorStore（Milvus 骨架预留） |
+| `LLMProvider` | domain/repositories/llm_provider.py | OllamaProvider / GLMProvider |
+| `DocumentParser` | domain/services/document_parser.py | TextParser / PdfParser |
+| `EmbeddingService` | domain/services/embedding.py | OllamaEmbeddingService |
+| `QaWorkflow` | domain/services/qa_workflow.py | LangGraph 工作流（agent/graph.py） |
+
+### 合规守护
+- 领域层禁止导入任何技术库（fastapi/httpx/chromadb/aiosqlite/pypdf/langgraph/pydantic 等）与应用层。
+- 应用层与 API 层禁止导入 `app.infrastructure`，只能依赖领域端口。
+- 上表所列抽象只允许定义在 domain 层；新增端口时同步更新本清单。
+- 以上规则可通过 AST 扫描脚本机械校验（曾据此发现并修复 Database 端口错位、chat_service 依赖 langgraph 类型等违例）。
 - Domain 不依赖 FastAPI、SQLite、Chroma、Ollama 等具体技术。
 - Application 负责业务流程编排。
 - Infrastructure 负责数据库、向量库、LLM、文件解析等具体实现。
@@ -306,7 +339,7 @@ API / Application Service ──依赖──▶ 抽象接口（domain/repositori
 - `DocumentRepository`：create / get / list / delete / update_status
 
 ### Database 抽象
-位于 `backend/app/infrastructure/database/base.py`：
+位于 `backend/app/domain/repositories/database.py`（领域端口，依赖倒置）：
 - `connect()` / `init_schema()` / `close()` 生命周期方法
 - `transaction()` 异步上下文管理器：事务内的仓库操作要么全部提交要么全部回滚
 - `conversations` / `messages` / `documents` 三个仓库实例由具体实现提供
@@ -448,7 +481,7 @@ START → retrieve（RagService.build_context 写入 state.context）
 - generate 节点内通过 `LLMProvider.stream` 生成，并经 `get_stream_writer()` 推送 token。
 - 非流式：`graph.ainvoke(...)`（writer 事件无人消费，行为不变）；流式：`graph.astream(..., stream_mode="custom")` 逐 token 产出。
 - 禁止在图外直连 LLMProvider 做问答——保证检索、Prompt、模型调用只有一份实现。
-- ChatService 是图的唯一消费方：负责会话历史快照与问答持久化，不再直接依赖 RAG/LLM。
+- ChatService 是图的唯一消费方：只依赖 `QaWorkflow` 领域端口（domain/services/qa_workflow.py），LangGraph 是可整体替换的实现细节；ChatService 负责会话历史快照与问答持久化，不直接依赖 RAG/LLM。
 
 ## 28. 对话服务（BE-018）
 
