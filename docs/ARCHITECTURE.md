@@ -394,3 +394,21 @@ SQLite 实现（BE-005）与未来 MySQL 实现均实现此抽象，业务层通
 - 网络调用基于 httpx.AsyncClient，全链路异步；敏感的 `GLM_API_KEY` 只从环境变量注入，日志中禁止输出。
 - 模型产出前先输出结构化日志（服务、模型名、消息数），失败时输出 ERROR 日志并抛出可识别异常。
 
+## 23. 文档处理 Pipeline（BE-011）
+
+### 流程
+```text
+文件接收(filename, bytes)
+   → 格式识别(扩展名, 工厂选择解析器)
+   → 文本解析(DocumentParser 策略)
+   → 文本清洗(去控制字符、归一化换行与空行)
+   → Chunk 切分(定长+重叠)
+   → 构建 DocumentChunk(content, chunk_index, metadata={filename,...})
+```
+
+### 结构
+- 解析器接口 `DocumentParser`（domain/services/document_parser.py）：`supports(filename)` + `parse(content) -> str`，策略模式；新格式（如 PDF）注册进工厂即可，Pipeline 不感知格式细节。
+- `DocumentParserFactory`（application/services/document_pipeline.py）：按文件名选择解析器，无匹配时抛 `UnsupportedFormatError`。
+- `DocumentPipeline`（application/services/document_pipeline.py）：编排上述全流程并输出结构化日志（开始：文件名与大小；完成：chunk 数量）。
+- 切分参数：`chunk_size`（默认 500 字符）、`chunk_overlap`（默认 50 字符），保证相邻 chunk 上下文连续。
+

@@ -97,9 +97,9 @@
       "id": "BE-011",
       "name": "文档处理 Pipeline",
       "description": "建立统一文档处理流程：文件接收、格式识别、文本解析、文本清洗、Chunk 切分、metadata 构建，为后续 Embedding 和向量存储提供标准输入。",
-      "status": "planned",
-      "evidence": "待实现：输入支持的文档后能够经过统一 Pipeline 转换为标准化 document chunks。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：backend/app/domain/services/document_parser.py 定义解析器策略接口与 UnsupportedFormatError；backend/app/application/services/document_pipeline.py 编排 识别→解析→清洗→切分→chunk 全流程（解析经 asyncio.to_thread 不阻塞事件循环，过程输出结构化日志）；backend/app/infrastructure/document_parser/text_parser.py 提供 TextParser（utf-8/gb18030/big5 编码回退）。验证：test_document_pipeline.py 5 passed（TXT 全流程产出带序号与 metadata 的 chunk、不支持的格式立即失败、控制字符清洗、overlap 边界连续、空行归一化）。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-012",
