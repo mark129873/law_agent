@@ -412,3 +412,10 @@ SQLite 实现（BE-005）与未来 MySQL 实现均实现此抽象，业务层通
 - `DocumentPipeline`（application/services/document_pipeline.py）：编排上述全流程并输出结构化日志（开始：文件名与大小；完成：chunk 数量）。
 - 切分参数：`chunk_size`（默认 500 字符）、`chunk_overlap`（默认 50 字符），保证相邻 chunk 上下文连续。
 
+## 24. PDF 与 TXT 文档解析（BE-012）
+
+- `infrastructure/document_parser/pdf_parser.py`：`PdfParser` 基于 `pypdf` 逐页提取文本后拼接；解析结果为空（扫描件/纯图片 PDF）时抛出明确异常，由上层记录失败状态。
+- `infrastructure/document_parser/text_parser.py`：`TextParser` 处理 TXT/MD，UTF-8 失败后回退 gb18030/big5。
+- 两个解析器均实现 `DocumentParser` 策略接口，由 `DocumentParserFactory` 按扩展名分发（.pdf / .txt|.md）。
+- 解析失败（损坏文件、空文档、未知编码）都抛出带原因的异常，Pipeline 上层据此将 Document 标记为 failed 并记录 ERROR 日志。
+

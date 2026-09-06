@@ -105,9 +105,9 @@
       "id": "BE-012",
       "name": "PDF 与 TXT 文档解析",
       "description": "实现 PDF、TXT 文档解析能力，并将不同格式统一转换为内部标准文档结构；处理常见解析失败和编码异常。",
-      "status": "planned",
-      "evidence": "待实现：PDF 和 TXT 测试文件均能够正确提取文本，并进入统一文档处理流程。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：backend/app/infrastructure/document_parser/pdf_parser.py（pypdf 逐页提取，损坏文件/无文本层扫描件均抛明确异常）与 text_parser.py（utf-8/gb18030/big5 回退）共同注册进 DocumentParserFactory。验证：test_document_parsers.py 6 passed（扩展名分发、真实 fpdf2 生成的 PDF 经 Pipeline 提取文本、损坏 PDF 明确报错、无文本层 PDF 明确报错、GBK 解码回退、二进制垃圾明确报错）。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-013",
