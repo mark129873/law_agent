@@ -8,7 +8,7 @@ os.chdir(r"C:\Users\nnnnnn\Desktop\law_agent\backend")
 from app.common.logging import setup_logging
 from app.config.settings import Settings
 from app.containers import create_container
-from app.agent.graph import build_qa_graph
+from app.agent import create_qa_workflow
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
 
@@ -20,7 +20,7 @@ async def main() -> None:
     rag_store = container.resolve(VectorStore)
     await rag_store.initialize()
     # 与生产一致：问答走 LangGraph 图（无 RAG 的基础工作流）
-    graph = build_qa_graph(llm, rag=None)
+    graph = create_qa_workflow(llm, rag=None)
     print("model:", llm.model_name)
 
     async def consume() -> list[str]:

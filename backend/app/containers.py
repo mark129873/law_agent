@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from app.agent.graph import build_qa_graph
+from app.agent import create_qa_workflow
 from app.application.services.chat_service import ChatService
 from app.application.services.conversation_service import ConversationService
 from app.application.services.document_pipeline import DocumentParserFactory, DocumentPipeline
@@ -130,9 +130,8 @@ def create_container(settings: Settings | None = None) -> DIContainer:
         ChatService,
         lambda c: ChatService(
             conversation_service=c.resolve(ConversationService),
-            # 唯一的问答执行体：RAG 检索与 Prompt 组装都在图节点内，
-            # 流式与非流式共用这张图（所有 LLM 问答统一走 LangGraph）
-            qa_graph=build_qa_graph(c.resolve(LLMProvider), rag=c.resolve(RagService)),
+            # 唯一的问答执行体：经 agent 包工厂构建，langgraph 类型不外泄
+            qa_graph=create_qa_workflow(c.resolve(LLMProvider), rag=c.resolve(RagService)),
         ),
         singleton=True,
     )

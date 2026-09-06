@@ -81,9 +81,11 @@ backend/
 │   │       └── ollama_embedding.py  # OllamaEmbeddingService
 │   │
 │   ├── agent/                  # LangGraph Agent（问答工作流，实现 QaWorkflow 端口）
+│   │   ├── __init__.py         # 对外唯一入口：create_qa_workflow 工厂
 │   │   ├── graph.py            # 工作流构建（retrieve?→generate，流式经 stream writer）
 │   │   ├── prompts.py          # 法律问答策略 Prompt
 │   │   └── state.py            # AgentState
+│   │                           # ※ 全项目唯一允许导入 langgraph 的业务模块
 │   │
 │   ├── common/                 # 横切基础设施
 │   │   ├── di.py               # 轻量 DI 容器
@@ -125,13 +127,14 @@ Infrastructure implements Domain ports
 | `LLMProvider` | domain/repositories/llm_provider.py | OllamaProvider / GLMProvider |
 | `DocumentParser` | domain/services/document_parser.py | TextParser / PdfParser |
 | `EmbeddingService` | domain/services/embedding.py | OllamaEmbeddingService |
-| `QaWorkflow` | domain/services/qa_workflow.py | LangGraph 工作流（agent/graph.py） |
+| `QaWorkflow` | domain/services/qa_workflow.py | LangGraph 工作流（agent/，经 `create_qa_workflow` 工厂暴露） |
 
 ### 合规守护
 - 领域层禁止导入任何技术库（fastapi/httpx/chromadb/aiosqlite/pypdf/langgraph/pydantic 等）与应用层。
 - 应用层与 API 层禁止导入 `app.infrastructure`，只能依赖领域端口。
+- langgraph 是工作流引擎隔离区：只允许 `app/agent/` 导入；模块外部一律经 `app.agent.create_qa_workflow` 工厂获取工作流，不感知引擎存在。
 - 上表所列抽象只允许定义在 domain 层；新增端口时同步更新本清单。
-- 以上规则可通过 AST 扫描脚本机械校验（曾据此发现并修复 Database 端口错位、chat_service 依赖 langgraph 类型等违例）。
+- 以上规则由 `backend/tests/unit/test_ddd_boundaries.py` 在每次 pytest 时以 AST 扫描机械校验（曾据此发现并修复 Database 端口错位、chat_service 依赖 langgraph 类型等违例）。
 - Domain 不依赖 FastAPI、SQLite、Chroma、Ollama 等具体技术。
 - Application 负责业务流程编排。
 - Infrastructure 负责数据库、向量库、LLM、文件解析等具体实现。
