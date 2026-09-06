@@ -3,7 +3,7 @@
 import { BookOpenText, ChatCircleDots, Plus } from '@phosphor-icons/react'
 import { useAppStore } from '../state/AppContext'
 import ConversationList from './ConversationList'
-import KnowledgeList from './KnowledgeList'
+import KnowledgeSummary from './KnowledgeSummary'
 
 /** 视图切换按钮的样式：选中态浮起（浅底 + 描边 + 阴影），未选中态弱化 */
 function tabClass(active: boolean): string {
@@ -59,9 +59,9 @@ export default function Sidebar() {
         </button>
       </div>
 
-      {/* 列表区：随视图切换显示历史会话或知识库文档 */}
+      {/* 列表区：随视图切换显示历史会话或知识库汇总 */}
       <nav className="flex-1 overflow-y-auto px-3 pb-3">
-        {sidebarView === 'chat' ? <ConversationList /> : <KnowledgeList />}
+        {sidebarView === 'chat' ? <ConversationList /> : <KnowledgeSummary />}
       </nav>
     </aside>
   )
