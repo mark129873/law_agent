@@ -10,21 +10,25 @@ from pydantic import BaseModel, Field
 
 
 class CreateConversationRequest(BaseModel):
+    """创建会话请求体：title 可选（空标题由服务层回退默认值）。"""
     title: str = ""
 
 
 class ChatStreamRequest(BaseModel):
+    """流式问答请求体；question 最少 1 字符由 pydantic 校验兜底。"""
     conversation_id: str
     question: str = Field(min_length=1)
 
 
 class ConversationResponse(BaseModel):
+    """会话响应：created_at 已转为 ISO 字符串，前端无需处理时间对象。"""
     id: str
     title: str
     created_at: str
 
 
 class MessageResponse(BaseModel):
+    """消息响应：role 以字符串输出，避免枚举类型泄漏到 JSON。"""
     id: str
     role: str
     content: str
@@ -32,6 +36,7 @@ class MessageResponse(BaseModel):
 
 
 class DocumentResponse(BaseModel):
+    """知识库文档响应：status 为处理状态机的字符串形式（pending/processing/ready/failed）。"""
     id: str
     filename: str
     file_size: int

@@ -1,4 +1,9 @@
-"""会话与消息路由。"""
+"""会话与消息路由。
+
+DDD 说明：控制器模式——HTTP 细节（状态码、JSON 形状）在这里终结，
+业务规则全部在 ConversationService；会话不存在的领域异常在此翻译为
+API 层的 404 错误，翻译边界清晰且只做一次。
+"""
 
 from __future__ import annotations
 
@@ -12,6 +17,7 @@ router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
 
 def _get_conversation_service(request: Request) -> ConversationService:
+    """从容器解析会话服务：路由不自行构造依赖（服务定位器经由 app.state）。"""
     # 依赖从容器解析，路由内不构造任何基础设施组件
     return request.app.state.container.resolve(ConversationService)
 

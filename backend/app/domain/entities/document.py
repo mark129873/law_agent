@@ -1,4 +1,10 @@
-"""Document 领域实体。"""
+"""Document 领域实体。
+
+DDD 说明：Document 只承载知识库文档的元数据（id/文件名/大小/状态），
+文本内容本身存放在向量数据库——实体与它聚合不到一起的外部大对象分离，
+是"聚合边界最小化"的体现。status 状态机（pending/processing/ready/failed）
+表达文档从接收到可检索的完整生命周期，非法状态转移由状态枚举约束。
+"""
 
 from __future__ import annotations
 

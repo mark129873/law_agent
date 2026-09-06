@@ -153,6 +153,7 @@ class _SQLiteTransaction(TransactionContext):
 
 
 class _SQLiteConversationRepository(ConversationRepository):
+    """ConversationRepository 端口的 SQLite 实现（多态：与内存 Fake 可互换）。"""
     def __init__(self, db: SQLiteDatabase) -> None:
         self._db = db
 
@@ -191,6 +192,11 @@ class _SQLiteConversationRepository(ConversationRepository):
 
 
 class _SQLiteMessageRepository(MessageRepository):
+    """MessageRepository 端口的 SQLite 实现。
+
+    list_by_conversation 以 created_at + rowid 双键排序：
+    同毫秒创建的消息按插入顺序稳定输出，保证对话顺序可复现。
+    """
     def __init__(self, db: SQLiteDatabase) -> None:
         self._db = db
 
@@ -236,6 +242,7 @@ class _SQLiteMessageRepository(MessageRepository):
 
 
 class _SQLiteDocumentRepository(DocumentRepository):
+    """DocumentRepository 端口的 SQLite 实现。"""
     def __init__(self, db: SQLiteDatabase) -> None:
         self._db = db
 

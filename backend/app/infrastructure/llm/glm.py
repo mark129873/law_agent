@@ -20,6 +20,7 @@ logger = logging.getLogger("app.llm.glm")
 
 
 def _to_api_messages(messages: list[ChatMessage]) -> list[dict[str, str]]:
+    """领域消息 → OpenAI 兼容协议消息（与 Ollama 共用角色取值，无需映射表）。"""
     return [{"role": message.role.value, "content": message.content} for message in messages]
 
 

@@ -1,4 +1,10 @@
-"""DocumentChunk 领域实体。"""
+"""DocumentChunk 领域实体。
+
+DDD 说明：chunk 是向量检索的基本单元，本质是值对象——
+它的同一性由内容与位置决定而非 id（chunk_id 仅为存储主键）；
+DocumentChunk（写）与 RetrievedChunk（读，附加 score）拆成两个契约，
+让"入库需要什么"与"检索返回什么"各自最小化（接口隔离）。
+"""
 
 from __future__ import annotations
 

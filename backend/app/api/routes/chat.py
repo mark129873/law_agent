@@ -1,4 +1,9 @@
-"""Chat 流式路由（BE-020）。"""
+"""Chat 流式路由。
+
+DDD 说明：本路由是流式用例的"驱动适配器"——把 HTTP SSE 协议与
+ChatService 的异步生成器对接；生成中任何异常都转为 error 事件
+正常收尾，而不是让连接悬死，这是流式接口的可靠性契约。
+"""
 
 from __future__ import annotations
 
@@ -23,6 +28,9 @@ _SSE_HEADERS = {
 
 
 def _sse_event(payload: dict) -> str:
+    """把一个事件字典编码为 SSE 帧：`data: {json}
+
+`（协议见 ARCHITECTURE.md）。"""
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 

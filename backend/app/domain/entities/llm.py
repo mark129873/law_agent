@@ -1,4 +1,10 @@
-"""LLM 调用相关领域实体。"""
+"""LLM 调用相关领域实体。
+
+DDD 说明：ChatMessage 复用 MessageRole 而非另建枚举，体现"通用语言"——
+对话消息与大模型请求消息在业务上是同一个概念，两套类型会制造翻译层；
+LlmParams 把采样参数收拢为参数对象（Parameter Object 模式），
+新增参数不破坏端口方法签名。
+"""
 
 from __future__ import annotations
 

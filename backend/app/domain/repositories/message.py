@@ -1,4 +1,9 @@
-"""MessageRepository 抽象接口。"""
+"""MessageRepository 抽象接口。
+
+DDD 说明：仓储端口只暴露领域需要的查询粒度（list_by_conversation），
+不暴露 SQL/索引等存储概念；delete_by_conversation 返回删除条数而非
+布尔值，因为"删除了多少条"是业务上关心的结果。
+"""
 
 from __future__ import annotations
 

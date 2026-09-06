@@ -29,26 +29,31 @@ class AppError(Exception):
 
 
 class ConversationNotFoundApiError(AppError):
+    """会话不存在 → 404/40401：资源缺失属于客户端误用，应可安全重试。"""
     status_code = 404
     code = 40401
 
 
 class DocumentNotFoundApiError(AppError):
+    """文档不存在 → 404/40402。"""
     status_code = 404
     code = 40402
 
 
 class UnsupportedFormatApiError(AppError):
+    """上传格式不支持 → 400/40001：客户端可修正后重试，非服务器故障。"""
     status_code = 400
     code = 40001
 
 
 class DocumentTooLargeApiError(AppError):
+    """上传超过大小上限 → 413/41301：语义上属请求体过大，用 413 而非 400。"""
     status_code = 413
     code = 41301
 
 
 def _error_response(status_code: int, code: int, message: str) -> JSONResponse:
+    """构造统一错误响应体：所有非 2xx 出口共用，保证形状唯一。"""
     return JSONResponse(status_code=status_code, content=ErrorResponse(code=code, message=message).model_dump())
 
 

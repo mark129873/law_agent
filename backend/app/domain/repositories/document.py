@@ -1,4 +1,9 @@
-"""DocumentRepository 抽象接口。"""
+"""DocumentRepository 抽象接口。
+
+DDD 说明：文档仓储只管元数据的 CRUD 与状态更新——文本内容归 VectorStore
+端口管，两个端口按聚合边界分离；update_status 单独成方法，是因为
+"处理状态"是文档生命周期中唯一会被单独修改的属性。
+"""
 
 from __future__ import annotations
 
