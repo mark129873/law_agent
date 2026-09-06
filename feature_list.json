@@ -210,8 +210,8 @@
       "id": "FE-003",
       "name": "Codex 风格应用 Shell",
       "description": "实现类似 Codex Web 的整体应用布局，包括左侧导航/会话区域、主内容区域、顶部区域和统一交互样式，重点保证简洁、高级和低干扰的视觉体验。",
-      "status": "planned",
-      "evidence": "待实现：主要页面使用统一 Shell，布局、间距、字体、按钮和交互风格保持一致。",
+      "status": "passing",
+      "evidence": "2026-09-06：components/AppShell.tsx（h-dvh 双栏布局：w-64 侧边栏 + 弹性主区）+ Sidebar.tsx（品牌区/新对话按钮/对话-知识库分段切换/列表区）+ index.css 语义化主题 token（stone 暖灰系 + 唯一 emerald 强调色，明暗双主题跟随系统自动切换）；圆角体系统一（控件 rounded-lg、气泡 rounded-2xl、状态点 rounded-full）；图标统一 @phosphor-icons/react。验证：npm run build 通过；真实浏览器截图验证布局与切换（对话视图 5 条历史会话、知识库视图 6 个文档、激活态样式正确、视图切换正常）。",
       "testedAt": null
     },
     {

@@ -1,4 +1,74 @@
-/* 全局样式入口。
-   Tailwind CSS v4 只需要这一行 @import：插件会扫描源码中用到的 className，
-   按需生成对应工具类样式（没用到的不会打包，产物体积小）。 */
 @import "tailwindcss";
+
+/* ==================== 主题 token ====================
+   所有颜色定义为语义化 CSS 变量，明暗两套取值跟随系统自动切换。
+   组件里只使用语义工具类（bg-app、text-ink、border-line 等），不写死颜色值：
+   1. 新组件天然适配双主题；
+   2. 全站共享同一套灰阶与唯一强调色，保证视觉一致（设计规范：色彩一致性锁）。 */
+@theme inline {
+  --color-app: var(--app); /* 主区域背景 */
+  --color-sidebar: var(--sidebar); /* 侧边栏背景 */
+  --color-elevated: var(--elevated); /* 浮起元素背景（输入框、气泡、选中项） */
+  --color-ink: var(--ink); /* 主文字 */
+  --color-ink-soft: var(--ink-soft); /* 次要文字 */
+  --color-ink-faint: var(--ink-faint); /* 弱化文字 / 占位符 */
+  --color-line: var(--line); /* 边框与分隔线 */
+  --color-accent: var(--accent); /* 全站唯一强调色 */
+  --color-accent-contrast: var(--accent-contrast); /* 强调色背景上的文字 */
+  --color-accent-soft: var(--accent-soft); /* 强调色的浅色底（选中态、状态底色） */
+}
+
+/* 字体：中文优先系统字体栈，不下载 webfont（加载快，渲染符合操作系统习惯） */
+@theme {
+  --font-sans:
+    system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", sans-serif;
+}
+
+/* 浅色主题（默认）：暖灰 stone 系，emerald 做唯一强调色 */
+:root {
+  --app: #fbfbfa;
+  --sidebar: #f3f3f1;
+  --elevated: #fefefe;
+  --ink: #1c1917;
+  --ink-soft: #57534e;
+  --ink-faint: #a8a29e;
+  --line: #e7e5e4;
+  --accent: #047857;
+  --accent-contrast: #fefefe;
+  --accent-soft: #e8f5ef;
+}
+
+/* 深色主题：跟随系统设置自动生效，层级关系与浅色一一对应 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --app: #1a1918;
+    --sidebar: #131211;
+    --elevated: #242320;
+    --ink: #e8e6e3;
+    --ink-soft: #a8a29e;
+    --ink-faint: #78716c;
+    --line: #2e2d2b;
+    --accent: #34d399;
+    --accent-contrast: #0c0a09;
+    --accent-soft: #122a20;
+  }
+}
+
+/* ==================== 基础样式 ==================== */
+body {
+  @apply bg-app font-sans text-ink antialiased;
+}
+
+/* 细滚动条：低调、不抢视觉 */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
