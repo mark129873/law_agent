@@ -113,9 +113,9 @@
       "id": "BE-013",
       "name": "Embedding 与知识库入库",
       "description": "对文档 chunks 生成 embedding，并通过 VectorStore 接口写入 Chroma，同时保存文档来源、chunk、文件名等 metadata。",
-      "status": "planned",
-      "evidence": "待实现：上传文档后可以完成解析、分块、Embedding 和 Chroma 入库，并可以查询对应 metadata。",
-      "testedAt": null
+      "status": "in_progress",
+      "evidence": "2026-09-06：domain/services/embedding.py 定义 EmbeddingService 抽象；infrastructure/embedding/ollama_embedding.py 实现 /api/embed 批量向量化（OLLAMA_EMBEDDING_MODEL 配置，transport 可注入）；application/services/knowledge_service.py 编排 Pipeline→回填 document_id→Embedding→Chroma 入库（全程结构化日志），容器完成装配。验证：pytest 53 passed 全量通过，其中 test_embedding_ingestion.py 5 passed——协议级 3 个（批量解析/数量校验/空输入）+ 端到端 2 个（真实 Chroma：入库后按语义检索命中带 metadata 的 chunk、按 document_id 删除）。剩余：真实 Ollama 向量生成被环境阻塞——本机 Ollama 服务未以 --embeddings 启动（重启并拉取 embedding 模型后补验，即可置 passing）。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-014",

@@ -7,12 +7,18 @@
 
 from __future__ import annotations
 
+from app.application.services.document_pipeline import DocumentParserFactory, DocumentPipeline
+from app.application.services.knowledge_service import KnowledgeIngestionService
 from app.common.di import DIContainer
 from app.config.settings import Settings, get_settings
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
+from app.domain.services.embedding import EmbeddingService
 from app.infrastructure.database.base import Database
 from app.infrastructure.database.sqlite.database import SQLiteDatabase
+from app.infrastructure.document_parser.pdf_parser import PdfParser
+from app.infrastructure.document_parser.text_parser import TextParser
+from app.infrastructure.embedding.ollama_embedding import OllamaEmbeddingService
 from app.infrastructure.llm.glm import GLMProvider
 from app.infrastructure.llm.ollama import OllamaProvider
 from app.infrastructure.vector_store.chroma import ChromaVectorStore
@@ -60,6 +66,18 @@ def _build_llm_provider(settings: Settings) -> LLMProvider:
     raise NotImplementedError(f"大模型 Provider '{settings.llm_provider.value}' 尚未实现")
 
 
+def _build_document_pipeline(settings: Settings) -> DocumentPipeline:
+    """构造文档处理 Pipeline：注册全部已实现的解析器策略。"""
+    return DocumentPipeline(
+        parser_factory=DocumentParserFactory([TextParser(), PdfParser()]),
+    )
+
+
+def _build_embedding_service(settings: Settings) -> EmbeddingService:
+    """按配置构造向量生成服务（当前实现：Ollama）。"""
+    return OllamaEmbeddingService(settings.ollama_base_url, settings.ollama_embedding_model)
+
+
 def create_container(settings: Settings | None = None) -> DIContainer:
     """创建并装配应用容器。
 
@@ -76,4 +94,16 @@ def create_container(settings: Settings | None = None) -> DIContainer:
     container.register(VectorStore, lambda c: _build_vector_store(settings), singleton=True)
     # 大模型：按 LLM_PROVIDER 配置注册对应实现（BE-010）
     container.register(LLMProvider, lambda c: _build_llm_provider(settings), singleton=True)
+    # 文档处理 Pipeline 与知识库入库服务（BE-011/BE-013）
+    container.register(DocumentPipeline, lambda c: _build_document_pipeline(settings), singleton=True)
+    container.register(EmbeddingService, lambda c: _build_embedding_service(settings), singleton=True)
+    container.register(
+        KnowledgeIngestionService,
+        lambda c: KnowledgeIngestionService(
+            pipeline=c.resolve(DocumentPipeline),
+            embedding_service=c.resolve(EmbeddingService),
+            vector_store=c.resolve(VectorStore),
+        ),
+        singleton=True,
+    )
     return container

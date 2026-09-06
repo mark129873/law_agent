@@ -419,3 +419,14 @@ SQLite 实现（BE-005）与未来 MySQL 实现均实现此抽象，业务层通
 - 两个解析器均实现 `DocumentParser` 策略接口，由 `DocumentParserFactory` 按扩展名分发（.pdf / .txt|.md）。
 - 解析失败（损坏文件、空文档、未知编码）都抛出带原因的异常，Pipeline 上层据此将 Document 标记为 failed 并记录 ERROR 日志。
 
+## 25. Embedding 与知识库入库（BE-013）
+
+### Embedding 抽象
+- `EmbeddingService`（domain/services/embedding.py）：`embed_documents(texts) -> list[vector]`（批量，入库用）与 `embed_query(text) -> vector`（单条，检索用）。
+- `OllamaEmbeddingService`（infrastructure/embedding/ollama_embedding.py）：调用 `POST {OLLAMA_BASE_URL}/api/embed` 批量生成向量；模型来自 `OLLAMA_EMBEDDING_MODEL` 配置。
+
+### 知识库入库服务
+- `KnowledgeIngestionService`（application/services/knowledge_service.py）：编排 `DocumentPipeline`（解析/清洗/切分）→ 回填 document_id → `EmbeddingService` 批量向量化 → `VectorStore.add_chunks` 写入。
+- 全流程结构化日志：开始（文件名/大小）、向量化（chunk 数）、完成（chunk id 数）。
+- 依赖全部来自抽象接口（Pipeline 组合、EmbeddingService、VectorStore），可整体替换任一实现。
+
