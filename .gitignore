@@ -12,9 +12,10 @@ node_modules/
 venv/
 env/
 
-# 环境变量与密钥
+# 环境变量与密钥（.env.example 模板需要入库，供使用者复制）
 .env
 .env.*
+!.env.example
 *.key
 secrets/
 
