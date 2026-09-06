@@ -365,3 +365,18 @@ SQLite 实现（BE-005）与未来 MySQL 实现均实现此抽象，业务层通
 - 容器装配点按 `VECTOR_STORE_PROVIDER` 分支：chroma → `ChromaVectorStore`；milvus → `MilvusVectorStore` 骨架。切换 Provider 只改配置。
 - 核心约束：RAG/Agent 业务代码只 import `domain/repositories/vector_store.py` 抽象，不存在 Chroma 强耦合；Milvus 完整实现落地时只新增/替换基础设施文件，业务层零修改。
 
+## 21. LLM Provider 抽象层（BE-009）
+
+### 数据契约
+- `ChatMessage`（domain/entities/llm.py）：role（复用 MessageRole：user/assistant/system）+ content
+
+### LLMProvider 抽象接口（domain/repositories/llm_provider.py）
+- `chat(messages, temperature, max_tokens) -> str`：同步问答，返回完整回答
+- `stream(messages, temperature, max_tokens) -> AsyncIterator[str]`：流式问答，按 token 增量产出
+- 两个方法都必须可被 LangGraph Agent 与上层 Service 直接消费，且不暴露任何具体厂商协议
+
+### 实现与选择
+- Ollama（BE-010）：`infrastructure/llm/ollama.py`
+- GLM（BE-010）：`infrastructure/llm/glm.py`
+- 容器装配点按 `LLM_PROVIDER` 注册实现；LangGraph Agent 只依赖抽象接口。
+

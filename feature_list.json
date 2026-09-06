@@ -81,9 +81,9 @@
       "id": "BE-009",
       "name": "LLM Provider 抽象层",
       "description": "建立统一的大模型 Provider 接口，抽象同步调用、流式调用以及必要的模型参数，使 LangGraph Agent 不直接依赖具体模型服务。",
-      "status": "planned",
-      "evidence": "待实现：Agent 可以通过统一 LLM 接口调用模型，并能够独立替换具体 LLM Provider。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：backend/app/domain/entities/llm.py 定义 ChatMessage/LlmParams 数据契约；backend/app/domain/repositories/llm_provider.py 定义 LLMProvider 抽象（chat 同步问答 + stream 异步增量流 + model_name 属性）。测试用 Fake Provider 跑通同步+流式问答流程（test_llm_provider.py 3 passed），证明上层业务只依赖抽象接口、可独立替换具体 Provider。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-010",
