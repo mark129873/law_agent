@@ -226,8 +226,8 @@
       "id": "FE-005",
       "name": "历史对话与会话切换",
       "description": "在侧边栏展示历史对话，支持在不同 conversation 之间切换，并加载对应历史消息。",
-      "status": "planned",
-      "evidence": "待实现：创建多个对话后，可以切换会话并正确恢复每个会话的消息。",
+      "status": "passing",
+      "evidence": "2026-09-06：侧边栏列表渲染与切换动作在 FE-002/003/004 中实现（AppContext.openConversation 加载历史消息、ConversationList 渲染会话项与选中态）。本轮真实浏览器验证：切到旧会话「graph流式」其历史消息正确恢复且顶栏标题同步；再切回最新会话（以提问为标题）原问答对完整恢复；往返切换无串话。POST /api/chat/stream 生成期间切换由 FE-007 守卫（生成中禁切）。",
       "testedAt": null
     },
     {
