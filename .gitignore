@@ -36,3 +36,6 @@ Thumbs.db
 
 # 运行时数据（数据库/向量库），位置见 data
 data/
+
+# ZCode 内部工件（计划文件等）
+.zcode/
