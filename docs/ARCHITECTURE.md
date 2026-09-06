@@ -455,3 +455,12 @@ START → retrieve（RagService.build_context 写入 state.context）
 - `build_qa_graph(llm, rag=None)`（agent/graph.py）：rag 为 None 时为基础工作流，传入即为 RAG 工作流；节点全异步，LLM 调用只经过 LLMProvider 抽象。
 - Prompt 组装集中在 `agent/prompts.py`，回答策略（BE-017）只改该文件。
 
+## 28. 对话服务（BE-018）
+
+- `ConversationService`（application/services/conversation_service.py）：会话生命周期与消息持久化的唯一业务入口。
+  - `create_conversation(title)`：空标题默认"新对话"
+  - `list_conversations()` / `get_messages(conversation_id)` / `delete_conversation(conversation_id)`
+  - `add_user_message` / `add_assistant_message`：供 Chat 流程持久化问答
+- 会话不存在时抛 `ConversationNotFoundError`；删除会话时同时清理其全部消息。
+- 依赖仅 Database 抽象；标题与消息数变更输出结构化日志。
+

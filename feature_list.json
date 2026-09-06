@@ -153,9 +153,9 @@
       "id": "BE-018",
       "name": "对话服务",
       "description": "建立 Conversation/Message Service，实现创建对话、查询历史对话、查询消息、删除对话以及保存用户问题和 Agent 回答。",
-      "status": "planned",
-      "evidence": "待实现：服务层可以完成完整的对话生命周期管理，并正确持久化用户问题和模型回答。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：backend/app/application/services/conversation_service.py 实现会话生命周期管理（创建含默认标题/列表/消息查询/级联删除/追加问答消息），缺失会话统一抛 ConversationNotFoundError，依赖仅 Database 抽象，删除与创建输出结构化日志。验证：test_conversation_service.py 4 passed（真实 SQLite：默认标题、消息顺序恢复、缺失会话异常、级联删除）。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-019",
