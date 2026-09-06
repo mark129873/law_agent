@@ -303,3 +303,25 @@ API / Application Service ──依赖──▶ 抽象接口（domain/repositori
 - 切换 Provider = 修改配置 + 容器注册对应工厂，业务代码零修改。
 - 测试可向容器注册 Fake 实现替代真实基础设施。
 
+## 16. 数据库抽象层（BE-004）
+
+### 领域实体（数据契约）
+纯 Python dataclass，位于 `backend/app/domain/entities/`，不依赖任何数据库技术：
+- `Conversation`：id、title、created_at
+- `Message`：id、conversation_id、role（user/assistant/system）、content、created_at
+- `Document`：id、filename、file_size、status（pending/processing/ready/failed）、created_at
+
+### Repository 接口
+位于 `backend/app/domain/repositories/`，全部为抽象基类：
+- `ConversationRepository`：create / get / list / delete
+- `MessageRepository`：add / list_by_conversation / delete_by_conversation
+- `DocumentRepository`：create / get / list / delete / update_status
+
+### Database 抽象
+位于 `backend/app/infrastructure/database/base.py`：
+- `connect()` / `init_schema()` / `close()` 生命周期方法
+- `transaction()` 异步上下文管理器：事务内的仓库操作要么全部提交要么全部回滚
+- `conversations` / `messages` / `documents` 三个仓库实例由具体实现提供
+
+SQLite 实现（BE-005）与未来 MySQL 实现均实现此抽象，业务层通过依赖注入获取 `Database` 实例。
+

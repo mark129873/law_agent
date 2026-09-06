@@ -41,9 +41,9 @@
       "id": "BE-004",
       "name": "数据库抽象层",
       "description": "设计统一数据库接口，包括 Repository、事务、CRUD 等基础能力，使业务层可以独立于具体数据库实现。当前实现 SQLite3，架构上预留 MySQL 8.0。",
-      "status": "planned",
-      "evidence": "待实现：业务层通过数据库抽象接口访问数据，并存在独立的 SQLite 实现；后续可以增加 MySQL 实现而无需修改业务层。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：backend/app/domain/entities/ 定义 Conversation/Message/Document 纯 dataclass 实体（含状态枚举）；backend/app/domain/repositories/ 定义三个 Repository 抽象接口（CRUD+状态更新）；backend/app/infrastructure/database/base.py 定义 Database 抽象（connect/init_schema/close/transaction 事务上下文）。测试用与 SQLite 无关的内存 Fake 实现跑通完整业务流程（test_database_abstraction.py 4 passed），证明业务层只依赖 Database 抽象，可增加 MySQL 实现而无需修改业务层。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-005",
