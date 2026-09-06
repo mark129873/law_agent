@@ -218,8 +218,8 @@
       "id": "FE-004",
       "name": "对话页面与新建会话",
       "description": "实现核心聊天页面，包括新建对话、消息区域、输入框、发送按钮、空状态以及当前会话状态。",
-      "status": "planned",
-      "evidence": "待实现：用户进入应用后可以创建新对话并进入聊天页面。",
+      "status": "passing",
+      "evidence": "2026-09-06：pages/ChatPage.tsx（顶栏标题+生成状态、消息滚动区、自适应高度输入框、Enter 发送/Shift+Enter 换行、欢迎空状态带 3 个可点击建议问题、错误提示条）+ MessageBlock.tsx（用户右侧气泡/助手左侧平铺+流式光标）+ AppContext.sendQuestion（无会话先建会话 title=提问截短 20 字，乐观插入消息，SSE 增量写入）。验证：npm run build 通过；真实浏览器点击建议问题发送——新会话以提问为标题出现在侧边栏顶部，回答流式完成：「发明专利权的保护期限为二十年」引用专利法第四十二条与来源文件；后端 API 确认 user/assistant 消息已持久化。PRODUCT.md/ARCHITECTURE.md 已同步延迟建会话决策。",
       "testedAt": null
     },
     {

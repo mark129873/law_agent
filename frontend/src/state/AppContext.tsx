@@ -3,11 +3,12 @@
 //   本项目状态简单，Context 是 React 自带能力，代码量少、概念少（前端规范：简洁精炼）。
 // 使用方式：组件里调用 useAppStore() 拿到状态和动作方法。
 // 所有网络请求都发生在 state/api 层，UI 组件不直接 fetch，保证数据访问只有一份实现。
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { Conversation, KnowledgeDocument, Message } from '../types'
 import * as conversationsApi from '../api/conversations'
 import * as documentsApi from '../api/documents'
+import { streamChat } from '../api/chat'
 
 /** 侧边栏的两个视图：对话列表 / 知识库管理（PRODUCT.md：两者同处侧边栏，按钮切换） */
 export type SidebarView = 'chat' | 'knowledge'
@@ -29,6 +30,12 @@ interface AppContextValue {
   /** 正在加载历史消息 */
   loadingMessages: boolean
 
+  // —— 流式问答状态 ——
+  /** 正在流式生成回答（生成中禁止重复发送与切换会话） */
+  isStreaming: boolean
+  /** 流式/提问过程的错误信息；null 表示无错误 */
+  streamError: string | null
+
   // —— 会话动作 ——
   refreshConversations: () => Promise<void>
   openConversation: (id: string) => Promise<void>
@@ -37,6 +44,9 @@ interface AppContextValue {
   createConversation: (title: string) => Promise<Conversation>
   /** 删除会话并同步本地列表；删的是当前会话时自动回到"新对话" */
   removeConversation: (id: string) => Promise<void>
+  /** 发送提问：必要时先建会话，然后流式接收回答并写入 messages */
+  sendQuestion: (question: string) => Promise<void>
+  clearStreamError: () => void
 
   // —— 知识库状态与动作 ——
   documents: KnowledgeDocument[]
@@ -114,6 +124,79 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [activeId],
   )
 
+  // ———————— 流式问答 ————————
+
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [streamError, setStreamError] = useState<string | null>(null)
+  // 用 ref 同步记录流式状态：sendQuestion 是异步函数，
+  // 如果读 state 变量会拿到闭包里的旧值，导致"生成中"判断失效
+  const streamingRef = useRef(false)
+
+  const clearStreamError = useCallback(() => setStreamError(null), [])
+
+  /** 发送提问：必要时先建会话 → 乐观插入本地消息 → 消费 SSE 流增量更新 */
+  const sendQuestion = useCallback(
+    async (question: string) => {
+      // 生成中不允许重复发送
+      if (streamingRef.current) return
+      streamingRef.current = true
+      setIsStreaming(true)
+      setStreamError(null)
+
+      // 本地乐观消息的临时 id 声明在 try 外：catch 里才能清理它们
+      const tempUserId = `local-user-${Date.now()}`
+      const assistantId = `streaming-${Date.now()}`
+
+      try {
+        // 1) 还没有会话：用提问内容（截短）当标题创建，侧边栏能看出每个会话聊了什么
+        let conversationId = activeId
+        if (!conversationId) {
+          conversationId = (await createConversation(question.slice(0, 20))).id
+        }
+
+        // 2) 界面先显示用户消息和一个空的助手消息（内容靠流式增量填充）。
+        //    本地临时 id 与后端真实 id 无关，仅用于本次渲染。
+        const now = new Date().toISOString()
+        setMessages((prev) => [
+          ...prev,
+          { id: tempUserId, role: 'user', content: question, created_at: now },
+          { id: assistantId, role: 'assistant', content: '', created_at: now },
+        ])
+
+        // 3) 消费 SSE 流：每段增量追加到助手消息；完成后后端已持久化完整回答
+        await streamChat(
+          { conversationId, question },
+          {
+            onDelta: (content) =>
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + content } : m)),
+              ),
+            onDone: () => {
+              // 换掉临时 id（移除流式光标标记），本地内容与后端持久化内容一致，无需重新拉取
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, id: `assistant-${Date.now()}` } : m)),
+              )
+            },
+            onError: (message) => {
+              setStreamError(message)
+              // 出错时移除空的助手占位；已有部分内容的保留展示。
+              // 后端"异常中断不落库"，所以刷新后看到的与本地一致。
+              setMessages((prev) => prev.filter((m) => m.id !== assistantId || m.content !== ''))
+            },
+          },
+        )
+      } catch (error) {
+        // 会话创建失败或网络层异常：清掉本条乐观消息（界面上不留半截内容）并提示
+        setMessages((prev) => prev.filter((m) => m.id !== tempUserId && m.id !== assistantId))
+        setStreamError(error instanceof Error ? error.message : '网络异常，请稍后重试')
+      } finally {
+        streamingRef.current = false
+        setIsStreaming(false)
+      }
+    },
+    [activeId, createConversation],
+  )
+
   // ———————— 知识库动作 ————————
 
   /** 拉取文档列表；失败静默 */
@@ -181,6 +264,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       startNewChat,
       createConversation,
       removeConversation,
+      sendQuestion,
+      isStreaming,
+      streamError,
+      clearStreamError,
       documents,
       refreshDocuments,
       uploadDocument,
@@ -198,6 +285,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       startNewChat,
       createConversation,
       removeConversation,
+      sendQuestion,
+      isStreaming,
+      streamError,
+      clearStreamError,
       documents,
       refreshDocuments,
       uploadDocument,
