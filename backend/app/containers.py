@@ -11,6 +11,9 @@ from app.common.di import DIContainer
 from app.config.settings import Settings, get_settings
 from app.infrastructure.database.base import Database
 from app.infrastructure.database.sqlite.database import SQLiteDatabase
+from app.infrastructure.vector_store.chroma import ChromaVectorStore
+from app.infrastructure.vector_store.milvus import MilvusVectorStore
+from app.domain.repositories.vector_store import VectorStore
 
 
 def _build_database(settings: Settings) -> Database:
@@ -28,6 +31,20 @@ def _build_database(settings: Settings) -> Database:
     )
 
 
+def _build_vector_store(settings: Settings) -> VectorStore:
+    """按配置构造向量库实现（工厂函数，BE-008）。
+
+    为什么骨架也纳入工厂：VECTOR_STORE_PROVIDER=milvus 时装配成功、
+    使用时才报"未实现"，这样 Provider 的表达能力与 Chroma 完全一致，
+    未来 Milvus 落地只改本函数的一行分支。
+    """
+    if settings.vector_store_provider.value == "chroma":
+        return ChromaVectorStore(settings.chroma_persist_dir)
+    if settings.vector_store_provider.value == "milvus":
+        return MilvusVectorStore(settings.milvus_uri)
+    raise NotImplementedError(f"向量库 Provider '{settings.vector_store_provider.value}' 尚未实现")
+
+
 def create_container(settings: Settings | None = None) -> DIContainer:
     """创建并装配应用容器。
 
@@ -40,6 +57,6 @@ def create_container(settings: Settings | None = None) -> DIContainer:
     container.register(Settings, lambda c: settings, singleton=True)
     # 数据库：按 DB_PROVIDER 配置注册对应实现（BE-005）
     container.register(Database, lambda c: _build_database(settings), singleton=True)
-
-    # BE-006/BE-009 落地后，向量库、LLM Provider 的具体工厂将在此处注册。
+    # 向量库：按 VECTOR_STORE_PROVIDER 配置注册对应实现（BE-006~008）
+    container.register(VectorStore, lambda c: _build_vector_store(settings), singleton=True)
     return container

@@ -73,9 +73,9 @@
       "id": "BE-008",
       "name": "Milvus 扩展架构",
       "description": "基于 VectorStore 抽象层预留 Milvus 实现能力，并使向量数据库 Provider 可以通过配置进行选择。第一版不要求完整实现 Milvus。",
-      "status": "planned",
-      "evidence": "待实现：配置和架构可以表达 Chroma/Milvus Provider，核心 RAG 代码不存在 Chroma 强耦合。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：backend/app/infrastructure/vector_store/milvus.py 提供 MilvusVectorStore 骨架（履行全部接口签名，调用时抛明确 NotImplementedError）；容器装配点按 VECTOR_STORE_PROVIDER 分支注册 chroma/milvus（backend/app/containers.py），并接入 main.py lifespan。验证：uv run pytest tests -q → 28 passed（test_vector_store_factory.py 3 passed：chroma 配置解析出可用单例、milvus 配置解析成功、milvus 调用报错明确）；真实启动日志 \"VectorStore initialized (provider: chroma)\"，curl /api/health 返回 ok。RAG 业务代码仅依赖 domain/repositories/vector_store.py 抽象，无 Chroma 强耦合。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-009",

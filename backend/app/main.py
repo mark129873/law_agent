@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from app.common.logging import setup_logging
 from app.config.settings import get_settings
 from app.containers import create_container
+from app.domain.repositories.vector_store import VectorStore
 from app.infrastructure.database.base import Database
 
 # 启动时初始化结构化 JSON 日志，确保后续所有服务日志格式一致
@@ -46,9 +47,17 @@ def create_app() -> FastAPI:
             "Database initialized",
             extra={"service": "database", "provider": settings.db_provider.value},
         )
+        # 向量库随应用一起初始化，保证首次请求前存储就绪
+        vector_store: VectorStore = container.resolve(VectorStore)
+        await vector_store.initialize()
+        logger.info(
+            "VectorStore initialized",
+            extra={"service": "vector_store", "provider": settings.vector_store_provider.value},
+        )
         yield
+        await vector_store.close()
         await database.close()
-        logger.info("Database closed", extra={"service": "database"})
+        logger.info("Infrastructure closed", extra={"service": "system"})
 
     # 启动即记录当前生效的 Provider，方便从日志确认配置是否按预期切换；
     # 注意：只输出 Provider 名称等非敏感信息，密钥一律不进日志。

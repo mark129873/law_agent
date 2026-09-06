@@ -359,3 +359,9 @@ SQLite 实现（BE-005）与未来 MySQL 实现均实现此抽象，业务层通
 - chunk 原文作为 document 存储，metadata 保存 `document_id`、`chunk_index` 与来源信息；`delete_by_document` 通过 metadata 过滤实现。
 - 接口中的 embedding 均由调用方显式传入，不使用 Chroma 内置 embedding 函数（与 embedding 模型解耦，且避免启动时下载模型）。
 
+## 20. Milvus 扩展架构（BE-008）
+
+- `infrastructure/vector_store/milvus.py` 提供 `MilvusVectorStore` 骨架：履行 VectorStore 接口签名，任何实际调用抛出明确的 `NotImplementedError`（第一版不做完整实现）。
+- 容器装配点按 `VECTOR_STORE_PROVIDER` 分支：chroma → `ChromaVectorStore`；milvus → `MilvusVectorStore` 骨架。切换 Provider 只改配置。
+- 核心约束：RAG/Agent 业务代码只 import `domain/repositories/vector_store.py` 抽象，不存在 Chroma 强耦合；Milvus 完整实现落地时只新增/替换基础设施文件，业务层零修改。
+
