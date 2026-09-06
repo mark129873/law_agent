@@ -27,7 +27,16 @@
 - 提交记录：41aed90 (BE-009)、2de5486 (BE-010)、075a736 (BE-011)、8b393bf+9def484 (BE-012)、e395422 (BE-013)
 - 已知风险或未解决问题：
   - BE-010 剩余：GLM 真实调用需配置 GLM_API_KEY 后补验
-  - BE-013 剩余：本机 Ollama 服务未以 --embeddings 启动（报 "This server does not support embeddings"），需重启 Ollama 加参数并拉取 embedding 模型后补验真实向量生成
+  - BE-013 已补验通过（Session 006）：真实 nomic-embed-text 向量端到端入库检索成功；此前"模型不存在/服务不支持 embeddings"的判断有误——第一次查 /api/tags 时输出被截断导致漏判，且当时服务状态不同；教训：结论前必须完整读取输出
+- 下一步最佳动作：BE-014 RAG 检索服务
+
+### Session 006
+- 日期：2026-09-06
+- 本轮目标：应用户要求将全项目 embedding 模型改为 nomic-embed-text:latest，并核实模型可用性
+- 技术决策：对话模型 OLLAMA_MODEL 保持 qwen3.5:4b 不变，仅改 OLLAMA_EMBEDDING_MODEL
+- 已完成：settings.py 与 .env.example 更新；BE-013 真实向量端到端补验；新增 scripts/verify_real_embedding.py
+- 运行过的验证：pytest 53 passed；真实链路 DocumentPipeline→OllamaEmbedding(nomic-embed-text, 768 维)→Chroma，语义检索命中（score 0.6207）
+- 提交记录：5e27b76（配置）、本轮 BE-013 置 passing 提交
 - 下一步最佳动作：BE-014 RAG 检索服务
 
 ### Session 004

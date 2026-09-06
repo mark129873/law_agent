@@ -28,9 +28,11 @@
 - 已知缺陷：无
 - 未验证路径（环境阻塞，均已记录在 feature_list）：
   - BE-010：GLM 真实调用（缺 GLM_API_KEY）
-  - BE-013：真实 Ollama 向量生成（本机 Ollama 未以 --embeddings 启动，报 "This server does not support embeddings"）
+  - ~~BE-013 真实向量生成~~ 已于 Session 006 补验通过（nomic-embed-text:latest 本机已装，embedding 接口可用）
 - 下一轮会话需要注意的风险：
+  - 本机 Ollama 模型齐全（qwen3.5:9b / qwen3.5:4b / nomic-embed-text:latest），embedding 端点可用
   - `uv pip install` 进 venv 的包必须同步写入 pyproject.toml，否则 uv sync 会移除（pypdf 教训）
+  - 排查环境问题时必须完整读取命令输出再做结论（截断输出曾导致误判模型缺失）
   - RAG API 层尚未存在；BE-014 需要决定检索接口形态（Service → API 分两步走）
 
 ## 下一步最佳动作
