@@ -202,8 +202,8 @@
       "id": "FE-002",
       "name": "前端 API 与状态基础层",
       "description": "建立统一 Fetch API Service 与类型定义（会话/消息/文档、统一错误结构 {code,message}、SSE 事件），采用轻量状态管理（React hooks/Context，不引入重型状态库），为对话、历史记录、知识库等页面提供统一数据访问能力。",
-      "status": "planned",
-      "evidence": "待实现：页面通过统一 API Service 与后端通信，不在 UI 组件中散落 API 请求逻辑。",
+      "status": "passing",
+      "evidence": "2026-09-06：src/types/index.ts 类型与后端契约一一对应（会话/消息/文档/统一错误/SSE 事件）；src/api/ 统一数据访问层五模块（client.ts request<T>+ApiError 解析 {code,message}，conversations/documents/health/chat），chat.ts 用 fetch 手动消费 SSE（EventSource 不支持 POST）；src/state/AppContext.tsx 轻量全局状态（React Context + useMemo，无重型状态库），会话/文档列表与 CRUD 动作集中于此。验证：npm run build 通过；fetch 机械校验仅存在于 src/api/ 3 处、UI 组件零散落；真实浏览器验证首页经统一层读到后端连接状态与 5 条历史会话（数据流贯通）。",
       "testedAt": null
     },
     {

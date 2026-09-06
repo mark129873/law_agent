@@ -1,11 +1,11 @@
 // 应用入口文件：浏览器加载 index.html 后执行的第一段前端代码。
-// 做了三件事：
-// 1. 引入全局样式 index.css（Tailwind CSS 从这里生效）；
-// 2. 用 BrowserRouter 包裹 App，启用前端路由（切换页面时不刷新整页）；
-// 3. 把 App 渲染到 index.html 里的 <div id="root"> 上。
+// 结构（从外到内）：BrowserRouter（前端路由）> AppProvider（全局状态）> App（路由表）。
+// 顺序原因：路由渲染出的页面组件要用 useAppStore() 读全局状态，
+// 所以 Provider 必须包在路由外面，否则页面拿不到状态。
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
+import { AppProvider } from './state/AppContext'
 import App from './App'
 import './index.css'
 
@@ -14,7 +14,9 @@ import './index.css'
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
-      <App />
+      <AppProvider>
+        <App />
+      </AppProvider>
     </BrowserRouter>
   </StrictMode>,
 )

@@ -93,21 +93,33 @@ backend/
 ```
 
 ```text
-frontend/                        # 前端独立项目（FE-001，React + TS + Vite）
+frontend/                        # 前端独立项目（React + TS + Vite）
 ├── index.html                   # 唯一 HTML 入口（React 挂载点 #root）
 ├── vite.config.ts               # React/Tailwind v4 插件；dev 期 /api 代理到 127.0.0.1:8000
 ├── tsconfig.json                # TS 严格模式；build 前先 tsc --noEmit 类型检查
 ├── package.json                 # npm 依赖与脚本（dev / build / preview）
 └── src/
-    ├── main.tsx                 # 应用入口：挂载 App + BrowserRouter 启用前端路由
+    ├── main.tsx                 # 应用入口：BrowserRouter（路由）> AppProvider（状态）> App
     ├── App.tsx                  # 路由表（URL → 页面组件），集中一处便于总览
-    ├── index.css                # Tailwind CSS v4 入口（@import "tailwindcss"，按需生成）
+    ├── index.css                # Tailwind v4 入口 + 语义化主题 token（明暗双主题跟随系统）
     ├── vite-env.d.ts            # Vite 内置 API 与样式导入的类型声明
-    ├── pages/                   # 页面组件（当前仅 HomePage 占位，FE-003/004 起替换）
-    ├── api/                     # 统一 API Service（FE-002）
-    ├── components/              # 通用组件（FE-003 Shell 起）
-    └── types/                   # 前端类型定义（FE-002）
+    ├── types/index.ts           # 与后端契约一一对应的类型（会话/消息/文档/错误/SSE 事件）
+    ├── api/                     # 统一数据访问层（FE-002）：UI 组件禁止直接 fetch
+    │   ├── client.ts            # request<T> 封装 + ApiError（解析统一错误结构 {code,message}）
+    │   ├── health.ts            # 健康检查（连接状态指示）
+    │   ├── conversations.ts     # 会话列表/创建/消息/删除
+    │   ├── documents.ts         # 文档列表/上传(multipart)/删除 + 白名单与大小上限常量
+    │   └── chat.ts              # 流式问答：fetch 消费 SSE，拆分 delta/done/error 事件
+    ├── state/AppContext.tsx     # 轻量全局状态（React Context）：会话/消息/文档/视图与业务动作
+    ├── pages/                   # 页面组件（对话页 / 知识库页）
+    ├── components/              # 通用组件（侧边栏、消息块、上传面板等）
+    └── utils/format.ts          # 纯函数工具（文件大小/日期格式化）
 ```
+
+### 前端数据流（FE-002 起）
+- UI 组件一律经 `state/AppContext` 的动作方法读写数据，动作内部调用 `api/*` 模块，组件禁止直接 `fetch`，请求与错误解析只保留一份实现。
+- 错误契约：后端非 2xx 统一 `{code,message}`，`api/client.ts` 解析为 `ApiError` 抛出，UI 展示 `message`。
+- 图标统一使用 `@phosphor-icons/react`；不手绘 SVG 图标，不引入第二套图标族。
 
 ## 3. 分层架构与领域端口
 
