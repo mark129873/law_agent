@@ -120,6 +120,7 @@ frontend/                        # 前端独立项目（React + TS + Vite）
 - UI 组件一律经 `state/AppContext` 的动作方法读写数据，动作内部调用 `api/*` 模块，组件禁止直接 `fetch`，请求与错误解析只保留一份实现。
 - 错误契约：后端非 2xx 统一 `{code,message}`，`api/client.ts` 解析为 `ApiError` 抛出，UI 展示 `message`。
 - 提问数据流（FE-004）：ChatPage 输入框 → `AppContext.sendQuestion` →（无会话时先 `POST /api/conversations`，title=提问截短 20 字）→ 本地乐观插入 user 消息与空 assistant 消息 → `api/chat.ts` 消费 SSE，delta 增量写回 messages → done 后由后端持久化；error 移除空占位并展示错误条。
+- 回答渲染（FE-010）：助手消息经 `react-markdown` 渲染（模型输出含 Markdown 格式；默认不解析原始 HTML，无 XSS 风险）；用户消息保持纯文本。流式过程中的未闭合标记会短暂显示为字面字符，完成后即正常渲染。
 - 图标统一使用 `@phosphor-icons/react`；不手绘 SVG 图标，不引入第二套图标族。
 
 ## 3. 分层架构与领域端口

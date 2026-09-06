@@ -2,45 +2,44 @@
 
 ## 当前已验证
 - 现在明确可用的部分：
-  - **前端基础框架（FE-001）已就绪**：frontend/ 独立项目（React 19 + TS 严格模式 + Vite 8 + Tailwind v4 + React Router 7）；`npm run build`（类型检查+打包）、`npm run dev`（5173 端口，/api 代理到后端 8000）均已真实验证通过；pages/api/components/types 目录结构就位，后续 FE 直接在上面叠加。
+  - **前端全部完成**：FE-001~010 共 10 项全部 passing（全项目 32 项功能全绿）。完整产品闭环：侧边栏对话/知识库双视图 → 新对话（延迟创建，以首句提问为标题）→ 流式问答（Markdown 渲染、来源标注、生成中禁切）→ 历史恢复 → 两步确认删除；知识库上传（点击/拖拽 + 格式大小预校验）→ 状态展示 → 即时可 RAG → 删除级联清理。
   - **后端全部完成**：BE-001~022 共 22 项全部 passing（含 BE-010 双 Provider 真实调用、BE-012 真实《专利法》数据复验）。完整业务闭环可用：上传文档→向量化入库→提问→检索→流式回答→历史持久化→删除清理。
-  - **架构合规**：DDD 分层经 AST 机械扫描违例清零（7 个领域端口定义在 domain 层）；langgraph 封闭在 `app/agent/`（唯一隔离区，对外仅 `create_qa_workflow` 工厂）；所有 LLM 问答统一走 LangGraph 图（流式/非流式同一节点）。
-  - **测试体系四层**：单元 37 + 集成 39 + 接口 7 = 83 个自动化测试（25s，无外部服务依赖）+ 端到端脚本 3 个（真实服务，手工运行）；DDD 边界守护（test_ddd_boundaries.py）随 pytest 持续校验分层规则。
-- 这轮实际跑过的验证（最近一轮四层验证，2026-09-06）：
-  - `tests/unit` → 37 passed；`tests/integration`（除 API）→ 39 passed；`test_api.py` → 7 passed
-  - 端到端：真实《专利法》TXT+MD 上传（201/ready）→ 流式提问 → 回答"发明专利权的保护期限为二十年"并引用第四十二条原文 → user/assistant 消息持久化
+  - **测试体系**：后端四层 83 个自动化测试（无外部服务依赖）+ 端到端脚本 3 个；前端每个功能均经真实浏览器验证（截图/采样序列/异常注入），FE-009 完成对话与知识库两大业务闭环联调。
+- 最近一轮实际跑过的验证（2026-09-06）：
+  - 后端 `uv run pytest` → 83 passed；前端 `npm run build`（tsc 类型检查 + vite）→ 通过
+  - 浏览器：提问流式回答引用专利法第四十二条/劳动合同法六个月/消保法三倍赔偿（均为真实 RAG）；增量渲染采样 506→681→823；停后端发送出现 502 错误条；上传真实 MD 入库「可检索」；删除会话/文档刷新后不复活
   - 启动 smoke：`/api/health` → ok
-  - feature_list.json 后端部分经 62 项声明机械审计全部吻合（审计脚本按用户决定已删除）
-
 
 ## 本轮改动
-- 新增 frontend/ 独立项目：手写脚手架（全源码中文注释），index.html→main.tsx（BrowserRouter）→App.tsx 集中路由表→pages/HomePage 占位页
-- Tailwind CSS v4（@tailwindcss/vite，无配置文件）；vite.config.ts 配置 /api 代理到 127.0.0.1:8000，前端代码只用相对路径
-- 修复 TS7 对 CSS 副作用导入的 TS2882（补标准 vite-env.d.ts）；build = tsc --noEmit && vite build
-- 验证证据：build 通过 / dev 292ms ready / curl / 200 / 代理 /api/health 返回 ok（后端日志确认）/ dist CSS 含 Tailwind 工具类
-- 文档同步：ARCHITECTURE.md（前端技术栈、frontend/ 目录树、启动验证、扩展点状态）、init.md（前端验证路径）、feature_list.json（FE-001→passing）
-
+- FE-001：frontend/ 独立项目（React 19 + TS 严格模式 + Vite 8 + Tailwind v4 + Router 7，全源码中文注释）；vite 代理 /api → 8000；修复 TS7 CSS 副作用导入（vite-env.d.ts）
+- FE-002：types/api/state 三层——client.ts request<T>+ApiError（统一错误 {code,message}）、conversations/documents/health/chat 五模块（chat.ts 用 fetch 消费 SSE，EventSource 不支持 POST）、AppContext 轻量全局状态（UI 组件零直接 fetch，grep 机械校验）
+- FE-003：Codex 风格 Shell——语义化主题 token（stone 暖灰 + 唯一 emerald 强调色，明暗双主题跟随系统）、对话/知识库分段切换、图标统一 @phosphor-icons/react
+- FE-004：对话页（欢迎空状态 + 建议问题 + 自适应输入 + Enter 发送）+ 流式发送；新会话延迟创建（title=提问截短 20 字，弥补后端不自动改标题）
+- FE-005/006：会话切换消息恢复；删除两步确认 + danger 语义色 token
+- FE-007：streamingRef 守卫生成中禁止切换/新建；增量渲染与异常路径实测验证
+- FE-008：知识库页——上传面板（点击/拖拽、accept 限制、格式/大小前端预校验）、状态徽标、两步确认删除、utils/format
+- FE-009：浏览器联调双闭环（对话闭环 + 知识库闭环含新文档即时 RAG）
+- FE-010：react-markdown 渲染助手回答（默认不解析原始 HTML）；ink-faint 对比度达 WCAG AA（明暗两套）
+- 文档同步：ARCHITECTURE.md（前端技术栈/目录树/数据流/启动验证/扩展点）、PRODUCT.md（延迟建会话交互）、init.md（前端验证路径）、feature_list.json（FE-002~010 逐项 evidence）
 
 ## 仍损坏或未验证
 - 已知缺陷：无
-- 未验证路径：uvicorn 多 worker 并发；HTTPS/反向代理；CORS 生产收敛（当前 allow_origins=["*"]）
+- 未验证路径：深色主题未做强制暗色截图（token 与浅色同源镜像，风险低）；uvicorn 多 worker 并发；HTTPS/反向代理；CORS 生产收敛（当前 allow_origins=["*"]）
 - 下一轮会话需要注意的风险：
-  - 前端 FE-002~010 未开始（FE-001 框架已就绪，后续按清单叠加）
-  - curl 在 Git Bash 下发中文 JSON 有编码问题（测 API 用 ASCII 或 TestClient/httpx）
-  - min_score 默认 0.0（不过滤）；检索质量调优需按 nomic 分数分布配置
-  - E2E 脚本依赖本机 Ollama（qwen3.5:4b / nomic-embed-text:latest）与 .env 中 GLM_API_KEY
-  - 前端依赖很新（Vite 8 / TS 7），如遇生态兼容问题可降级到 Vite 5/6 + TS 5 稳定组合
+  - Ollama qwen3.5:4b 首 token 延迟约 30~40s（本机 CPU 推理）——非前端问题，但影响体感
+  - 前端依赖很新（Vite 8 / TS 7 / React 19 / react-markdown），生态兼容问题留意
+  - 流式过程中未闭合的 Markdown 标记会短暂显示字面字符（完成后正常渲染）
+  - min_score 默认 0.0（不过滤）；E2E 脚本依赖本机 Ollama（qwen3.5:4b / nomic-embed-text:latest）与 .env 中 GLM_API_KEY
 
 ## 下一步最佳动作
-- 最高优先级未完成功能：FE-002 前端 API 与状态基础层
-- 为什么它是下一步：所有页面（对话/历史/知识库）都依赖统一 API Service 与类型定义
-- 什么结果才算 passing：页面通过统一 API Service 与后端通信，不在 UI 组件中散落 API 请求逻辑；类型定义覆盖会话/消息/文档/统一错误结构/SSE 事件
-- 这一步中哪些东西不要动：后端 API 契约（ARCHITECTURE.md 第 7 节表格与 SSE 协议）；统一错误结构 {code,message}；FE-001 已建立的目录结构与代理配置
+- 全项目 32 项功能全部 passing，无最高优先级未完成功能
+- 可选增强方向（需用户决定）：会话重命名（需后端新增 PATCH 端点）、回答停止按钮（需后端取消协议）、深色主题手动开关、部署方案与 CORS 收敛
+- 这一步中哪些东西不要动：后端 API 契约（ARCHITECTURE.md 第 7 节表格与 SSE 协议）；统一错误结构 {code,message}；前端 api/state 分层与主题 token 体系
 
 ## 命令
 - 后端启动：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 后端验证：`cd backend && uv run pytest`（全量 83 个）；分层：`pytest tests/unit` / `pytest tests/integration`
+- 前端构建：`cd frontend && npm install && npm run build`（tsc 类型检查 + vite）
+- 前端启动：`cd frontend && npm run dev`（http://localhost:5173，/api 代理到后端 8000；联调需先启动后端）
 - 端到端：启动服务器后 `PYTHONPATH=backend python backend/scripts/verify_real_e2e.py`
-- 前端构建：`cd frontend && npm install && npm run build`
-- 前端启动：`cd frontend && npm run dev`（http://localhost:5173，联调需先启动后端）
 - 定向调试：`LOG_LEVEL=INFO uv run uvicorn app.main:app --port 8000`；OpenAPI http://127.0.0.1:8000/docs

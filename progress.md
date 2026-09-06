@@ -4,8 +4,34 @@
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
 - 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 标准验证路径：`cd backend && uv run pytest tests -q`；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：前端 FE-002（后端 BE 全部 22 项 passing，前端 FE-001 基础框架 passing）
+- 当前最高优先级未完成功能：无（后端 BE-001~022 与前端 FE-001~010 全部 passing，32 项功能全部完成）
 - 当前 blocker：无
+
+### Session 014（FE-002 ~ FE-010 前端全部功能）
+- 日期：2026-09-06
+- 本轮目标：完成前端全部剩余功能（FE-002~010），直至前后端全链路可用
+- 技术决策：
+  - FE-002：types/api/state 三层（client.ts request<T>+ApiError 解析统一错误；chat.ts fetch 手动消费 SSE，EventSource 不支持 POST）；React Context 轻量状态，UI 组件零直接 fetch
+  - FE-003：语义化主题 token（stone 暖灰 + 唯一 emerald 强调色，明暗双主题跟随系统）；圆角体系（控件 lg/气泡 2xl/徽标 full）；图标统一 @phosphor-icons/react（不手绘 SVG）
+  - FE-004：新会话延迟创建（第一句提问时才 POST，title=提问截短 20 字，解决后端不自动改标题导致的列表不可辨认）；乐观插入 + SSE 增量写入
+  - FE-006/008：删除统一两步确认交互；新增 danger 语义色 token
+  - FE-007：streamingRef 守卫生成中禁止切换/新建会话（openConversation/startNewChat 入口拦截）
+  - FE-010：助手消息 react-markdown 渲染（默认不解析原始 HTML）；ink-faint 对比度提升至 WCAG AA（明暗两套）
+- 运行过的验证（全部真实执行）：
+  - npm run build（tsc 类型检查 + vite）每个功能均通过；fetch 隔离机械校验（仅 api/ 层 3 处）
+  - 真实浏览器（IAB）：Shell 布局/视图切换截图；提问→新会话以提问为标题→流式回答「二十年」引用专利法第四十二条→后端确认持久化
+  - 增量渲染采样序列 506→681(生成中)→823(完成)；生成中点击其他会话被守卫阻止；停后端发送→502 错误条、重启恢复
+  - 会话删除：条目消失 + 刷新不复活 + 删除当前会话回新对话
+  - 知识库：真实 MD 文档经 input change 路径上传→201→embedding 入库「可检索」；bad.exe 前端预校验拒绝；两步确认删除
+  - FE-009 联调双闭环：劳动法问答（引用新上传劳动合同法文档）→刷新恢复→删除；上传消保法→立即 RAG（三倍赔偿+五百元）→删除清理
+  - 终验：后端 uv run pytest 83 passed；前端 build 通过；Markdown 渲染截图复验
+- 已记录证据：feature_list.json FE-002~010 全部 passing（附各项验证细节）
+- 提交记录：7f6a3b9、4009527、06e0168、2fcc092、10b0664、a531eb0、870f6b0、fd7a0bb、本轮收尾提交
+- 已知风险或未解决问题：
+  - Ollama qwen3.5:4b 首 token 延迟约 30~40s（本机 CPU 推理），回答期间 UI 有状态提示但体验依赖模型速度
+  - 前端依赖较新（Vite 8/TS 7/React 19），生态兼容问题留意
+  - 深色主题为 token 自动切换，未做浏览器强制暗色截图（结构同源，风险低）
+- 下一步最佳动作：可选产品化增强（会话重命名、回答停止按钮、深色主题手动开关、部署收敛 CORS）
 
 ### Session 013（FE-001 前端项目基础框架）
 - 日期：2026-09-06

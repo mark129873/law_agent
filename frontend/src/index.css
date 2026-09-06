@@ -34,7 +34,7 @@
   --elevated: #fefefe;
   --ink: #1c1917;
   --ink-soft: #57534e;
-  --ink-faint: #a8a29e;
+  --ink-faint: #78716c; /* 弱化文字也保持 4.5:1 以上对比度（WCAG AA） */
   --line: #e7e5e4;
   --accent: #047857;
   --accent-contrast: #fefefe;
@@ -51,7 +51,7 @@
     --elevated: #242320;
     --ink: #e8e6e3;
     --ink-soft: #a8a29e;
-    --ink-faint: #78716c;
+    --ink-faint: #8f8a84; /* 深色下同样满足 AA 对比度 */
     --line: #2e2d2b;
     --accent: #34d399;
     --accent-contrast: #0c0a09;

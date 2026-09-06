@@ -204,7 +204,7 @@
       "description": "建立统一 Fetch API Service 与类型定义（会话/消息/文档、统一错误结构 {code,message}、SSE 事件），采用轻量状态管理（React hooks/Context，不引入重型状态库），为对话、历史记录、知识库等页面提供统一数据访问能力。",
       "status": "passing",
       "evidence": "2026-09-06：src/types/index.ts 类型与后端契约一一对应（会话/消息/文档/统一错误/SSE 事件）；src/api/ 统一数据访问层五模块（client.ts request<T>+ApiError 解析 {code,message}，conversations/documents/health/chat），chat.ts 用 fetch 手动消费 SSE（EventSource 不支持 POST）；src/state/AppContext.tsx 轻量全局状态（React Context + useMemo，无重型状态库），会话/文档列表与 CRUD 动作集中于此。验证：npm run build 通过；fetch 机械校验仅存在于 src/api/ 3 处、UI 组件零散落；真实浏览器验证首页经统一层读到后端连接状态与 5 条历史会话（数据流贯通）。",
-      "testedAt": null
+      "testedAt": "2026-09-06"
     },
     {
       "id": "FE-003",
@@ -212,7 +212,7 @@
       "description": "实现类似 Codex Web 的整体应用布局，包括左侧导航/会话区域、主内容区域、顶部区域和统一交互样式，重点保证简洁、高级和低干扰的视觉体验。",
       "status": "passing",
       "evidence": "2026-09-06：components/AppShell.tsx（h-dvh 双栏布局：w-64 侧边栏 + 弹性主区）+ Sidebar.tsx（品牌区/新对话按钮/对话-知识库分段切换/列表区）+ index.css 语义化主题 token（stone 暖灰系 + 唯一 emerald 强调色，明暗双主题跟随系统自动切换）；圆角体系统一（控件 rounded-lg、气泡 rounded-2xl、状态点 rounded-full）；图标统一 @phosphor-icons/react。验证：npm run build 通过；真实浏览器截图验证布局与切换（对话视图 5 条历史会话、知识库视图 6 个文档、激活态样式正确、视图切换正常）。",
-      "testedAt": null
+      "testedAt": "2026-09-06"
     },
     {
       "id": "FE-004",
@@ -220,7 +220,7 @@
       "description": "实现核心聊天页面，包括新建对话、消息区域、输入框、发送按钮、空状态以及当前会话状态。",
       "status": "passing",
       "evidence": "2026-09-06：pages/ChatPage.tsx（顶栏标题+生成状态、消息滚动区、自适应高度输入框、Enter 发送/Shift+Enter 换行、欢迎空状态带 3 个可点击建议问题、错误提示条）+ MessageBlock.tsx（用户右侧气泡/助手左侧平铺+流式光标）+ AppContext.sendQuestion（无会话先建会话 title=提问截短 20 字，乐观插入消息，SSE 增量写入）。验证：npm run build 通过；真实浏览器点击建议问题发送——新会话以提问为标题出现在侧边栏顶部，回答流式完成：「发明专利权的保护期限为二十年」引用专利法第四十二条与来源文件；后端 API 确认 user/assistant 消息已持久化。PRODUCT.md/ARCHITECTURE.md 已同步延迟建会话决策。",
-      "testedAt": null
+      "testedAt": "2026-09-06"
     },
     {
       "id": "FE-005",
@@ -228,7 +228,7 @@
       "description": "在侧边栏展示历史对话，支持在不同 conversation 之间切换，并加载对应历史消息。",
       "status": "passing",
       "evidence": "2026-09-06：侧边栏列表渲染与切换动作在 FE-002/003/004 中实现（AppContext.openConversation 加载历史消息、ConversationList 渲染会话项与选中态）。本轮真实浏览器验证：切到旧会话「graph流式」其历史消息正确恢复且顶栏标题同步；再切回最新会话（以提问为标题）原问答对完整恢复；往返切换无串话。POST /api/chat/stream 生成期间切换由 FE-007 守卫（生成中禁切）。",
-      "testedAt": null
+      "testedAt": "2026-09-06"
     },
     {
       "id": "FE-006",
@@ -236,7 +236,7 @@
       "description": "提供删除历史对话的交互，并在删除后同步更新前端状态和后端数据。",
       "status": "passing",
       "evidence": "2026-09-06：ConversationList 增加删除交互——悬停条目显示删除图标（opacity 过渡）→ 点击展开二次确认态（删除该对话？+ 删除/取消，防误触）→ 确认后调 AppContext.removeConversation（DELETE /api/conversations/{id}，级联删消息）；index.css 新增 danger 语义色 token（明暗双主题），ChatPage 错误条同步迁移到 token。验证：npm run build 通过；真实浏览器实测——确认删除后条目 4→3 消失，刷新页面后仍为 3（后端已删不复活）；删除当前打开的会话后主区域自动回到「新对话」空状态。",
-      "testedAt": null
+      "testedAt": "2026-09-06"
     },
     {
       "id": "FE-007",
@@ -244,7 +244,7 @@
       "description": "使用 Fetch 消费 Chat 流式 API，将 Agent 回复逐步渲染到消息区域，并处理发送中、生成中、完成和异常等状态。",
       "status": "passing",
       "evidence": "2026-09-06：api/chat.ts fetch 读流按 SSE 拆分 delta/done/error；AppContext.sendQuestion 增量写 messages（乐观插入→onDelta 追加→done 收尾/移除光标→onError 移除空占位并提示）；UI 状态：顶栏「正在生成…」、流式光标（motion-reduce 静止）、发送中按钮禁用、错误条（danger token，可关闭）、streamingRef 守卫生成中禁止切换/新建会话。真实浏览器验证：采样序列 506(空占位)→681(生成中部分内容)→823(完整) 证明逐步渲染；生成中点击其他会话被阻止（主区域与标题不变）；停后端发送→「请求失败（HTTP 502）」错误条出现、重启后恢复；附带验证回答策略真实生效（无关领域问题明确声明知识库暂无依据）。",
-      "testedAt": null
+      "testedAt": "2026-09-06"
     },
     {
       "id": "FE-008",
@@ -252,7 +252,7 @@
       "description": "实现知识库管理入口（与对话历史同处侧边栏，点击知识库管理按钮切换）、已上传文档列表展示（文档名称、大小、处理状态）与文档删除，以及文档上传 UI：支持选择 PDF/TXT/MD 文件、上传、处理状态显示以及成功/失败反馈。",
       "status": "passing",
       "evidence": "2026-09-06：pages/KnowledgePage.tsx（点击/拖拽上传面板 + accept 限制 + 前端预校验格式/大小即时反馈 + 成功/失败反馈条 + 文档卡片列表：名称/大小/日期/状态徽标/两步确认删除）+ utils/format.ts；侧边栏知识库列表显示文档名与语义状态点（统一主题 token）。真实浏览器验证：注入真实《劳动合同法（要点）.md》经真实 input change 路径上传→后端 201→真实 embedding 入库→列表出现「可检索」行且反馈「上传成功，已可用于问答」；bad.exe 立即被前端预校验拒绝（格式不支持提示）；两步确认删除 diag.txt 后 8→7 且向量级联清理反馈显示；侧边栏同步 7 个文档。",
-      "testedAt": null
+      "testedAt": "2026-09-06"
     },
     {
       "id": "FE-009",
@@ -260,15 +260,15 @@
       "description": "完成前端与后端核心功能联调，打通创建对话、发送问题、Agent 处理、流式回答、历史消息恢复、删除对话以及知识库上传、文档删除和 RAG 问答。",
       "status": "passing",
       "evidence": "2026-09-06：真实浏览器操作完成两大业务闭环。对话闭环：新对话→提问「试用期最长不能超过几个月？」→流式回答引用《劳动合同法》条文（六个月，来自 FE-008 刚上传的文档）→刷新页面后会话历史从后端恢复→删除会话后条目消失且主区域回新对话。知识库闭环：UI 上传《消费者权益保护法（要点）.md》→真实 embedding 入库 ready→新会话提问「买到假货可以要求几倍赔偿？」→回答引用第五十五条（三倍赔偿+五百元兜底）并标注来源文件→删除测试会话与文档。全程经 Vite 代理访问后端，无 CORS 问题。",
-      "testedAt": null
+      "testedAt": "2026-09-06"
     },
     {
       "id": "FE-010",
       "name": "最终体验优化与全链路测试",
       "description": "统一优化前端视觉、交互、加载状态、错误提示、空状态、滚动行为和异常场景，并进行前后端全链路测试和生产构建验证。",
-      "status": "planned",
-      "evidence": "待实现：核心功能全部通过验收，前端可以正常 build，后端可以正常启动，核心用户流程不存在阻断性问题。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：助手回答接入 react-markdown 渲染（加粗/列表/标题/引用统一风格，默认不解析原始 HTML 无注入风险；修复模型输出 Markdown 按字面显示星号的缺陷）；ink-faint 弱化文字对比度提升至 WCAG AA ≥4.5:1（明暗两套 token）；流式光标支持 prefers-reduced-motion。状态覆盖完整：空状态（对话欢迎页/知识库空列表）、加载提示、错误条（网络/后端/格式拒绝）、两步确认删除、生成中禁切。全链路终验：npm run build 通过（tsc+vite）；后端 uv run pytest 83 passed；浏览器复验 Markdown 渲染效果与整体视觉一致性。前端 10 项功能全部 passing。",
+      "testedAt": "2026-09-06"
     }
   ]
 }
