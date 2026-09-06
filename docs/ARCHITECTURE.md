@@ -38,6 +38,7 @@
 ```
 
 技术栈：Python 3.11 + FastAPI（全异步）+ uv 环境管理 + LangGraph + aiosqlite + Chroma + httpx。
+前端技术栈：React 19 + TypeScript（严格模式）+ Vite 8 + Tailwind CSS v4 + React Router 7 + 原生 Fetch（无 axios）。
 
 ## 2. 目录结构
 
@@ -89,6 +90,23 @@ backend/
 ├── scripts/                    # 手工验证脚本（Ollama 流式 / 真实 embedding / E2E）
 ├── pyproject.toml / uv.lock
 └── .env                        # 本地敏感配置（gitignore，模板见 .env.example）
+```
+
+```text
+frontend/                        # 前端独立项目（FE-001，React + TS + Vite）
+├── index.html                   # 唯一 HTML 入口（React 挂载点 #root）
+├── vite.config.ts               # React/Tailwind v4 插件；dev 期 /api 代理到 127.0.0.1:8000
+├── tsconfig.json                # TS 严格模式；build 前先 tsc --noEmit 类型检查
+├── package.json                 # npm 依赖与脚本（dev / build / preview）
+└── src/
+    ├── main.tsx                 # 应用入口：挂载 App + BrowserRouter 启用前端路由
+    ├── App.tsx                  # 路由表（URL → 页面组件），集中一处便于总览
+    ├── index.css                # Tailwind CSS v4 入口（@import "tailwindcss"，按需生成）
+    ├── vite-env.d.ts            # Vite 内置 API 与样式导入的类型声明
+    ├── pages/                   # 页面组件（当前仅 HomePage 占位，FE-003/004 起替换）
+    ├── api/                     # 统一 API Service（FE-002）
+    ├── components/              # 通用组件（FE-003 Shell 起）
+    └── types/                   # 前端类型定义（FE-002）
 ```
 
 ## 3. 分层架构与领域端口
@@ -221,6 +239,12 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 uv run pytest                                      # 全量测试（含 DDD 边界守护）
 curl http://127.0.0.1:8000/api/health              # {"status":"ok"}
 ```
+```bash
+cd frontend                                        # 前端（FE-001）
+npm install                                        # 安装依赖（Node 20+）
+npm run dev                                        # 开发服务器 http://localhost:5173（/api 代理到 8000）
+npm run build                                      # tsc 类型检查 + 生产构建（dist/）
+```
 - 启动时 lifespan 自动：SQLite connect + init_schema（幂等建表）、Chroma initialize；关闭时释放。
 - 日志：单行 JSON（timestamp/level/service/message/data），等级由 `LOG_LEVEL` 控制，默认 ERROR；注意事项见 docs/RELIABILITY.md。
 
@@ -245,4 +269,4 @@ curl http://127.0.0.1:8000/api/health              # {"status":"ok"}
 - **新文档格式**：实现 `DocumentParser` 策略并注册进 `DocumentParserFactory`。
 - **新 LLM Provider**：实现 `LLMProvider`（chat + stream + model_name），容器工厂加分支；密钥仅环境注入。
 - **新问答节点**：继承 `AgentNode`，在 `QaGraphBuilder.build()` 中接线。
-- **前端**（FE-001~010，待开发）：遵循第 7 节 API 契约与 SSE 协议。
+- **前端**（FE-001 基础框架完成；FE-002~010 待开发）：遵循第 7 节 API 契约与 SSE 协议；开发期统一请求相对路径 `/api/...`，由 Vite 代理转发，前端代码不感知后端地址。

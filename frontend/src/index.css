@@ -1,0 +1,4 @@
+/* 全局样式入口。
+   Tailwind CSS v4 只需要这一行 @import：插件会扫描源码中用到的 className，
+   按需生成对应工具类样式（没用到的不会打包，产物体积小）。 */
+@import "tailwindcss";

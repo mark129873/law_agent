@@ -194,9 +194,9 @@
       "id": "FE-001",
       "name": "前端项目基础框架",
       "description": "在 frontend/ 目录建立 React + TypeScript + Vite 前端项目，集成 Tailwind CSS、Fetch 和 React Router，建立基础目录结构、入口和开发配置。",
-      "status": "planned",
-      "evidence": "待实现：前端可以正常启动、构建，并能够访问基础路由。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：frontend/ 独立项目（React 19 + TypeScript 严格模式 + Vite 8 + Tailwind CSS v4 + React Router 7，npm 管理）；入口链 index.html→src/main.tsx（BrowserRouter）→App.tsx 集中路由表→pages/，预留 api/components/types 目录；vite.config.ts 将 /api 代理到 127.0.0.1:8000（开发期免 CORS，前端代码只用相对路径）；全源码详细中文注释；修复 TS7 对 CSS 副作用导入的类型检查（补 Vite 标准 vite-env.d.ts）。验证：npm run build 通过（tsc --noEmit + vite 打包 152ms）；npm run dev 292ms ready，curl / 返回 200 且标题/挂载点正确；启动真实后端后 curl /api/health 经代理返回 {\"status\":\"ok\"}（后端访问日志确认 200）；dist 产物 CSS 含按需生成的 Tailwind 工具类（min-h-screen 等）。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "FE-002",

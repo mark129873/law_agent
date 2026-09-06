@@ -11,6 +11,7 @@ legal-knowledge-agent 项目描述:
 - 阅读 docs/PRODUCT.md，掌握功能需求与用户侧交互行为
 - 阅读 docs/RELIABILITY.md，了解日志、可观测性以及干净环境的相关要求。
 - 读取 progress.md，了解最新已验证状态和下一步。
+- 读取 session‑handoff.md 获取上一轮开发上下文。
 - 查看 feature_list.json，确认当前所有功能的开发进度, 选择优先级最高的未完成功能
 - 用 `git log --oneline -5` 看最近提交
 - 验证`init.md`的内容, 如未通过, 则修复问题。
@@ -40,6 +41,7 @@ legal-knowledge-agent 项目描述:
 结束会话前：
 - 更新 `progress.md`
 - 更新 `feature_list.json`
+- 更新 `session‑handoff.md`
 - 记录仍未解决的风险或 blocker
 - 在工作处于安全状态后，用清晰的提交信息提交
 - 保证下一轮会话可以直接运行项目
@@ -50,14 +52,6 @@ legal-knowledge-agent 项目描述:
   - 集成测试
   - 接口测试
   - 端到端测试
-
-## 会话交接说明
-恢复之前中断的开发任务时，读取 session‑handoff.md 获取上一轮开发上下文。
-每轮开发结束时更新该文件，记录：
-- 本轮已完成工作
-- 剩余待开发任务
-- 遇到的阻塞问题与做出的技术决策
-- 修改过的文件清单
 
 ## 后端代码规范
 - 要求代码必须包含中文注释, 并解释做了什么, 这么做的原因, 涉及的设计模式, 涉及的DDD, OOP原则

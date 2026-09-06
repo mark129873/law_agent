@@ -4,8 +4,24 @@
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
 - 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 标准验证路径：`cd backend && uv run pytest tests -q`；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：前端 FE-001（后端 BE 全部 22 项 passing，四层测试全部验证通过；前端 FE-001~010 清单已于本轮评审修订确认，可作为开发依据）
+- 当前最高优先级未完成功能：前端 FE-002（后端 BE 全部 22 项 passing，前端 FE-001 基础框架 passing）
 - 当前 blocker：无
+
+### Session 013（FE-001 前端项目基础框架）
+- 日期：2026-09-06
+- 本轮目标：FE-001 在 frontend/ 建立 React + TS + Vite + Tailwind + React Router 基础框架
+- 技术决策：
+  - 手写脚手架而非 create-vite 模板：文件全部带中文注释，结构与后续 FE 对齐（pages/api/components/types 预留目录 + .gitkeep）
+  - Tailwind CSS v4（@tailwindcss/vite 插件 + 单行 @import），无 tailwind.config；dev 经 Vite 代理 /api → 127.0.0.1:8000，前端代码只用相对路径，规避开发期 CORS
+  - build 脚本为 tsc --noEmit && vite build（类型检查前置）；React Router 用最直白的 BrowserRouter/Routes/Route 写法（0 基础友好）
+  - 踩坑：TS7 对 CSS 副作用导入报 TS2882，补 Vite 标准 vite-env.d.ts 解决
+- 运行过的验证：
+  - npm install 成功（React 19.2 / Router 7.18 / Tailwind 4.3 / Vite 8.2 / TS 7.0，0 漏洞）
+  - npm run build 通过（类型检查 + 152ms 打包）；dist CSS 含按需生成的 Tailwind 工具类
+  - npm run dev 启动 292ms ready；curl / → 200 且 title/挂载点正确
+  - 真实后端启动后 curl /api/health 经代理返回 {"status":"ok"}，后端访问日志确认 200
+- 提交记录：本轮提交
+- 下一步最佳动作：FE-002 前端 API 与状态基础层
 
 ### Session 012（前端 feature 清单评审与修订）
 - 日期：2026-09-06
