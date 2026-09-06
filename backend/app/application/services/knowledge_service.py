@@ -42,14 +42,14 @@ class KnowledgeIngestionService:
         """
         logger.info(
             "Knowledge ingestion started",
-            extra={"service": "knowledge", "document_id": document_id, "filename": filename, "size": len(content)},
+            extra={"service": "knowledge", "document_id": document_id, "file_name": filename, "size": len(content)},
         )
         # 1. 解析/清洗/切分
         chunks = await self._pipeline.process(filename, content)
         if not chunks:
             logger.warning(
                 "Knowledge ingestion produced no chunks",
-                extra={"service": "knowledge", "document_id": document_id, "filename": filename},
+                extra={"service": "knowledge", "document_id": document_id, "file_name": filename},
             )
             return []
 
@@ -65,7 +65,7 @@ class KnowledgeIngestionService:
             extra={
                 "service": "knowledge",
                 "document_id": document_id,
-                "filename": filename,
+                "file_name": filename,
                 "chunk_count": len(chunk_ids),
             },
         )

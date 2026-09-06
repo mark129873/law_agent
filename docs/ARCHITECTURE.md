@@ -464,3 +464,30 @@ START → retrieve（RagService.build_context 写入 state.context）
 - 会话不存在时抛 `ConversationNotFoundError`；删除会话时同时清理其全部消息。
 - 依赖仅 Database 抽象；标题与消息数变更输出结构化日志。
 
+## 29. FastAPI 核心 API（BE-019/020/021）
+
+所有 API 均为异步函数，业务逻辑只调用 Service 层；统一错误结构 `{"code": <int>, "message": <str>}`，业务异常（会话不存在等）由全局异常处理器映射为对应状态码。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | /api/conversations | 创建对话（title 可选） |
+| GET | /api/conversations | 对话列表 |
+| GET | /api/conversations/{id}/messages | 会话消息 |
+| DELETE | /api/conversations/{id} | 删除会话（级联消息） |
+| POST | /api/chat/stream | 提交问题，SSE 流式返回回答（BE-020） |
+| POST | /api/documents | 上传 PDF/TXT（multipart，BE-021） |
+| GET | /api/documents | 文档列表 |
+| DELETE | /api/documents/{id} | 删除文档（级联向量） |
+
+### Chat 流式协议（SSE，data: {json}\n\n）
+```json
+{"type": "delta", "content": "增量文本"}
+{"type": "done", "conversation_id": "...", "message_id": "..."}
+{"type": "error", "message": "..."}
+```
+流结束前 Assistant 完整回答必须持久化；流中异常以 error 事件返回而非中断连接。
+
+### Document Upload（BE-021）
+- 校验：扩展名白名单（不支持→400）、大小上限 20MB（超限→413）。
+- 流程：DocumentService 创建元数据(processing) → KnowledgeIngestionService 入库 → 状态 ready/failed；DELETE 时同时删除向量与元数据。
+

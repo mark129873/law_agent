@@ -161,33 +161,33 @@
       "id": "BE-019",
       "name": "FastAPI 核心 API",
       "description": "提供对话、消息、知识库文档等核心 REST API，所有 API 使用异步函数，并建立统一的请求、响应和错误处理结构。",
-      "status": "planned",
-      "evidence": "待实现：核心 API 可以通过 Swagger/OpenAPI 调用并获得符合预期的响应。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：app/api/routes/conversations.py 与 documents.py 提供全部异步 REST 端点（会话 CRUD、消息查询、文档列表/删除），业务逻辑全部下沉 Service 层，路由从容器解析依赖；统一错误结构 {code,message} 由全局异常处理器映射（app/api/errors.py）。验证：test_api.py 7 passed（含统一 404 错误结构）；真实 uvicorn 启动后 curl 验证创建会话/文档列表/404 形状均正确。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-020",
       "name": "Chat 流式 API",
       "description": "提供用户问题提交和 Agent 流式回答接口，将 LLM/Agent 的增量输出转换为前端可以持续消费的 HTTP 流。",
-      "status": "planned",
-      "evidence": "待实现：客户端请求 Chat API 后可以在模型生成过程中持续收到增量内容，而无需等待完整回答。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：POST /api/chat/stream（SSE，StreamingResponse）+ ChatService.stream_answer（逐 token 推送，正常完成才持久化完整回答，异常中断不落库）；会话不存在时进入流之前返回 404。验证：test_api.py test_chat_stream_sse_protocol passed——delta 事件按序到达、done 收尾、完整回答已持久化到会话消息；流式过程输出结构化日志（answer_length/model）。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-021",
       "name": "Document Upload API",
       "description": "提供 PDF/TXT 等文档上传 API，完成文件校验、解析、Chunk、Embedding、向量入库和处理结果返回。",
-      "status": "planned",
-      "evidence": "待实现：通过 API 上传测试 PDF/TXT 后，可以完成完整知识库入库流程。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：POST /api/documents（multipart）+ DocumentService.upload_document——格式白名单前置校验（不支持→400/40001）、20MB 上限（超限→413）、元数据状态机 processing→ready/failed（失败落库不产生僵尸记录）、删除级联清理向量。验证：test_api.py 上传/删除/非法格式 3 用例 passed；真实服务器 curl 上传 TXT 经真实 Ollama embedding 入库返回 status=ready，bad.exe 返回 40001。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-022",
       "name": "后端异常处理与测试",
       "description": "完善模型调用失败、数据库异常、向量数据库异常、文档解析失败、非法文件等错误处理，并为核心 Service、Repository、RAG、Agent 和 API 建立自动化测试。",
-      "status": "planned",
-      "evidence": "待实现：核心后端测试可以稳定运行，主要异常场景具有明确的错误响应，不会导致服务异常退出。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：app/api/errors.py 统一 AppError 体系（40401 会话不存在/40402 文档不存在/40001 格式不支持/41301 超限/40002 参数非法/50000 兜底）；LLM 调用失败抛 HTTPStatusError、文档解析失败落库 failed、流式中断以 error 事件收尾不崩溃。测试规模：uv run pytest tests -q → 75 passed（覆盖 Service/Repository/RAG/Agent/Embedding/API 全层，含真实 SQLite/Chroma/Ollama 端到端）。开发中 API 测试（LOG_LEVEL=INFO）抓出并修复 extra 误用 LogRecord 保留字段（message/filename）导致 404 变 500 的真实缺陷。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "FE-001",

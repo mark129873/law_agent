@@ -7,8 +7,13 @@
 
 from __future__ import annotations
 
+from app.agent.graph import build_qa_graph
+from app.application.services.chat_service import ChatService
+from app.application.services.conversation_service import ConversationService
 from app.application.services.document_pipeline import DocumentParserFactory, DocumentPipeline
+from app.application.services.document_service import DocumentService
 from app.application.services.knowledge_service import KnowledgeIngestionService
+from app.application.services.rag_service import RagService
 from app.common.di import DIContainer
 from app.config.settings import Settings, get_settings
 from app.domain.repositories.llm_provider import LLMProvider
@@ -103,6 +108,29 @@ def create_container(settings: Settings | None = None) -> DIContainer:
             pipeline=c.resolve(DocumentPipeline),
             embedding_service=c.resolve(EmbeddingService),
             vector_store=c.resolve(VectorStore),
+        ),
+        singleton=True,
+    )
+    # 业务服务（BE-014/018/019/020/021）
+    container.register(ConversationService, lambda c: ConversationService(c.resolve(Database)), singleton=True)
+    container.register(RagService, lambda c: RagService(c.resolve(EmbeddingService), c.resolve(VectorStore)), singleton=True)
+    container.register(
+        DocumentService,
+        lambda c: DocumentService(
+            database=c.resolve(Database),
+            parser_factory=c.resolve(DocumentPipeline).parser_factory,
+            ingestion_service=c.resolve(KnowledgeIngestionService),
+            vector_store=c.resolve(VectorStore),
+        ),
+        singleton=True,
+    )
+    container.register(
+        ChatService,
+        lambda c: ChatService(
+            conversation_service=c.resolve(ConversationService),
+            rag_service=c.resolve(RagService),
+            llm_provider=c.resolve(LLMProvider),
+            qa_graph=build_qa_graph(c.resolve(LLMProvider), rag=c.resolve(RagService)),
         ),
         singleton=True,
     )

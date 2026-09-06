@@ -1,8 +1,7 @@
 """FastAPI 应用入口。
 
-为什么这么做：BE-001 的目标是建立统一的应用入口与模块边界，
-本文件只负责创建应用实例、装配日志与暴露健康检查端点；
-具体业务路由将在对应功能（BE-019 等）中按分层注册进来。
+为什么用工厂函数：便于测试中按需构建应用实例（注入临时配置），
+也为后续根据配置装配不同 Provider（SQLite/MySQL、Chroma/Milvus 等）留出扩展点。
 """
 
 from __future__ import annotations
@@ -11,9 +10,12 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.errors import register_exception_handlers
+from app.api.routes import chat, conversations, documents
 from app.common.logging import setup_logging
-from app.config.settings import get_settings
+from app.config.settings import Settings, get_settings
 from app.containers import create_container
 from app.domain.repositories.vector_store import VectorStore
 from app.infrastructure.database.base import Database
@@ -23,15 +25,12 @@ setup_logging()
 logger = logging.getLogger("app.main")
 
 
-def create_app() -> FastAPI:
-    """创建 FastAPI 应用实例。
-
-    为什么用工厂函数：便于测试中按需构建应用实例，
-    也为后续根据配置装配不同 Provider（SQLite/MySQL、Chroma/Milvus 等）留出扩展点。
-    """
-    settings = get_settings()
+def create_app(settings: Settings | None = None) -> FastAPI:
+    """创建 FastAPI 应用实例；允许注入自定义配置供测试使用。"""
+    settings = settings or get_settings()
     # 装配依赖注入容器：所有"抽象接口 -> 具体实现"的映射从此处开始
     container = create_container(settings)
+    # 预构建 Agent 图并在日志中体现模型配置（图在 ChatService 内注册）
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -77,8 +76,18 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
-    # 容器挂在 app.state 上，请求处理链路可按需解析依赖
-    app.state.container = container
+    # 前端开发服务器跨域访问：本地开发全放开，生产环境应收敛为具体来源
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    register_exception_handlers(app)
+    app.include_router(conversations.router)
+    app.include_router(chat.router)
+    app.include_router(documents.router)
 
     @app.get("/api/health", tags=["system"])
     async def health() -> dict[str, str]:
@@ -86,6 +95,8 @@ def create_app() -> FastAPI:
         logger.info("Health check requested", extra={"service": "system"})
         return {"status": "ok"}
 
+    # 容器挂在 app.state 上，请求处理链路可按需解析依赖
+    app.state.container = container
     return app
 
 

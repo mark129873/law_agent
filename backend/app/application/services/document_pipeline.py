@@ -71,11 +71,16 @@ class DocumentPipeline:
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
 
+    @property
+    def parser_factory(self) -> DocumentParserFactory:
+        """公开只读访问：DocumentService 需要复用同一份格式识别规则。"""
+        return self._factory
+
     async def process(self, filename: str, content: bytes) -> list[DocumentChunk]:
         """处理上传文件，返回可直接送入 Embedding/VectorStore 的 chunk 列表。"""
         logger.info(
             "Document processing started",
-            extra={"service": "document_pipeline", "filename": filename, "size": len(content)},
+            extra={"service": "document_pipeline", "file_name": filename, "size": len(content)},
         )
         parser = self._factory.get_parser(filename)
         # 解析放到线程池：未来 PDF 解析是 CPU 密集操作，不能阻塞事件循环
@@ -89,6 +94,8 @@ class DocumentPipeline:
                 document_id="",
                 content=piece,
                 chunk_index=index,
+                # 注意：chunk metadata 的键名是存储契约（Chroma/前端均依赖），
+                # 与日志 extra 的保留字段限制无关，保持 "filename" 不变
                 metadata={"filename": filename},
             )
             for index, piece in enumerate(pieces)
@@ -97,7 +104,7 @@ class DocumentPipeline:
             "Document processing completed",
             extra={
                 "service": "document_pipeline",
-                "filename": filename,
+                "file_name": filename,
                 "chunk_count": len(chunks),
             },
         )
