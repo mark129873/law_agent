@@ -430,3 +430,9 @@ SQLite 实现（BE-005）与未来 MySQL 实现均实现此抽象，业务层通
 - 全流程结构化日志：开始（文件名/大小）、向量化（chunk 数）、完成（chunk id 数）。
 - 依赖全部来自抽象接口（Pipeline 组合、EmbeddingService、VectorStore），可整体替换任一实现。
 
+## 26. RAG 检索服务（BE-014）
+
+- `RagService`（application/services/rag_service.py）：`retrieve(query, top_k)` 编排 `EmbeddingService.embed_query` → `VectorStore.search`，返回带来源信息的 `RetrievedChunk` 列表。
+- 另提供 `build_context(results)`：把检索结果格式化为供 LLM 使用的上下文文本（含来源文件名），空结果返回空串。
+- 依赖仅抽象接口（EmbeddingService、VectorStore），检索过程输出结构化日志（query 长度、命中数、最高分）。
+

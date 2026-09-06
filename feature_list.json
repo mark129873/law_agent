@@ -121,9 +121,9 @@
       "id": "BE-014",
       "name": "RAG 检索服务",
       "description": "建立独立 RAG Service，根据用户问题生成查询向量并从 VectorStore 检索相关法律知识，将检索结果整理成 Agent 可使用的上下文。",
-      "status": "planned",
-      "evidence": "待实现：针对测试知识库中的明确内容进行查询，可以返回相关 document chunks 和来源信息。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：backend/app/application/services/rag_service.py 实现 retrieve（embed_query→vector_store.search）与 build_context（含【来源：文件名】标注，空结果返回空串供上层走\"信息不足\"策略）。验证：test_rag_service.py 3 passed——真实 Chroma + 确定性 embedding 检索命中预置劳动法知识并带来源、上下文含来源标注、无命中时返回空串。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-015",
