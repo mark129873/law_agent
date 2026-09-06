@@ -4,12 +4,12 @@
 import { useAppStore } from '../state/AppContext'
 import type { DocumentStatus } from '../types'
 
-/** 文档状态 → 状态点颜色（颜色只在此处定义一次，全站复用） */
+/** 文档状态 → 状态点颜色（语义状态色，与主页面徽标同源的主题 token） */
 const STATUS_DOT: Record<DocumentStatus, string> = {
-  ready: 'bg-emerald-500',
-  pending: 'bg-amber-500',
-  processing: 'bg-amber-500',
-  failed: 'bg-red-500',
+  ready: 'bg-accent',
+  pending: 'bg-ink-faint',
+  processing: 'bg-ink-faint',
+  failed: 'bg-danger',
 }
 
 export default function KnowledgeList() {
