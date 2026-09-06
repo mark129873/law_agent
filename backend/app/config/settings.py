@@ -10,8 +10,21 @@ from __future__ import annotations
 
 from enum import Enum
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 项目根锚点：backend/ 目录（本文件位于 backend/app/config/）。
+# 为什么需要锚定：sqlite/chroma 的路径默认是相对路径，若直接按
+# 进程工作目录解析，启动方式不同（如在仓库根启动）会把数据写到
+# 错误位置；统一锚定到 backend/ 保证数据位置只由配置决定。
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _anchor_path(value: str) -> str:
+    """相对路径锚定到 backend/ 目录，绝对路径原样返回。"""
+    path = Path(value)
+    return str(path if path.is_absolute() else (_PROJECT_ROOT / path))
 
 
 class DbProvider(str, Enum):
@@ -78,6 +91,16 @@ class Settings(BaseSettings):
     glm_model: str = "glm-4-flash"
     # 敏感配置：只通过环境变量注入，禁止写入任何文件或日志
     glm_api_key: str = ""
+
+    @property
+    def resolved_sqlite_db_path(self) -> str:
+        """SQLite 数据库文件的实际路径（相对路径锚定到 backend/）。"""
+        return _anchor_path(self.sqlite_db_path)
+
+    @property
+    def resolved_chroma_persist_dir(self) -> str:
+        """Chroma 持久化目录的实际路径（相对路径锚定到 backend/）。"""
+        return _anchor_path(self.chroma_persist_dir)
 
 
 @lru_cache

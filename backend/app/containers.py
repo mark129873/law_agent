@@ -37,7 +37,8 @@ def _build_database(settings: Settings) -> Database:
     业务层与装配结构完全不动。
     """
     if settings.db_provider.value == "sqlite":
-        return SQLiteDatabase(settings.sqlite_db_path)
+        # 使用锚定后的绝对路径，避免进程工作目录影响数据位置
+        return SQLiteDatabase(settings.resolved_sqlite_db_path)
     # MySQL 实现将在后续版本提供（见 feature_list 架构预留）
     raise NotImplementedError(
         f"数据库 Provider '{settings.db_provider.value}' 尚未实现；"
@@ -53,7 +54,8 @@ def _build_vector_store(settings: Settings) -> VectorStore:
     未来 Milvus 落地只改本函数的一行分支。
     """
     if settings.vector_store_provider.value == "chroma":
-        return ChromaVectorStore(settings.chroma_persist_dir)
+        # 使用锚定后的绝对路径，避免进程工作目录影响数据位置
+        return ChromaVectorStore(settings.resolved_chroma_persist_dir)
     if settings.vector_store_provider.value == "milvus":
         return MilvusVectorStore(settings.milvus_uri)
     raise NotImplementedError(f"向量库 Provider '{settings.vector_store_provider.value}' 尚未实现")

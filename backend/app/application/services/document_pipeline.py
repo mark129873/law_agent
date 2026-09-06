@@ -34,15 +34,37 @@ def clean_text(text: str) -> str:
 
 
 def chunk_text(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
-    """定长滑动窗口切分。
+    """段落感知切分：优先保持法条段落完整，单段超限时退化为滑动窗口。
 
-    为什么带 overlap：法律条文的关键词常落在切分边界附近，
-    重叠窗口保证边界处的语义不会因切分而丢失。
+    为什么不用纯定长窗口：法律文本一条法规就是一个语义单元，
+    定长切分会把一条法条从中间截断（实测第四十二条的
+    "期限为二十年"与后半句被切到两个 chunk，导致检索到也答不全）；
+    按段落打包能让每条法条完整进入同一个 chunk。
     """
     if not text:
         return []
-    step = max(1, chunk_size - chunk_overlap)
-    return [text[start : start + chunk_size] for start in range(0, len(text), step)]
+    paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+    chunks: list[str] = []
+    buffer = ""
+    for paragraph in paragraphs:
+        # 单段超过 chunk_size：无法保持完整，退化为定长滑动窗口（保留 overlap）
+        if len(paragraph) > chunk_size:
+            if buffer:
+                chunks.append(buffer)
+                buffer = ""
+            step = max(1, chunk_size - chunk_overlap)
+            chunks.extend(paragraph[start : start + chunk_size] for start in range(0, len(paragraph), step))
+            continue
+        candidate = paragraph if not buffer else f"{buffer}\n{paragraph}"
+        if len(candidate) <= chunk_size:
+            buffer = candidate
+        else:
+            if buffer:
+                chunks.append(buffer)
+            buffer = paragraph
+    if buffer:
+        chunks.append(buffer)
+    return chunks
 
 
 class DocumentParserFactory:

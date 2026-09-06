@@ -1,5 +1,10 @@
 # Architecture
 
+
+## 0.测试数据源
+- tests/data_source/ 存放用于测试功能的RAG的法律文档数据
+
+
 ## 1. 系统概览
 本项目是一个法律知识库与法律问答 Agent，采用前后端分离架构：
 ┌─────────────────────────────────────────────────────────────┐
@@ -138,7 +143,7 @@ Persist Message
 ```
 
 ## 4. 知识库数据流
-用户上传 PDF / TXT：
+用户上传 PDF / TXT / MD：
 
 ```text
 Frontend
@@ -329,6 +334,7 @@ SQLite 实现（BE-005）与未来 MySQL 实现均实现此抽象，业务层通
 
 - 依赖 `aiosqlite`，连接对象由 `SQLiteDatabase` 持有，业务层不可见。
 - 数据库文件路径来自配置 `SQLITE_DB_PATH`（默认 `data/law_agent.db`）。
+- 相对路径统一锚定到 `backend/` 目录（`Settings.resolved_sqlite_db_path` / `resolved_chroma_persist_dir`），数据位置不随进程工作目录变化——避免在不同目录启动服务时数据被写到错误位置。
 - 应用启动时（FastAPI lifespan）执行 `connect()` + `init_schema()`，关闭时 `close()`；建表使用 `IF NOT EXISTS`，保证幂等。
 - 表结构：`conversations`、`messages`（外键 conversation_id，级联删除，需开启 `PRAGMA foreign_keys`）、`documents`。
 - 容器装配点按 `DB_PROVIDER` 注册：sqlite → `SQLiteDatabase`；mysql → 明确的"未实现"错误（预留）。
@@ -402,7 +408,7 @@ SQLite 实现（BE-005）与未来 MySQL 实现均实现此抽象，业务层通
    → 格式识别(扩展名, 工厂选择解析器)
    → 文本解析(DocumentParser 策略)
    → 文本清洗(去控制字符、归一化换行与空行)
-   → Chunk 切分(定长+重叠)
+   → Chunk 切分(段落感知：法条段落优先完整，单段超限退化为定长+重叠窗口)
    → 构建 DocumentChunk(content, chunk_index, metadata={filename,...})
 ```
 
@@ -410,7 +416,7 @@ SQLite 实现（BE-005）与未来 MySQL 实现均实现此抽象，业务层通
 - 解析器接口 `DocumentParser`（domain/services/document_parser.py）：`supports(filename)` + `parse(content) -> str`，策略模式；新格式（如 PDF）注册进工厂即可，Pipeline 不感知格式细节。
 - `DocumentParserFactory`（application/services/document_pipeline.py）：按文件名选择解析器，无匹配时抛 `UnsupportedFormatError`。
 - `DocumentPipeline`（application/services/document_pipeline.py）：编排上述全流程并输出结构化日志（开始：文件名与大小；完成：chunk 数量）。
-- 切分参数：`chunk_size`（默认 500 字符）、`chunk_overlap`（默认 50 字符），保证相邻 chunk 上下文连续。
+- 切分策略（段落感知）：`chunk_size`（默认 500 字符）、`chunk_overlap`（默认 50 字符）。优先按换行段落打包，保证一条法规完整进入同一个 chunk；仅当单段超过 chunk_size 时才退化为定长滑动窗口。背景：真实专利法测试中定长切分曾把第四十二条截断到两个 chunk，导致检索命中也答不全。
 
 ## 24. PDF 与 TXT 文档解析（BE-012）
 

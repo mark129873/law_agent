@@ -89,8 +89,8 @@
       "id": "BE-010",
       "name": "Ollama 与 GLM 实现",
       "description": "实现 Ollama 本地模型和 GLM API 两种 LLM Provider，并支持通过配置选择当前使用的模型服务。",
-      "status": "in_progress",
-      "evidence": "2026-09-06 部分验证：OllamaProvider（/api/chat，NDJSON 流式解析）与 GLMProvider（OpenAI 兼容 /chat/completions，SSE 解析）已实现，容器按 LLM_PROVIDER 注册（glm 缺密钥时装配即报错）；协议级测试 6 passed（test_llm_providers.py：请求构造/响应解析/流式拆包/错误抛出/参数透传）。Ollama 真实调用通过：本机 Ollama + qwen3.5:9b（经 OLLAMA_MODEL 覆盖）chat 与流式问答均正常（scripts/verify_ollama_stream.py，流式 15 个增量片段）。剩余：GLM 真实调用验证被阻塞——环境未配置 GLM_API_KEY，需用户提供密钥后执行真实问答验证方可置 passing。",
+      "status": "passing",
+      "evidence": "2026-09-06：OllamaProvider（/api/chat，NDJSON 流式解析）与 GLMProvider（OpenAI 兼容 /chat/completions，SSE 解析）均已实现，容器按 LLM_PROVIDER 注册（glm 缺密钥时装配即报错）；协议级测试 6 passed。真实调用双双通过：Ollama qwen3.5:4b chat+流式问答正常；GLM glm-4.5-air（密钥经 .env 注入）chat 与流式问答正常（13 个增量片段，回答正确）。",
       "testedAt": "2026-09-06"
     },
     {
@@ -103,10 +103,10 @@
     },
     {
       "id": "BE-012",
-      "name": "PDF 与 TXT 文档解析",
-      "description": "实现 PDF、TXT 文档解析能力，并将不同格式统一转换为内部标准文档结构；处理常见解析失败和编码异常。",
+      "name": "PDF 、 TXT  MD 文档解析",
+      "description": "实现 PDF、TXT、MD 文档解析能力，并将不同格式统一转换为内部标准文档结构；处理常见解析失败和编码异常。",
       "status": "passing",
-      "evidence": "2026-09-06：backend/app/infrastructure/document_parser/pdf_parser.py（pypdf 逐页提取，损坏文件/无文本层扫描件均抛明确异常）与 text_parser.py（utf-8/gb18030/big5 回退）共同注册进 DocumentParserFactory。验证：test_document_parsers.py 6 passed（扩展名分发、真实 fpdf2 生成的 PDF 经 Pipeline 提取文本、损坏 PDF 明确报错、无文本层 PDF 明确报错、GBK 解码回退、二进制垃圾明确报错）。",
+      "evidence": "2026-09-06 复验（真实数据，含 MD）：backend/tests/data_source/中华人民共和国专利法.txt（真实法律文本 1.2 万字）与其 MD 摘要（.md，TextParser 支持 txt/md/text 扩展名，utf-8/gb18030/big5 编码回退）通过 API 上传均入库 ready；发现并修复定长切分把法条从中间截断的真实缺陷——chunk_text 改为段落感知切分（法条完整入 chunk，单段超限才退化滑动窗口）；修复后真实 RAG 问答正确命中第四十二条（\"发明专利权的期限为二十年\"）并引用来源文件。测试：test_document_parsers.py 6 passed，全量 75 passed。",
       "testedAt": "2026-09-06"
     },
     {
@@ -176,7 +176,7 @@
     {
       "id": "BE-021",
       "name": "Document Upload API",
-      "description": "提供 PDF/TXT 等文档上传 API，完成文件校验、解析、Chunk、Embedding、向量入库和处理结果返回。",
+      "description": "提供 PDF/TXT/MD 等文档上传 API，完成文件校验、解析、Chunk、Embedding、向量入库和处理结果返回。",
       "status": "passing",
       "evidence": "2026-09-06：POST /api/documents（multipart）+ DocumentService.upload_document——格式白名单前置校验（不支持→400/40001）、20MB 上限（超限→413）、元数据状态机 processing→ready/failed（失败落库不产生僵尸记录）、删除级联清理向量。验证：test_api.py 上传/删除/非法格式 3 用例 passed；真实服务器 curl 上传 TXT 经真实 Ollama embedding 入库返回 status=ready，bad.exe 返回 40001。",
       "testedAt": "2026-09-06"
@@ -248,9 +248,9 @@
     {
       "id": "FE-008",
       "name": "知识库管理页面",
-      "description": "实现知识库管理入口和文档上传 UI，支持选择 PDF/TXT 文件、上传、处理状态显示以及成功/失败反馈。",
+      "description": "实现知识库管理入口和文档上传 UI，支持选择 PDF/TXT/MD 文件、上传、处理状态显示以及成功/失败反馈。",
       "status": "planned",
-      "evidence": "待实现：用户可以在前端选择并上传 PDF/TXT，并能够看到文档处理结果。",
+      "evidence": "待实现：用户可以在前端选择并上传 PDF/TXT/MD，并能够看到文档处理结果。",
       "testedAt": null
     },
     {
