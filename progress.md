@@ -4,9 +4,30 @@
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
 - 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 标准验证路径：`cd backend && uv run pytest tests -q`；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：前端 FE-001（后端 BE 全部 passing，测试已分层）
+- 当前最高优先级未完成功能：前端 FE-001（后端 BE 全部 22 项 passing，四层测试全部验证通过）
 - 当前 blocker：无
-- 当前 blocker：BE-010 真实 GLM 调用需用户提供 GLM_API_KEY（代码与协议测试已完成）
+
+### Session 011（四层测试验证 + 文档与清单整合）
+- 日期：2026-09-06
+- 内容：
+  - 四层测试全部真实验证通过：单元 37 / 集成 39 / 接口 7（自动化合计 83）+ 端到端真实链路（真实 uvicorn + 专利法上传入库 + 流式 RAG 问答引用第四十二条 + 持久化）
+  - ARCHITECTURE.md 全面整合：530 行/30 节 → 238 行/10 节（删重复实现叙述，补端口清单、边界守护、四层测试体系、扩展点）
+  - feature_list.json 后端 11 项 description/evidence 同步至演进后事实；并做过 62 项声明的机械审计（62/62 通过），审计脚本按用户决定删除（f46352c）
+  - qa_workflow.py 加 @runtime_checkable 与装配守卫测试
+- 提交记录：48f5596、21ca7ef、15ad5f5、b3bb4bc、f46352c
+
+### Session 010（DDD 合规整改 + agent OOP + langgraph 隔离）
+- 日期：2026-09-06
+- 内容：
+  - AST 机械扫描发现并修复 3 处违例：Database 端口迁至 domain/repositories/database.py；新增 QaWorkflow 领域端口（QaWorkflow Protocol，ChatService 解除 langgraph 依赖）；application 对 infrastructure 的反向导入清零
+  - app/agent/ 确立为 langgraph 唯一隔离区：create_qa_workflow 工厂唯一入口 + OOP 重构（AgentNode 命令模式/QaGraphBuilder 建造者/LangGraphQaWorkflow 适配器）
+  - 新增 tests/unit/test_ddd_boundaries.py（4 项 AST 边界守护随 pytest 运行）
+  - ARCHITECTURE.md 同步端口清单、隔离区规则、OOP 结构
+- 提交记录：f9c2cb5、9bf599a、675ec72、46f391b
+- 测试状态：全量 83 passed（unit 37 + integration 46）
+
+### 补记（Session 007 之后、008 之前的一轮，未及时登记）
+- 提交 5b375bf：BE-010 GLM 真实调用补验通过（glm-4.5-air）；BE-012 用真实《专利法》TXT+MD 复验并修复定长切分截断法条的缺陷（chunk_text 改段落感知）；修复相对路径随启动目录漂移（settings 锚定 resolved_*）；停止跟踪运行时数据（data/、backend/data/）；收录用户改动（md 格式支持、tests/data_source 测试数据）
 
 ### Session 009
 - 日期：2026-09-06
