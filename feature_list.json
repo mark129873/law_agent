@@ -49,9 +49,9 @@
       "id": "BE-005",
       "name": "SQLite 数据库实现与数据模型",
       "description": "实现当前版本 SQLite 数据库，建立 Conversation、Message、Document 等核心业务数据模型，并提供数据库初始化机制。",
-      "status": "planned",
-      "evidence": "待实现：应用首次启动可以自动初始化 SQLite 数据库，并能够持久化核心业务数据。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：backend/app/infrastructure/database/sqlite/database.py 基于 aiosqlite 实现 Database 抽象（三表建表幂等、外键级联删除、事务深度计数守卫提交边界）；容器按 DB_PROVIDER 注册工厂并接入 main.py lifespan 自动 connect+init_schema。验证：uv run pytest tests -q → 18 passed（含跨连接持久化、级联删除、真实事务回滚、幂等建表）；删除 data/law_agent.db 后真实启动自动重建数据库并输出结构化日志 \"Database initialized\"，curl /api/health 返回 ok。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-006",

@@ -9,6 +9,23 @@ from __future__ import annotations
 
 from app.common.di import DIContainer
 from app.config.settings import Settings, get_settings
+from app.infrastructure.database.base import Database
+from app.infrastructure.database.sqlite.database import SQLiteDatabase
+
+
+def _build_database(settings: Settings) -> Database:
+    """按配置构造数据库实现（工厂函数）。
+
+    为什么在工厂里分支：新增 MySQL 支持时只需在此增加分支并引入实现类，
+    业务层与装配结构完全不动。
+    """
+    if settings.db_provider.value == "sqlite":
+        return SQLiteDatabase(settings.sqlite_db_path)
+    # MySQL 实现将在后续版本提供（见 feature_list 架构预留）
+    raise NotImplementedError(
+        f"数据库 Provider '{settings.db_provider.value}' 尚未实现；"
+        f"当前可用：sqlite"
+    )
 
 
 def create_container(settings: Settings | None = None) -> DIContainer:
@@ -21,7 +38,8 @@ def create_container(settings: Settings | None = None) -> DIContainer:
     container = DIContainer()
     # 配置本身作为单例注册，后续工厂通过容器解析配置来决定实现
     container.register(Settings, lambda c: settings, singleton=True)
+    # 数据库：按 DB_PROVIDER 配置注册对应实现（BE-005）
+    container.register(Database, lambda c: _build_database(settings), singleton=True)
 
-    # BE-004/BE-006/BE-009 落地后，数据库、向量库、LLM Provider
-    # 的具体工厂将在此处按 settings.db_provider 等配置分支注册。
+    # BE-006/BE-009 落地后，向量库、LLM Provider 的具体工厂将在此处注册。
     return container

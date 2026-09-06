@@ -4,8 +4,27 @@
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
 - 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 标准验证路径：`cd backend && uv run pytest tests -q`；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：BE-003 后端分层与依赖注入架构
+- 当前最高优先级未完成功能：BE-006 向量数据库抽象层
 - 当前 blocker：无
+
+### Session 003
+- 日期：2026-09-06
+- 本轮目标：BE-003 / BE-004 / BE-005（用户指定"完成 3 个 feature"）
+- 技术决策：
+  - BE-003：自研轻量 DIContainer（接口注册工厂+单例），不引入 DI 框架；containers.py 为唯一装配点，挂载到 app.state.container。
+  - BE-004：领域实体用纯 dataclass（零技术依赖）；Repository 接口在 domain 层；Database 抽象含 transaction() 事务上下文。
+  - BE-005：aiosqlite 实现；提交边界由 Database 层统一控制（_tx_depth 计数），仓库不自行 commit——测试暴露了"仓库自动提交破坏外层事务回滚"的真实缺陷后修正。
+  - 本机环境备注：Ollama 已运行（模型 qwen3.5:9b，非默认配置的 qwen2.5:7b，BE-010 时需对齐）；GLM_API_KEY 未设置。
+- 已完成：DI 容器与装配点、领域实体与 Repository 接口、Database 抽象、SQLite 实现、lifespan 自动建库
+- 运行过的验证：
+  - `uv run pytest tests -q` → 18 passed（DI 4 + 数据库抽象 4 + SQLite 6 + 健康检查 1 + 配置 4，共 18；其中 SQLite 含持久化/级联/事务回滚/幂等）
+  - 真实启动：删除 data/law_agent.db 后启动自动建库，日志 "Database initialized"，curl /api/health → ok
+- 已记录证据：feature_list.json BE-003/BE-004/BE-005 evidence
+- 提交记录：1b0b9a8 (BE-003)、942b4d6 (BE-004)、本轮 BE-005 提交
+- 更新过的文件或工件：docs/ARCHITECTURE.md（第 15-17 节）、app/common/di.py、app/containers.py、app/main.py、domain/entities/**、domain/repositories/**、infrastructure/database/**、tests/**、pyproject.toml（aiosqlite）、进度三件套
+- 已知风险或未解决问题：
+  - 开发中发现 shell 中 `cd && uv run pytest` 复合命令偶发挂起，改用 python 内部 os.chdir 后稳定（不影响项目本身）
+- 下一步最佳动作：BE-006 向量数据库抽象层（Chroma/Milvus 前置）
 
 ### Session 002
 - 日期：2026-09-06

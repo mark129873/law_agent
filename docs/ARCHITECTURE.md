@@ -325,3 +325,11 @@ API / Application Service ──依赖──▶ 抽象接口（domain/repositori
 
 SQLite 实现（BE-005）与未来 MySQL 实现均实现此抽象，业务层通过依赖注入获取 `Database` 实例。
 
+## 17. SQLite 实现（BE-005）
+
+- 依赖 `aiosqlite`，连接对象由 `SQLiteDatabase` 持有，业务层不可见。
+- 数据库文件路径来自配置 `SQLITE_DB_PATH`（默认 `data/law_agent.db`）。
+- 应用启动时（FastAPI lifespan）执行 `connect()` + `init_schema()`，关闭时 `close()`；建表使用 `IF NOT EXISTS`，保证幂等。
+- 表结构：`conversations`、`messages`（外键 conversation_id，级联删除，需开启 `PRAGMA foreign_keys`）、`documents`。
+- 容器装配点按 `DB_PROVIDER` 注册：sqlite → `SQLiteDatabase`；mysql → 明确的"未实现"错误（预留）。
+
