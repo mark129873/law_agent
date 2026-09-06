@@ -9,7 +9,6 @@ import json
 from typing import AsyncIterator
 
 import pytest
-import pytest_asyncio
 from fastapi.testclient import TestClient
 
 from app.application.services.rag_service import RagService
