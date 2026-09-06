@@ -106,6 +106,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (streamingRef.current) return
     setActiveId(null)
     setMessages([])
+    // 新对话是对话行为：若当前在知识库视图，自动切回对话视图
+    setSidebarView('chat')
   }, [])
 
   /** 创建会话：置为当前会话并插入列表顶部 */
