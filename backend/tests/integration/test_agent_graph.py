@@ -4,6 +4,7 @@
 基础工作流完成一次问答；RAG 工作流把知识库上下文注入 Prompt。
 """
 
+import asyncio
 import hashlib
 
 import pytest
@@ -209,4 +210,15 @@ def test_compiled_graph_satisfies_qa_workflow_port() -> None:
 
     graph = build_qa_graph(RecordingFakeLLM("ok"), rag=None)
     assert isinstance(graph, QaWorkflow)  # runtime_checkable 校验方法存在性
+
+def test_create_qa_workflow_returns_port_implementation() -> None:
+    """工厂应返回显式实现 QaWorkflow 端口的对象（agent 模块 OOP 契约）。"""
+    from app.agent import create_qa_workflow
+    from app.domain.services.qa_workflow import QaWorkflow
+
+    workflow = create_qa_workflow(RecordingFakeLLM("ok"))
+    assert isinstance(workflow, QaWorkflow)
+    # 与编译图等价：经端口执行问答可用
+    assert asyncio.run(workflow.ainvoke({"question": "q", "history": []}))["answer"] == "ok"
+
 

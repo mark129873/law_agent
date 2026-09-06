@@ -82,7 +82,8 @@ backend/
 │   │
 │   ├── agent/                  # LangGraph Agent（问答工作流，实现 QaWorkflow 端口）
 │   │   ├── __init__.py         # 对外唯一入口：create_qa_workflow 工厂
-│   │   ├── graph.py            # 工作流构建（retrieve?→generate，流式经 stream writer）
+│   │   ├── graph.py            # QaGraphBuilder 建造者 + LangGraphQaWorkflow 适配器
+│   │   ├── nodes.py            # AgentNode 抽象基类 + Retrieve/Generate 节点（命令模式）
 │   │   ├── prompts.py          # 法律问答策略 Prompt
 │   │   └── state.py            # AgentState
 │   │                           # ※ 全项目唯一允许导入 langgraph 的业务模块
@@ -477,7 +478,12 @@ START → retrieve（RagService.build_context 写入 state.context）
       → generate（上下文 + 问题组装 Prompt 调用 LLM）→ END
 ```
 
-- `build_qa_graph(llm, rag=None)`（agent/graph.py）：rag 为 None 时为基础工作流，传入即为 RAG 工作流；节点全异步，LLM 调用只经过 LLMProvider 抽象。
+- 面向对象结构（agent/ 内全部使用 OOP 设计模式）：
+  - `AgentNode`（抽象基类）+ `RetrieveNode` / `GenerateNode`（命令模式）：`__call__` 使节点实例可直接注册进图，新增节点继承基类即可（多态）；
+  - `QaGraphBuilder`（建造者模式）：按是否有 RAG 装配不同拓扑，装配规则集中一处；
+  - `LangGraphQaWorkflow`（适配器模式）：显式继承并实现 `QaWorkflow` 领域端口，langgraph 引擎封在适配器之内；
+  - `create_qa_workflow(llm, rag=None)`（agent/__init__.py）：模块对外唯一入口（工厂），返回端口类型。
+- `build_qa_graph(llm, rag=None)`（agent/graph.py）：兼容入口，等价于建造者的 build()；节点全异步，LLM 调用只经过 LLMProvider 抽象。
 - Prompt 组装集中在 `agent/prompts.py`，回答策略（BE-017）只改该文件。
 
 ### 统一执行路径（所有 LLM 问答必须走图）
