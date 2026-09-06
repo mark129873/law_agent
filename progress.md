@@ -4,8 +4,28 @@
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
 - 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 标准验证路径：`cd backend && uv run pytest tests -q`；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：BE-014 RAG 检索服务
-- 当前 blocker：两个环境依赖（见 Session 005 风险），均不影响继续开发
+- 当前最高优先级未完成功能：BE-010 GLM 真实调用补验（仅剩此项，待 GLM_API_KEY）；后端其余 21 项全部 passing
+- 当前 blocker：BE-010 真实 GLM 调用需用户提供 GLM_API_KEY（代码与协议测试已完成）
+
+### Session 007
+- 日期：2026-09-06
+- 本轮目标：完成后端全部剩余功能（BE-014 ~ BE-022）
+- 技术决策：
+  - BE-014：RagService + build_context（含来源标注，空结果返回空串衔接"信息不足"策略）；新增 min_score 相似度阈值。
+  - BE-015/016：LangGraph StateGraph（START→retrieve?→generate→END），Agent 仅依赖 LLMProvider 抽象；Prompt 组装集中于 agent/prompts.py。
+  - BE-017：LEGAL_SYSTEM_PROMPT 三条硬规则（依据知识库并注明来源/无依据明确声明/严禁虚构法条）。
+  - BE-018：ConversationService 统一会话业务（缺失会话统一异常，级联删除）。
+  - BE-019~021：API 全异步、路由只调 Service、统一错误结构 {code,message}；ChatService 流式"完成才持久化"；DocumentService 状态机 processing→ready/failed。
+  - 修复的真实缺陷：日志 extra 误用 LogRecord 保留字段（message/filename）使业务 404 变 500；API 测试改在 LOG_LEVEL=INFO 下运行以覆盖此类问题。
+- 已完成：RAG 检索、LangGraph 双工作流、回答策略、对话服务、全部 REST/SSE API、统一异常体系
+- 运行过的验证：
+  - `uv run pytest tests -q` → 75 passed 全量通过
+  - 真实 RAG 端到端（nomic-embed-text + Chroma + qwen3.5:4b）：有依据答"试用期不超过六个月"并引用来源；无关问题明确声明信息不足
+  - 真实 uvicorn：会话创建/40401 统一结构/TXT 上传入库 ready/bad.exe 40001 全部正确
+- 已记录证据：feature_list.json BE-014~022 evidence
+- 提交记录：7d472e0 (BE-014)、2289115 (BE-015/016/017)、d1ab058 (BE-018)、e0eb5e7 (BE-019~022)
+- 已知风险或未解决问题：BE-010 GLM 真实调用待密钥；前端（FE-001~010）未开始
+- 下一步最佳动作：前端 FE-001 前端项目基础框架；或提供 GLM_API_KEY 后补验 BE-010
 
 ### Session 005
 - 日期：2026-09-06
