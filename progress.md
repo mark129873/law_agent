@@ -4,8 +4,19 @@
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
 - 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 标准验证路径：`cd backend && uv run pytest tests -q`；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：BE-010 GLM 真实调用补验（仅剩此项，待 GLM_API_KEY）；后端其余 21 项全部 passing
+- 当前最高优先级未完成功能：前端 FE-001（后端 BE 全部 passing，测试已分层）
+- 当前 blocker：无
 - 当前 blocker：BE-010 真实 GLM 调用需用户提供 GLM_API_KEY（代码与协议测试已完成）
+
+### Session 008
+- 日期：2026-09-06
+- 本轮目标：后端全面检查 + 测试分层重组 + 完整测试
+- 已完成：
+  - 移除空占位包（agent/nodes、agent/tools、application/dto）；清理测试未用导入
+  - 测试分层：tests/unit/（33 个，纯逻辑无外部 IO）+ tests/integration/（42 个，真实 SQLite/Chroma/Mock/完整应用）
+  - pyproject 增加 pytest testpaths；ChatService.send_message 保留（非流式入口，LangGraph 图唯一运行时消费者，暂无路由调用）
+- 运行过的验证：unit 33 + integration 42 = 75 passed；启动 smoke 通过
+- 提交记录：4be634b
 
 ### Session 007
 - 日期：2026-09-06

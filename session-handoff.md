@@ -6,7 +6,8 @@
   - 后端全部功能就绪（BE-001~022，仅 BE-010 的 GLM 真实调用待 API Key 补验）：SQLite/Chroma/Milvus 骨架、Ollama/GLM LLM、文档 Pipeline（TXT/PDF）、Embedding 入库、RAG 检索、LangGraph Agent（含法律回答策略）、对话服务、全部 REST/SSE API、统一异常体系。
   - 完整业务闭环已可用：上传文档→向量化入库→提问→检索→流式回答→历史持久化→删除清理。
 - 这轮实际跑过的验证：
-  - `uv run pytest tests -q` → 75 passed
+  - 测试已分层：tests/unit/（33，纯逻辑）+ tests/integration/（42，真实基础设施）
+  - 全量 `uv run pytest` → 75 passed；启动 smoke 通过
   - 真实 RAG 端到端（nomic-embed-text + Chroma + qwen3.5:4b）：引用来源回答 + 无依据声明信息不足
   - 真实 uvicorn：POST /api/conversations、40401 统一结构、TXT 上传→ready、bad.exe→40001
 
