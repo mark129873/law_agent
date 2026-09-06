@@ -19,6 +19,7 @@
   - 真实 GLM（glm-4.5-air）thinking=disabled 流式调用正常
   - 重启后端后 SSE 实测：整轮 RAG 回答（50 个 delta）13.3s 完成，对比此前仅首字 30~40s
 - 运维教训：Windows 下 TaskStop 只杀 shell 不杀 uvicorn 子进程（孤儿进程占住 8000，表现为旧代码+对 Ollama 连接异常 500）；需 netstat 找 PID 后 taskkill/Stop-Process 强杀
+- 额外发现并修复：backend/.env.example 一直被根 .gitignore 的 `.env.*` 模式误伤、从未真正入库（历次"已提供模板"的记录实际只存在于本地）；已加 `!.env.example` 否定规则并收录
 - 提交记录：本轮提交
 - 下一步最佳动作：可选增强（会话重命名/停止按钮/部署收敛），无阻塞项
 
