@@ -4,8 +4,23 @@
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
 - 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 标准验证路径：`cd backend && uv run pytest tests -q`；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：无（后端 BE-001~022 与前端 FE-001~010 全部 passing，32 项功能全部完成）
+- 当前最高优先级未完成功能：无（后端 BE-001~022 与前端 FE-001~010 全部 passing，32 项功能全部完成；全项目五层测试轮已通过）
 - 当前 blocker：无
+
+### Session 016（全项目全面测试轮）
+- 日期：2026-09-06
+- 本轮目标：按用户要求做全项目全面测试（单元/集成/接口/端到端/前端界面）
+- 测试结果：
+  - 后端单元 tests/unit → 38 passed
+  - 后端集成+接口 tests/integration（含 test_api.py 7 例接口测试）→ 48 passed
+  - 后端全量 uv run pytest → 86 passed
+  - 端到端 scripts/verify_real_e2e.py：干净环境通过（上传 201 ready ×2 → RAG 回答逐字引用第四十二条并标注来源 → user/assistant 持久化）
+  - 前端 npm run build（tsc+vite）通过；浏览器 GUI 黑盒走查 T1~T9 全部通过（截图证据归档 gui-test-screenshots/，已 gitignore）：加载渲染/空输入禁用/建议填充启用/流式生成中状态/回答引用/会话往返恢复/知识库汇总与明细/跨视图新对话跳转/删除确认取消与删除两路径/超长输入 160px 封顶
+- 本轮发现并处理的问题：
+  - 【已处理】测试数据污染：专利法文档被历次测试重复上传 3+ 份，向量库重复 chunk 导致检索退化（回答上下文错引第二十六/二十七条）。按 RELIABILITY.md 干净环境规则重置 backend/data 后重跑，检索质量恢复
+  - 【已记录】瞬态缺陷：Ollama 0.32.0 在"上传触发 embedding 批处理后立即提问"的模型切换窗口偶发对 /api/chat 返回 500（复现 1/2 次）；后端按设计转为 SSE error 事件，前端错误条正常展示。属 Ollama 侧健壮性问题，可在后端加重试，暂记录为已知风险
+- 运维备注：taskkill 在本机偶发超时，PowerShell Stop-Process 可靠；测试期间多次遇到 IAB 点击抖动，改用 CUA 坐标点击 + 只读几何定位（getBoundingClientRect）后稳定
+- 提交记录：本轮提交
 
 ### Session 015（LLM 思考模式开关）
 - 日期：2026-09-06
