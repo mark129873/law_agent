@@ -4,8 +4,31 @@
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
 - 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 标准验证路径：`cd backend && uv run pytest tests -q`；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：BE-009 LLM Provider 抽象层
-- 当前 blocker：无
+- 当前最高优先级未完成功能：BE-014 RAG 检索服务
+- 当前 blocker：两个环境依赖（见 Session 005 风险），均不影响继续开发
+
+### Session 005
+- 日期：2026-09-06
+- 本轮目标：BE-009 ~ BE-013（用户指定"完成 5 个 feature"）
+- 技术决策：
+  - BE-009：LLMProvider 抽象（chat 同步 + stream 异步生成器 + model_name）；ChatMessage 复用 MessageRole。
+  - BE-010：Ollama（NDJSON 流）与 GLM（OpenAI 兼容 + SSE 流）实现；Provider 构造函数支持 httpx transport 注入作为测试接缝；glm 缺密钥时装配即报错。
+  - BE-011：解析器策略接口（domain/services）+ Pipeline 编排（application），解析经 to_thread；TextParser 多编码回退（utf-8/gb18030/big5）。
+  - BE-012：PdfParser（pypdf 逐页提取）；损坏 PDF 与无文本层 PDF 均明确报错；测试用 fpdf2 生成真实 PDF。
+  - BE-013：EmbeddingService 抽象 + OllamaEmbeddingService（/api/embed 批量）+ KnowledgeIngestionService 入库编排；新增 OLLAMA_EMBEDDING_MODEL 配置。
+  - 教训：uv pip install 进 venv 的包必须同步写入 pyproject，否则 uv sync 会将其移除（pypdf 曾被剥离，已修复）。
+- 已完成：LLM 抽象与双实现、文档 Pipeline、PDF/TXT 解析、Embedding 与入库编排、容器装配齐备
+- 运行过的验证：
+  - `uv run pytest tests -q` → 53 passed 全量通过
+  - Ollama 真实调用：chat 与流式问答通过（qwen3.5:9b，经 OLLAMA_MODEL 覆盖；scripts/verify_ollama_stream.py）
+  - 知识库入库端到端：真实 Chroma + 确定性 embedding，检索命中带 metadata 的 chunk、按 document_id 删除
+  - 真实启动：Database/VectorStore 初始化日志正常，curl /api/health → ok
+- 已记录证据：feature_list.json BE-009/011/012 = passing；BE-010/BE-013 = in_progress（环境阻塞见下）
+- 提交记录：41aed90 (BE-009)、2de5486 (BE-010)、075a736 (BE-011)、8b393bf+9def484 (BE-012)、e395422 (BE-013)
+- 已知风险或未解决问题：
+  - BE-010 剩余：GLM 真实调用需配置 GLM_API_KEY 后补验
+  - BE-013 剩余：本机 Ollama 服务未以 --embeddings 启动（报 "This server does not support embeddings"），需重启 Ollama 加参数并拉取 embedding 模型后补验真实向量生成
+- 下一步最佳动作：BE-014 RAG 检索服务
 
 ### Session 004
 - 日期：2026-09-06
