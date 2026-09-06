@@ -21,6 +21,14 @@
 - 修复的真实缺陷：定长切分截断法条（改段落感知）、相对路径随启动目录漂移（settings 锚定）、日志 extra 误用 LogRecord 保留字段（404 变 500）、运行时数据曾被 git 跟踪（已排除）
 - 文档：ARCHITECTURE.md 整合为 238 行/10 节（端口清单/边界守护/数据流/测试体系/扩展点）；feature_list.json 后端 11 项刷新
 
+## 本轮改动（Session 012）
+
+- 前端 feature 清单评审修订（feature_list.json，均未改变功能编号与状态）：
+  - FE-008 补齐 PRODUCT.md 要求但清单遗漏的能力：侧边栏知识库管理切换入口、文档列表展示（名称/大小/状态）、文档删除（后端 GET/DELETE /api/documents 已支持）
+  - FE-009 联调闭环补"文档删除"；FE-001 锚定 frontend/ 目录；FE-002 明确统一错误结构/SSE 事件类型定义与轻量状态管理（hooks/Context）
+  - FE-003~007、FE-010 评审通过未改动：与 PRODUCT.md 交互需求、Codex 风格要求、后端 SSE 协议逐条吻合
+- 基线复验：uv run pytest → 83 passed
+
 ## 仍损坏或未验证
 
 - 已知缺陷：无

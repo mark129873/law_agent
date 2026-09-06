@@ -193,7 +193,7 @@
     {
       "id": "FE-001",
       "name": "前端项目基础框架",
-      "description": "建立 React + TypeScript + Vite 前端项目，集成 Tailwind CSS、Fetch 和 React Router，建立基础目录结构、入口和开发配置。",
+      "description": "在 frontend/ 目录建立 React + TypeScript + Vite 前端项目，集成 Tailwind CSS、Fetch 和 React Router，建立基础目录结构、入口和开发配置。",
       "status": "planned",
       "evidence": "待实现：前端可以正常启动、构建，并能够访问基础路由。",
       "testedAt": null
@@ -201,7 +201,7 @@
     {
       "id": "FE-002",
       "name": "前端 API 与状态基础层",
-      "description": "建立统一 Fetch API Service、类型定义和必要的前端状态管理方式，为对话、历史记录、知识库等页面提供统一数据访问能力。",
+      "description": "建立统一 Fetch API Service 与类型定义（会话/消息/文档、统一错误结构 {code,message}、SSE 事件），采用轻量状态管理（React hooks/Context，不引入重型状态库），为对话、历史记录、知识库等页面提供统一数据访问能力。",
       "status": "planned",
       "evidence": "待实现：页面通过统一 API Service 与后端通信，不在 UI 组件中散落 API 请求逻辑。",
       "testedAt": null
@@ -249,15 +249,15 @@
     {
       "id": "FE-008",
       "name": "知识库管理页面",
-      "description": "实现知识库管理入口和文档上传 UI，支持选择 PDF/TXT/MD 文件、上传、处理状态显示以及成功/失败反馈。",
+      "description": "实现知识库管理入口（与对话历史同处侧边栏，点击知识库管理按钮切换）、已上传文档列表展示（文档名称、大小、处理状态）与文档删除，以及文档上传 UI：支持选择 PDF/TXT/MD 文件、上传、处理状态显示以及成功/失败反馈。",
       "status": "planned",
-      "evidence": "待实现：用户可以在前端选择并上传 PDF/TXT/MD，并能够看到文档处理结果。",
+      "evidence": "待实现：用户可以在前端查看已上传文档列表（名称、状态），可以删除文档且删除后从列表消失，可以选择并上传 PDF/TXT/MD，并能够看到文档处理结果。",
       "testedAt": null
     },
     {
       "id": "FE-009",
       "name": "前后端完整联调",
-      "description": "完成前端与后端核心功能联调，打通创建对话、发送问题、Agent 处理、流式回答、历史消息恢复、删除对话以及知识库上传和 RAG 问答。",
+      "description": "完成前端与后端核心功能联调，打通创建对话、发送问题、Agent 处理、流式回答、历史消息恢复、删除对话以及知识库上传、文档删除和 RAG 问答。",
       "status": "planned",
       "evidence": "待实现：从浏览器实际操作可以完整跑通对话和知识库两个核心业务闭环。",
       "testedAt": null
