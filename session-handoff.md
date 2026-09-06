@@ -12,15 +12,6 @@
   - 启动 smoke：`/api/health` → ok
   - feature_list.json 后端部分经 62 项声明机械审计全部吻合（审计脚本按用户决定已删除）
 
-## 本轮改动（Session 008~011 累计）
-
-- 测试分层：tests/unit/ + tests/integration/ + data_source 测试数据；pyproject 增加 testpaths
-- LangGraph 统一执行：generate 节点经 get_stream_writer 推送 token；ChatService 精简为（会话服务 + QaWorkflow 端口）
-- DDD 整改：Database 端口迁至 domain/repositories/database.py；新增 QaWorkflow/QaWorkflow Protocol；违例清零
-- agent/ OOP 重构：AgentNode 命令模式、QaGraphBuilder 建造者、LangGraphQaWorkflow 适配器；langgraph 隔离区（工厂唯一入口）
-- 修复的真实缺陷：定长切分截断法条（改段落感知）、相对路径随启动目录漂移（settings 锚定）、日志 extra 误用 LogRecord 保留字段（404 变 500）、运行时数据曾被 git 跟踪（已排除）
-- 文档：ARCHITECTURE.md 整合为 238 行/10 节（端口清单/边界守护/数据流/测试体系/扩展点）；feature_list.json 后端 11 项刷新
-
 ## 本轮改动（Session 012）
 
 - 前端 feature 清单评审修订（feature_list.json，均未改变功能编号与状态）：
