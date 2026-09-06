@@ -4,8 +4,25 @@
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
 - 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 标准验证路径：`cd backend && uv run pytest tests -q`；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：BE-006 向量数据库抽象层
+- 当前最高优先级未完成功能：BE-009 LLM Provider 抽象层
 - 当前 blocker：无
+
+### Session 004
+- 日期：2026-09-06
+- 本轮目标：BE-006 / BE-007 / BE-008（用户指定"完成 3 个 feature"，中途因会话中断恢复续做）
+- 技术决策：
+  - BE-006：DocumentChunk/RetrievedChunk 数据契约；VectorStore 抽象含 initialize/close 生命周期；embedding 由调用方传入，向量库与 embedding 模型彻底解耦。
+  - BE-007：chromadb PersistentClient + law_chunks 集合（cosine 空间，score=1-distance）；所有阻塞调用经 asyncio.to_thread 包装；不使用内置 embedding 函数。
+  - BE-008：MilvusVectorStore 骨架调用即抛明确 NotImplementedError（拒绝静默空结果）；容器工厂按 VECTOR_STORE_PROVIDER 分支，向量库初始化接入 lifespan。
+- 已完成：VectorStore 抽象与契约测试、Chroma 实现、Milvus 骨架、容器工厂与 lifespan 接入
+- 运行过的验证：
+  - `uv run pytest tests -q` → 28 passed（Chroma 4：写入检索/删除隔离/跨连接持久化/幂等；工厂 3：chroma 解析/milvus 解析/明确报错）
+  - 真实启动：日志 "VectorStore initialized (provider: chroma)"，curl /api/health → ok
+  - VECTOR_STORE_PROVIDER=milvus 时 initialize 抛出明确 NotImplementedError（早暴露设计生效）
+- 已记录证据：feature_list.json BE-006/BE-007/BE-008 evidence
+- 提交记录：7d96fe8 (BE-006)、9aa3ece (BE-007)、664d8f4 (BE-008)
+- 已知风险或未解决问题：chroma 依赖较重（安装体积大），启动耗时略有增加；其余无
+- 下一步最佳动作：BE-009 LLM Provider 抽象层（Ollama/GLM 前置）
 
 ### Session 003
 - 日期：2026-09-06
