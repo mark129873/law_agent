@@ -7,6 +7,21 @@
 - 当前最高优先级未完成功能：无（后端 BE-001~022 与前端 FE-001~010 全部 passing，32 项功能全部完成）
 - 当前 blocker：无
 
+### Session 015（LLM 思考模式开关）
+- 日期：2026-09-06
+- 本轮目标：新增 .env 配置项控制 LLM think 开关，默认关闭（应用户需求）
+- 技术决策：
+  - 新增 `LLM_ENABLE_THINKING`（bool，默认 False）：关闭时 Ollama 请求携带顶层 `think:false`、GLM 请求携带 `thinking:{"type":"disabled"}`；开关经容器注入 Provider 构造函数，Provider 不读全局配置
+  - 顺带修复真实体验缺陷：qwen3.5 默认思考导致首字延迟 30~40s（思考 token 被流式解析忽略，用户只看到等待）
+- 运行过的验证：
+  - uv run pytest → 86 passed（新增：配置默认/覆盖 1 例 + Ollama/GLM 请求体 think 断言 2 例）
+  - 真实 Ollama 对比：think=false 0.54s vs think=true 2.30s（简单问题 4 倍，思考 144 token 只为答"5"）
+  - 真实 GLM（glm-4.5-air）thinking=disabled 流式调用正常
+  - 重启后端后 SSE 实测：整轮 RAG 回答（50 个 delta）13.3s 完成，对比此前仅首字 30~40s
+- 运维教训：Windows 下 TaskStop 只杀 shell 不杀 uvicorn 子进程（孤儿进程占住 8000，表现为旧代码+对 Ollama 连接异常 500）；需 netstat 找 PID 后 taskkill/Stop-Process 强杀
+- 提交记录：本轮提交
+- 下一步最佳动作：可选增强（会话重命名/停止按钮/部署收敛），无阻塞项
+
 ### Session 014（FE-002 ~ FE-010 前端全部功能）
 - 日期：2026-09-06
 - 本轮目标：完成前端全部剩余功能（FE-002~010），直至前后端全链路可用

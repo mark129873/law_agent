@@ -64,12 +64,14 @@ def _build_vector_store(settings: Settings) -> VectorStore:
 def _build_llm_provider(settings: Settings) -> LLMProvider:
     """按配置构造大模型 Provider（工厂函数，BE-010）。"""
     if settings.llm_provider.value == "ollama":
-        return OllamaProvider(settings.ollama_base_url, settings.ollama_model)
+        return OllamaProvider(settings.ollama_base_url, settings.ollama_model, settings.llm_enable_thinking)
     if settings.llm_provider.value == "glm":
         if not settings.glm_api_key:
             # 密钥缺失时尽早失败，而不是等到第一次请求才报 401
             raise ValueError("LLM_PROVIDER=glm 但未配置 GLM_API_KEY 环境变量")
-        return GLMProvider(settings.glm_base_url, settings.glm_api_key, settings.glm_model)
+        return GLMProvider(
+            settings.glm_base_url, settings.glm_api_key, settings.glm_model, settings.llm_enable_thinking
+        )
     raise NotImplementedError(f"大模型 Provider '{settings.llm_provider.value}' 尚未实现")
 
 

@@ -27,13 +27,23 @@ def _to_api_messages(messages: list[ChatMessage]) -> list[dict[str, str]]:
 class GLMProvider(LLMProvider):
     """基于智谱 GLM OpenAI 兼容端点的 Provider 实现。"""
 
-    def __init__(self, base_url: str, api_key: str, model: str, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        model: str,
+        enable_thinking: bool = False,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         # transport 仅供测试注入 MockTransport 使用，生产路径保持为 None
         self._transport = transport
         # 密钥只保存在实例内存中，来自环境变量注入（见 Settings）
         self._api_key = api_key
         self._model = model
+        # 思考模式开关（由配置注入）：glm-4.5 系列支持 thinking.type 参数，
+        # 关闭后响应不再生成思考内容，显著降低首字延迟
+        self._enable_thinking = enable_thinking
 
     @property
     def model_name(self) -> str:
@@ -45,14 +55,19 @@ class GLMProvider(LLMProvider):
             "Content-Type": "application/json",
         }
 
-    async def chat(self, messages: list[ChatMessage], params: LlmParams | None = None) -> str:
-        params = params or LlmParams()
-        payload = {
+    def _payload(self, messages: list[ChatMessage], params: LlmParams, stream: bool) -> dict:
+        """构造 chat/completions 请求体：thinking.type 为智谱扩展字段。"""
+        return {
             "model": self._model,
             "messages": _to_api_messages(messages),
-            "stream": False,
+            "stream": stream,
             "temperature": params.temperature,
+            "thinking": {"type": "enabled" if self._enable_thinking else "disabled"},
         }
+
+    async def chat(self, messages: list[ChatMessage], params: LlmParams | None = None) -> str:
+        params = params or LlmParams()
+        payload = self._payload(messages, params, stream=False)
         # 日志只记录模型名与消息数，禁止出现密钥
         logger.info(
             "GLM chat requested",
@@ -69,12 +84,7 @@ class GLMProvider(LLMProvider):
 
     async def stream(self, messages: list[ChatMessage], params: LlmParams | None = None) -> AsyncIterator[str]:
         params = params or LlmParams()
-        payload = {
-            "model": self._model,
-            "messages": _to_api_messages(messages),
-            "stream": True,
-            "temperature": params.temperature,
-        }
+        payload = self._payload(messages, params, stream=True)
         logger.info(
             "GLM stream requested",
             extra={"service": "llm", "model": self._model, "message_count": len(messages)},

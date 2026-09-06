@@ -27,7 +27,7 @@
       "name": "后端配置管理",
       "description": "建立统一配置系统，管理服务配置、SQLite/MySQL 数据库 Provider、Chroma/Milvus 向量数据库 Provider、Ollama/GLM LLM Provider、模型名称、服务地址和其他运行参数；相对数据路径锚定 backend/ 目录。敏感配置通过环境变量提供。",
       "status": "passing",
-      "evidence": "2026-09-06：app/config/settings.py 基于 pydantic-settings 统一 Settings（get_settings() 单例，支持 .env 与环境变量），三个 Provider 开关枚举校验、非法取值启动即拒绝；敏感字段 GLM_API_KEY 仅环境注入并已在真实 GLM 调用中使用；相对路径经 resolved_sqlite_db_path/resolved_chroma_persist_dir 锚定 backend/（修复数据随启动目录漂移的真实缺陷）；提供 .env.example 模板。测试覆盖默认值/环境切换/非法拒绝。",
+      "evidence": "2026-09-06：app/config/settings.py 基于 pydantic-settings 统一 Settings（get_settings() 单例，支持 .env 与环境变量），三个 Provider 开关枚举校验、非法取值启动即拒绝；敏感字段 GLM_API_KEY 仅环境注入并已在真实 GLM 调用中使用；相对路径经 resolved_sqlite_db_path/resolved_chroma_persist_dir 锚定 backend/（修复数据随启动目录漂移的真实缺陷）；提供 .env.example 模板。测试覆盖默认值/环境切换/非法拒绝。2026-09-06 增强：新增 LLM_ENABLE_THINKING 配置项（bool，默认 False 关闭思考模式，降低 qwen3.5/glm-4.5 等推理模型的首字延迟），默认值/环境变量覆盖均有测试。",
       "testedAt": "2026-09-06"
     },
     {
@@ -91,7 +91,7 @@
       "name": "Ollama 与 GLM 实现",
       "description": "实现 Ollama 本地模型和 GLM API 两种 LLM Provider，并支持通过配置选择当前使用的模型服务。",
       "status": "passing",
-      "evidence": "2026-09-06：OllamaProvider（/api/chat，NDJSON 流式解析）与 GLMProvider（OpenAI 兼容端点，SSE 解析）均已实现，容器按 LLM_PROVIDER 注册（glm 缺密钥时装配即报错）。双 Provider 真实调用通过：Ollama qwen3.5:4b、GLM glm-4.5-air（密钥经 .env 注入）chat 与流式问答均正常；协议级测试 6 passed（请求构造/响应解析/流式拆包/错误抛出/参数透传）。",
+      "evidence": "2026-09-06：OllamaProvider（/api/chat，NDJSON 流式解析）与 GLMProvider（OpenAI 兼容端点，SSE 解析）均已实现，容器按 LLM_PROVIDER 注册（glm 缺密钥时装配即报错）。双 Provider 真实调用通过：Ollama qwen3.5:4b、GLM glm-4.5-air（密钥经 .env 注入）chat 与流式问答均正常；协议级测试 6 passed（请求构造/响应解析/流式拆包/错误抛出/参数透传）。2026-09-06 增强：两个 Provider 支持 thinking 开关注入——Ollama 请求体携带顶层 think 字段、GLM 请求体携带 thinking.type（协议级测试 2 例断言默认关闭/显式开启）；真实验证：Ollama think=false 0.54s vs think=true 2.30s（简单问题 4 倍差距，RAG 场景曾达 30~40s 首字延迟），GLM glm-4.5-air 真实流式调用 thinking=disabled 正常；经真实后端 SSE 实测整轮 RAG 回答 13.3s 完成（此前仅首字即需 30~40s）。",
       "testedAt": "2026-09-06"
     },
     {

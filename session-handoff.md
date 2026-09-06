@@ -26,7 +26,9 @@
 - 已知缺陷：无
 - 未验证路径：深色主题未做强制暗色截图（token 与浅色同源镜像，风险低）；uvicorn 多 worker 并发；HTTPS/反向代理；CORS 生产收敛（当前 allow_origins=["*"]）
 - 下一轮会话需要注意的风险：
-  - Ollama qwen3.5:4b 首 token 延迟约 30~40s（本机 CPU 推理）——非前端问题，但影响体感
+  - Windows 下 TaskStop/停止后端可能留下 uvicorn 孤儿进程占用 8000 端口（表现为旧代码仍生效或诡异 500）：用 `netstat -ano | grep :8000` 找 PID 后 taskkill //F //PID 或 PowerShell Stop-Process 清理
+  - Git Bash 偶发 `uv` 命令找不到（exit 127），重试即可
+  - Ollama qwen3.5:4b 已默认关闭思考模式（LLM_ENABLE_THINKING=false）；开启后首字延迟会回到 30~40s 量级
   - 前端依赖很新（Vite 8 / TS 7 / React 19 / react-markdown），生态兼容问题留意
   - 流式过程中未闭合的 Markdown 标记会短暂显示字面字符（完成后正常渲染）
   - min_score 默认 0.0（不过滤）；E2E 脚本依赖本机 Ollama（qwen3.5:4b / nomic-embed-text:latest）与 .env 中 GLM_API_KEY

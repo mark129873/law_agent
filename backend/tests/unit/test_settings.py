@@ -49,3 +49,12 @@ def test_invalid_provider_rejected() -> None:
     """非法 Provider 取值应在构造配置时立即失败，而不是运行中段才暴露。"""
     with pytest.raises(ValidationError):
         Settings(_env_file=None, db_provider="oracle")  # type: ignore[call-arg]
+
+
+def test_llm_thinking_disabled_by_default_and_switchable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """思考模式默认关闭（降低推理模型首字延迟），且可通过环境变量开启。"""
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert settings.llm_enable_thinking is False
+    monkeypatch.setenv("LLM_ENABLE_THINKING", "true")
+    settings_enabled = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert settings_enabled.llm_enable_thinking is True

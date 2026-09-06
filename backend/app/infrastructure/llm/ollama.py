@@ -27,9 +27,18 @@ def _to_api_messages(messages: list[ChatMessage]) -> list[dict[str, str]]:
 class OllamaProvider(LLMProvider):
     """基于 Ollama /api/chat 的 Provider 实现。"""
 
-    def __init__(self, base_url: str, model: str, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        enable_thinking: bool = False,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._model = model
+        # 思考模式开关（由配置注入）：qwen3.5 等推理模型默认会先思考再回答，
+        # 关闭后 Ollama 请求携带顶层字段 think:false，显著降低首字延迟
+        self._enable_thinking = enable_thinking
         # transport 仅供测试注入 MockTransport 使用，生产路径保持为 None
         self._transport = transport
 
@@ -37,14 +46,19 @@ class OllamaProvider(LLMProvider):
     def model_name(self) -> str:
         return self._model
 
-    async def chat(self, messages: list[ChatMessage], params: LlmParams | None = None) -> str:
-        params = params or LlmParams()
-        payload = {
+    def _payload(self, messages: list[ChatMessage], params: LlmParams, stream: bool) -> dict:
+        """构造 /api/chat 请求体：think 为顶层字段（Ollama 协议约定）。"""
+        return {
             "model": self._model,
             "messages": _to_api_messages(messages),
-            "stream": False,
+            "stream": stream,
+            "think": self._enable_thinking,
             "options": {"temperature": params.temperature},
         }
+
+    async def chat(self, messages: list[ChatMessage], params: LlmParams | None = None) -> str:
+        params = params or LlmParams()
+        payload = self._payload(messages, params, stream=False)
         logger.info(
             "Ollama chat requested",
             extra={"service": "llm", "model": self._model, "message_count": len(messages)},
@@ -58,12 +72,7 @@ class OllamaProvider(LLMProvider):
 
     async def stream(self, messages: list[ChatMessage], params: LlmParams | None = None) -> AsyncIterator[str]:
         params = params or LlmParams()
-        payload = {
-            "model": self._model,
-            "messages": _to_api_messages(messages),
-            "stream": True,
-            "options": {"temperature": params.temperature},
-        }
+        payload = self._payload(messages, params, stream=True)
         logger.info(
             "Ollama stream requested",
             extra={"service": "llm", "model": self._model, "message_count": len(messages)},

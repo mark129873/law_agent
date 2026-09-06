@@ -108,3 +108,47 @@ async def test_llm_params_forwarded() -> None:
     provider = OllamaProvider("http://mock", "test-model", transport=httpx.MockTransport(handler))
     await provider.chat([ChatMessage(role=MessageRole.USER, content="q")], LlmParams(temperature=0.3))
     assert captured["payload"]["options"]["temperature"] == 0.3
+
+
+@pytest.mark.asyncio
+async def test_ollama_think_switch_in_payload() -> None:
+    """Ollama 请求体应携带顶层 think 开关：默认关闭，可经构造参数开启。"""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(200, json={"message": {"content": "ok"}})
+
+    # 默认（配置未开启）：think=false，避免推理模型的思考过程拉长首字延迟
+    provider = OllamaProvider("http://mock", "test-model", transport=httpx.MockTransport(handler))
+    [chunk async for chunk in provider.stream([ChatMessage(role=MessageRole.USER, content="q")])]
+    assert captured["payload"]["think"] is False
+
+    # 显式开启：think=true
+    provider_enabled = OllamaProvider(
+        "http://mock", "test-model", enable_thinking=True, transport=httpx.MockTransport(handler)
+    )
+    await provider_enabled.chat([ChatMessage(role=MessageRole.USER, content="q")])
+    assert captured["payload"]["think"] is True
+
+
+@pytest.mark.asyncio
+async def test_glm_thinking_switch_in_payload() -> None:
+    """GLM 请求体应携带 thinking.type：默认 disabled，可经构造参数切换为 enabled。"""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    provider = GLMProvider(
+        "http://mock", "test-key", "glm-4.5-air", transport=httpx.MockTransport(handler)
+    )
+    await provider.chat([ChatMessage(role=MessageRole.USER, content="q")])
+    assert captured["payload"]["thinking"] == {"type": "disabled"}
+
+    provider_enabled = GLMProvider(
+        "http://mock", "test-key", "glm-4.5-air", enable_thinking=True, transport=httpx.MockTransport(handler)
+    )
+    [chunk async for chunk in provider_enabled.stream([ChatMessage(role=MessageRole.USER, content="q")])]
+    assert captured["payload"]["thinking"] == {"type": "enabled"}

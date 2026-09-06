@@ -210,9 +210,12 @@ RAG： START → retrieve → generate → END
 | `DB_PROVIDER` | sqlite / mysql | sqlite |
 | `VECTOR_STORE_PROVIDER` | chroma / milvus | chroma |
 | `LLM_PROVIDER` | ollama / glm | ollama |
+| `LLM_ENABLE_THINKING` | true / false | false（关闭思考模式） |
 | `HOST` / `PORT` / `LOG_LEVEL` | — | 0.0.0.0 / 8000 / ERROR |
 
 其余参数：`SQLITE_DB_PATH`、`MYSQL_URL`、`CHROMA_PERSIST_DIR`、`MILVUS_URI`、`OLLAMA_BASE_URL`、`OLLAMA_MODEL`（qwen3.5:4b）、`OLLAMA_EMBEDDING_MODEL`（nomic-embed-text:latest）、`GLM_BASE_URL`、`GLM_MODEL`、`GLM_API_KEY`。
+
+- **思考模式开关（`LLM_ENABLE_THINKING`，默认 false）**：qwen3.5 / glm-4.5 等推理模型默认会先"思考"再回答，显著拉长首字延迟（真实环境曾达 30~40s）。关闭时 Ollama 请求携带 `think: false`、GLM 请求携带 `thinking: {"type": "disabled"}`；需要深度推理时可显式开启。
 
 - **敏感配置**：`GLM_API_KEY` 等密钥只经环境变量或本地 `.env` 注入，禁止提交仓库、禁止写入日志。
 - **路径锚定**：相对路径统一锚定到 `backend/`（`resolved_sqlite_db_path` / `resolved_chroma_persist_dir`），数据位置不随进程工作目录变化。

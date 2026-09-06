@@ -91,6 +91,9 @@ class Settings(BaseSettings):
     glm_model: str = "glm-4-flash"
     # 敏感配置：只通过环境变量注入，禁止写入任何文件或日志
     glm_api_key: str = ""
+    # 思考模式开关：qwen3.5/glm-4.5 等推理模型默认会先"思考"再回答，
+    # 显著拉长首字延迟（真实环境曾达 30~40s）；默认关闭以获得即时流式输出
+    llm_enable_thinking: bool = False
 
     @property
     def resolved_sqlite_db_path(self) -> str:
