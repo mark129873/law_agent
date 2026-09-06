@@ -33,9 +33,9 @@
       "id": "BE-003",
       "name": "后端分层与依赖注入架构",
       "description": "建立 API、Service、Agent、Repository、VectorStore、LLM Provider、Document 等核心模块边界，并通过依赖注入或等价机制管理组件依赖，避免业务代码直接绑定具体基础设施。",
-      "status": "planned",
-      "evidence": "待实现：核心业务层不直接依赖 SQLite、Chroma、Ollama 或 GLM 的具体实现。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：backend/app/common/di.py 实现轻量 DIContainer（按抽象接口注册工厂+单例缓存，双重检查锁支持依赖链装配）；backend/app/containers.py 为全应用唯一装配点并已接入 main.py 启动路径（app.state.container）；uv run pytest tests -q → 9 passed，其中 test_di 覆盖：单例复用、未注册报错、仅改容器注册即切换业务组件实现（业务代码零修改）、工厂依赖链解析。开发过程中 test_di 暴露并修复了锁内调用工厂导致的嵌套 resolve 死锁。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-004",

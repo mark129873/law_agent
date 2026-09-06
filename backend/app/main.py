@@ -13,6 +13,7 @@ from fastapi import FastAPI
 
 from app.common.logging import setup_logging
 from app.config.settings import get_settings
+from app.containers import create_container
 
 # 启动时初始化结构化 JSON 日志，确保后续所有服务日志格式一致
 setup_logging()
@@ -26,6 +27,8 @@ def create_app() -> FastAPI:
     也为后续根据配置装配不同 Provider（SQLite/MySQL、Chroma/Milvus 等）留出扩展点。
     """
     settings = get_settings()
+    # 装配依赖注入容器：所有"抽象接口 -> 具体实现"的映射从此处开始
+    container = create_container(settings)
     # 启动即记录当前生效的 Provider，方便从日志确认配置是否按预期切换；
     # 注意：只输出 Provider 名称等非敏感信息，密钥一律不进日志。
     logger.info(
@@ -43,6 +46,8 @@ def create_app() -> FastAPI:
         description="法律知识库与法律问答 Agent 后端服务",
         version="0.1.0",
     )
+    # 容器挂在 app.state 上，请求处理链路可按需解析依赖
+    app.state.container = container
 
     @app.get("/api/health", tags=["system"])
     async def health() -> dict[str, str]:

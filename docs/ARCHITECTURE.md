@@ -287,3 +287,19 @@ curl http://127.0.0.1:8000/api/health   # 期望 {"status": "ok"}
 ### 敏感配置
 `GLM_API_KEY` 等密钥只通过环境变量或本地 `.env`（已被 .gitignore 排除）注入，禁止硬编码、禁止提交仓库；日志中禁止输出密钥明文。
 
+## 15. 依赖注入与工厂（BE-003）
+
+### 机制
+- `backend/app/common/di.py` 提供轻量 `DIContainer`：按抽象接口注册工厂（工厂模式），支持单例缓存（单例模式）。
+- `backend/app/containers.py` 的 `create_container()` 是全应用唯一装配点：读取 `Settings`，按配置把具体实现注册到抽象接口上。
+
+### 依赖方向（依赖倒置）
+```text
+API / Application Service ──依赖──▶ 抽象接口（domain/repositories 等）
+                                        ▲
+具体实现（SQLite/Chroma/Ollama/GLM）────┘ 由容器在装配点注入
+```
+- 业务代码只 import 抽象接口，禁止 import 具体实现模块。
+- 切换 Provider = 修改配置 + 容器注册对应工厂，业务代码零修改。
+- 测试可向容器注册 Fake 实现替代真实基础设施。
+
