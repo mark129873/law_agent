@@ -202,3 +202,11 @@ async def test_non_stream_invoke_ignores_stream_events() -> None:
     graph = build_qa_graph(llm, rag=None)
     answer = await run_qa(graph, "任何问题")
     assert answer == "完整回答。"
+
+def test_compiled_graph_satisfies_qa_workflow_port() -> None:
+    """装配守卫：LangGraph 编译产物必须满足 QaWorkflow 领域端口。"""
+    from app.domain.services.qa_workflow import QaWorkflow
+
+    graph = build_qa_graph(RecordingFakeLLM("ok"), rag=None)
+    assert isinstance(graph, QaWorkflow)  # runtime_checkable 校验方法存在性
+

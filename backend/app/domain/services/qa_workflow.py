@@ -8,9 +8,12 @@ LangGraph 的 CompiledStateGraph 结构上天然满足本协议。
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Protocol
+from typing import Any, AsyncIterator, Protocol, runtime_checkable
 
 
+# runtime_checkable：允许装配点与测试用 isinstance 校验实现方满足端口
+# （仅检查方法存在性；签名正确性由调用约定与测试保证）
+@runtime_checkable
 class QaWorkflow(Protocol):
     """问答工作流契约：非流式执行 + 流式执行。"""
 
