@@ -242,8 +242,8 @@
       "id": "FE-007",
       "name": "流式聊天交互",
       "description": "使用 Fetch 消费 Chat 流式 API，将 Agent 回复逐步渲染到消息区域，并处理发送中、生成中、完成和异常等状态。",
-      "status": "planned",
-      "evidence": "待实现：模型生成过程中 UI 能够实时显示新增内容，并在生成完成后正确保存和展示完整回答。",
+      "status": "passing",
+      "evidence": "2026-09-06：api/chat.ts fetch 读流按 SSE 拆分 delta/done/error；AppContext.sendQuestion 增量写 messages（乐观插入→onDelta 追加→done 收尾/移除光标→onError 移除空占位并提示）；UI 状态：顶栏「正在生成…」、流式光标（motion-reduce 静止）、发送中按钮禁用、错误条（danger token，可关闭）、streamingRef 守卫生成中禁止切换/新建会话。真实浏览器验证：采样序列 506(空占位)→681(生成中部分内容)→823(完整) 证明逐步渲染；生成中点击其他会话被阻止（主区域与标题不变）；停后端发送→「请求失败（HTTP 502）」错误条出现、重启后恢复；附带验证回答策略真实生效（无关领域问题明确声明知识库暂无依据）。",
       "testedAt": null
     },
     {

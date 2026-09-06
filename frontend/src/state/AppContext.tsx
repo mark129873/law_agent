@@ -67,6 +67,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [loadingMessages, setLoadingMessages] = useState(false)
+  // 用 ref 同步记录流式状态：异步回调里读 state 变量会拿到闭包旧值，
+  // 导致"生成中"判断失效。声明在最前面，会话动作与提问动作都要用它做守卫。
+  const streamingRef = useRef(false)
 
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([])
 
@@ -83,6 +86,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   /** 打开某个会话：记录 id 并加载它的全部历史消息 */
   const openConversation = useCallback(async (id: string) => {
+    // 生成中禁止切换：切换会清空消息区，会打断流式增量写入，造成状态错乱
+    if (streamingRef.current) return
     setActiveId(id)
     setLoadingMessages(true)
     try {
@@ -97,6 +102,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   /** 回到"新对话"空白状态；会话对象延迟到真正发送第一句提问时才创建 */
   const startNewChat = useCallback(() => {
+    // 生成中禁止新建/切换视图，理由同 openConversation
+    if (streamingRef.current) return
     setActiveId(null)
     setMessages([])
   }, [])
@@ -128,9 +135,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamError, setStreamError] = useState<string | null>(null)
-  // 用 ref 同步记录流式状态：sendQuestion 是异步函数，
-  // 如果读 state 变量会拿到闭包里的旧值，导致"生成中"判断失效
-  const streamingRef = useRef(false)
 
   const clearStreamError = useCallback(() => setStreamError(null), [])
 
