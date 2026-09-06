@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     # ---- 大模型 Provider ----
     llm_provider: LlmProvider = LlmProvider.OLLAMA
     ollama_base_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "qwen2.5:7b"
+    ollama_model: str = "qwen3.5:4b"
     glm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
     glm_model: str = "glm-4-flash"
     # 敏感配置：只通过环境变量注入，禁止写入任何文件或日志
