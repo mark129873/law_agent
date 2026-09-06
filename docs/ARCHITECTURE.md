@@ -217,16 +217,19 @@ curl http://127.0.0.1:8000/api/health              # {"status":"ok"}
 - 启动时 lifespan 自动：SQLite connect + init_schema（幂等建表）、Chroma initialize；关闭时释放。
 - 日志：单行 JSON（timestamp/level/service/message/data），等级由 `LOG_LEVEL` 控制，默认 ERROR；注意事项见 docs/RELIABILITY.md。
 
-## 9. 测试体系
+## 9. 测试体系（四层，2026-09-06 全部验证通过）
 
-| 层级 | 位置 | 内容 | 数量 |
-|------|------|------|------|
-| 单元 | tests/unit/ | 纯逻辑与抽象层，无外部 IO（DI/配置/边界守护/策略/抽象契约/Pipeline/解析器） | 37 |
-| 集成 | tests/integration/ | 真实 SQLite/Chroma、MockTransport 协议、完整应用 API | 46 |
-| 数据 | tests/data_source/ | RAG 测试数据源（真实法律文档：专利法 TXT + MD） | — |
+| 层级 | 位置 | 数量 | 验证内容 |
+|------|------|------|---------|
+| 单元 | tests/unit/ | 37（~2s） | 纯逻辑与抽象层，无外部 IO：DI 容器、配置、DDD 边界守护（AST 扫描）、回答策略、Database/VectorStore/LLM 端口契约、文档 Pipeline、TXT/PDF 解析器、健康检查 |
+| 集成 | tests/integration/（除 API） | 39（~17s） | 真实 SQLite（持久化/级联/事务回滚）、真实 Chroma（写入/检索/删除/持久化）、LLM Provider 协议（MockTransport）、Embedding 入库、RAG 检索、Agent 图（含流式走图）、对话服务 |
+| 接口 | tests/integration/test_api.py | 7（~11s） | 完整应用（临时 SQLite/Chroma + Fake LLM，不启动真实服务）：会话 CRUD、统一错误结构、SSE 流式协议（delta/done + 持久化）、文档上传/删除/非法格式拒绝 |
+| 端到端 | scripts/verify_real_e2e.py 等（手工运行） | 3 个脚本 | 真实 uvicorn + 真实 Ollama/embedding/Chroma：真实法律文档上传→向量化入库→流式 RAG 问答引用原文→消息持久化 |
 
-- 测试用 Fake/确定性实现遵循领域端口（InMemoryDatabase、DeterministicEmbedding、ScriptedLLM），与生产实现互换验证同一契约。
-- 真实外部服务验证（Ollama 问答/GLM 调用/真实 embedding）由 `scripts/` 手工脚本与 feature_list.json 证据记录覆盖。
+数据：tests/data_source/ 为 RAG 测试数据源（真实法律文档：专利法 TXT + MD）。
+
+- 自动化测试合计 83 个，`uv run pytest` 全量运行，无需任何外部服务（Fake/确定性实现遵循领域端口，与生产实现互换验证同一契约：InMemoryDatabase、DeterministicEmbedding、ScriptedLLM）。
+- 端到端脚本依赖真实外部服务（本机 Ollama 模型、GLM 密钥），不纳入 pytest 自动化，保持自动化测试的封闭性与可重复性；运行方式见脚本头部说明，验证结论记录于 feature_list.json 各功能 evidence。
 
 ## 10. 扩展点与预留
 
