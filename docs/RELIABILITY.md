@@ -1,61 +1,79 @@
 # 可靠性文档 — 可观测性、干净环境与基准测试
 
 ## 结构化日志
+
 ### 概述
-应用内所有服务均输出结构化JSON日志条目，用于运行时调试、事后问题分析以及程序行为自动化监控。
-### 日志格式
-每一条日志为单行JSON对象：
+应用内所有服务均输出结构化 JSON 日志条目，用于运行时调试、事后问题分析以及程序行为自动化监控。
+
+### 日志基础设施
+- 实现位置：`backend/app/common/logging.py`（`JsonFormatter` + `setup_logging()`，在应用导入时初始化）。
+- 每条日志为**单行 JSON 对象**，输出到 stdout：
+
 ```json
 {
   "timestamp": "2026-03-30T12:00:00.000Z",
   "level": "INFO",
-  "service": "xxx",
-  "message": "xxx",
-  "data": {
-    "xxx": "xxx",
-  }
+  "service": "chat",
+  "message": "Chat stream completed",
+  "data": { "conversation_id": "...", "answer_length": 130 }
 }
 ```
+
+- `service` 标识产生日志的模块；业务字段统一放入 `data`（通过 `logger.info(msg, extra={...})` 传入）。
+- uvicorn 自身的启动/访问日志已归一为同格式（`service: uvicorn.error / uvicorn.access`）。
+- 使用约定（重要，曾踩坑）：
+  - `extra` 的键**禁止使用 LogRecord 保留字段**（`message`、`filename`、`name` 等）——重名会使日志调用自身抛 `KeyError`，曾导致业务 404 变成 500（由 API 集成测试在 LOG_LEVEL=INFO 下抓出）。
+  - **密钥禁止进日志**：`GLM_API_KEY` 等敏感值不得出现在任何日志字段中；日志只允许记录模型名、消息数、长度等非敏感元数据。
+
 ### 日志级别
 | 日志级别 | 使用场景 | 示例 |
 |-------|-------------|---------|
 | DEBUG | 常规数据访问、文件读取 | "Retrieved chunks for document" |
-| INFO | 重要业务事件 | "Document imported", "Batch indexing complete" |
-| WARN | 数据缺失但不影响主流程 | "Content not found for document" |
-| ERROR | 程序运行失败 | "File not found during import" |
-
-### 各服务日志埋点
-
-**文档服务(DocumentService)：**
-- 文档导入，记录文件大小与元数据
-- 文档删除并输出剩余文档数量
-- 文档元数据更新
-- 文件未找到类错误
-- 文件大小超限异常
-
-**问答服务(QaService)：**
-- 问答任务开始
-- 生成回答，记录置信度与耗时
-- 用户反馈提交
-- 会话历史清空
+| INFO | 重要业务事件 | "Chat stream completed", "Document upload completed" |
+| WARN | 数据缺失但不影响主流程 | "Document produced no chunks" |
+| ERROR | 程序运行失败 | "Document ingestion failed", "Unexpected error" |
 
 ### 日志等级配置
 通过环境变量 `LOG_LEVEL` 设置日志输出等级：
+```text
 LOG_LEVEL=INFO   # 输出 INFO、WARN、ERROR
-LOG_LEVEL=ERROR # 仅输出 ERROR
-默认值：`ERROR`
+LOG_LEVEL=ERROR  # 仅输出 ERROR（默认值）
+```
+
+### 各服务日志埋点（与代码一致，由 AST 扫描核对）
+下表为 `app/` 内全部真实日志事件（service → 事件 → 附加字段）：
+
+| service | 事件（level） | data 字段 | 位置 |
+|---------|--------------|-----------|------|
+| system | Application configured (INFO) | db/vector_store/llm_provider | app/main.py |
+| system | Infrastructure closed (INFO) / Health check requested (INFO) | — | app/main.py |
+| database | Database initialized (INFO) | provider | app/main.py |
+| vector_store | VectorStore initialized (INFO) | provider | app/main.py |
+| agent | Agent generate started/completed (INFO) | model, message_count / model, answer_length | app/agent/nodes.py |
+| chat | Chat stream completed (INFO) / failed (ERROR) | conversation_id, answer_length / conversation_id, error | app/application/services/chat_service.py |
+| conversation | Conversation created/deleted (INFO) | conversation_id, title / conversation_id, removed_messages | app/application/services/conversation_service.py |
+| document_pipeline | Document processing started/completed (INFO) | file_name, size / file_name, chunk_count | app/application/services/document_pipeline.py |
+| document | Document upload started/completed (INFO)，deleted (INFO)，produced no chunks (WARN)，ingestion failed (ERROR) | document_id, file_name, size / status, chunk_count / removed_chunks / error | app/application/services/document_service.py |
+| knowledge | Knowledge ingestion started/completed (INFO)，produced no chunks (WARN) | document_id, file_name, size / chunk_count | app/application/services/knowledge_service.py |
+| rag | RAG retrieval completed (INFO) | query_length, hit_count, top_score | app/application/services/rag_service.py |
+| embedding | Embedding requested/completed (INFO) | model, batch_size | app/infrastructure/embedding/ollama_embedding.py |
+| llm | Ollama/GLM chat·stream requested/completed (INFO) | model, message_count | app/infrastructure/llm/*.py |
+| api | Business error (WARN)，Unexpected error (ERROR，兜底 500) | code, detail / error | app/api/errors.py |
+
+维护约定：新增日志埋点时同步更新本表；`message` 与 `data` 键名不得与 LogRecord 保留字段冲突。
 
 ## 干净环境管理
+
 ### 作用
 干净环境管理保证测试从一个已知的空白状态启动，避免历史遗留数据干扰测试结果，引发未知异常。
 
 ### 需要重置干净环境的场景
 - 一轮调试结束之后
 - 新功能测试之前
-- 数据目录文件损坏时
+- 数据目录文件损坏时（数据位置见 ARCHITECTURE.md 第 6 节：`backend/data/`，已被 gitignore）
 
 ### 干净环境校验
-使用 `clean‑state‑checklist.md` 文件校验以下内容：
+使用仓库根目录的 `clean-state-checklist.md` 文件校验以下内容：
 - 项目构建无报错
 - 程序运行行为正常
 - 日志输出符合预期

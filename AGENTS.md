@@ -7,14 +7,16 @@ legal-knowledge-agent 项目描述:
 编写任何代码前，请按顺序完成以下步骤：
 - 完整阅读本文档。本文定义了本项目的开发边界与编码规范。
 - 用 `pwd` 确认当前目录。
--- 阅读 docs/ARCHITECTURE.md，了解完整架构与数据流定义
--- 阅读 docs/PRODUCT.md，掌握功能需求与用户侧交互行为
--- 阅读 docs/RELIABILITY.md，了解日志、可观测性以及干净环境的相关要求。 
+- 阅读 docs/ARCHITECTURE.md，了解完整架构与数据流定义
+- 阅读 docs/PRODUCT.md，掌握功能需求与用户侧交互行为
+- 阅读 docs/RELIABILITY.md，了解日志、可观测性以及干净环境的相关要求。
 - 读取 progress.md，了解最新已验证状态和下一步。
 - 查看 feature_list.json，确认当前所有功能的开发进度, 选择优先级最高的未完成功能
 - 用 `git log --oneline -5` 看最近提交
 - 验证`init.md`的内容, 如未通过, 则修复问题。
-- 验证项目可正常构建或启动、初始化无异常
+- 验证项目可正常构建或启动、初始化无异常。标准命令：
+  - 启动：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
+  - 验证：`cd backend && uv run pytest`（全量 83 个自动化测试）；启动后 `curl http://127.0.0.1:8000/api/health`
 - 在开始新功能前，先跑必需的 smoke test 或端到端验证, 如果基础验证一开始就失败，先修基础状态，不要在坏的起点上继续叠新功能。
 
 ## 工作规则
@@ -29,7 +31,7 @@ legal-knowledge-agent 项目描述:
 一个功能只有在以下条件都满足时才算完成：
 - 目标行为已经实现
 - 要求的验证真的跑过
-- feature_list.json 文件内该功能状态标记为 "pass"，并附上验证证据
+- feature_list.json 文件内该功能状态标记为 "passing"（与 status_legend 术语一致），并附上验证证据
 - docs/ARCHITECTURE.md 和 docs/PRODUCT.md 文档同步更新
 - 所有服务业务操作均配有结构化日志记录
 - 仓库仍然能按标准启动路径重新开始工作
@@ -70,5 +72,5 @@ legal-knowledge-agent 项目描述:
 - 代码要求简洁精炼, 避免使用复杂的语法或模式, 保持代码结构清晰
 
 ## 测试数据源
-- tests/data_source/ 测试数据源,存放用于测试功能的RAG的法律文档数据
+- backend/tests/data_source/ 测试数据源,存放用于测试功能的RAG的法律文档数据
 
