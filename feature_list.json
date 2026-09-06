@@ -65,9 +65,9 @@
       "id": "BE-007",
       "name": "Chroma 向量数据库实现",
       "description": "实现 Chroma VectorStore，负责保存文档 chunk、embedding 和 metadata，并支持根据用户问题进行相似度检索。",
-      "status": "planned",
-      "evidence": "待实现：文本及其向量能够写入 Chroma，并能够通过查询获取相关文档 chunk。",
-      "testedAt": null
+      "status": "passing",
+      "evidence": "2026-09-06：backend/app/infrastructure/vector_store/chroma.py 基于 chromadb PersistentClient 实现 VectorStore 抽象（law_chunks 集合、cosine 空间 score=1-distance、metadata 过滤按文档删除）；所有阻塞调用经 asyncio.to_thread 包装避免阻塞事件循环；不使用内置 embedding 函数，向量由调用方传入。验证：uv run pytest tests -q → 25 passed，其中 test_chroma_vector_store.py 4 passed 覆盖写入检索排序、按文档删除隔离、跨连接持久化、initialize 幂等。",
+      "testedAt": "2026-09-06"
     },
     {
       "id": "BE-008",

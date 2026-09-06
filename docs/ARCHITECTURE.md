@@ -352,3 +352,10 @@ SQLite 实现（BE-005）与未来 MySQL 实现均实现此抽象，业务层通
   这保证向量库实现与 embedding 模型彻底解耦。
 - 容器装配点按 `VECTOR_STORE_PROVIDER` 注册实现。
 
+## 19. Chroma 实现（BE-007）
+
+- 依赖 `chromadb`，使用 `PersistentClient` 持久化到配置 `CHROMA_PERSIST_DIR`（默认 `data/chroma`）。
+- 集合名 `law_chunks`，向量空间使用 cosine（保证 score = 1 - distance ∈ [0,1]，越大越相关）。
+- chunk 原文作为 document 存储，metadata 保存 `document_id`、`chunk_index` 与来源信息；`delete_by_document` 通过 metadata 过滤实现。
+- 接口中的 embedding 均由调用方显式传入，不使用 Chroma 内置 embedding 函数（与 embedding 模型解耦，且避免启动时下载模型）。
+
