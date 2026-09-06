@@ -14,9 +14,7 @@ legal-knowledge-agent 项目描述:
 - 查看 feature_list.json，确认当前所有功能的开发进度, 选择优先级最高的未完成功能
 - 用 `git log --oneline -5` 看最近提交
 - 验证`init.md`的内容, 如未通过, 则修复问题。
-- 验证项目可正常构建或启动、初始化无异常。标准命令：
-  - 启动：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-  - 验证：`cd backend && uv run pytest`（全量 83 个自动化测试）；启动后 `curl http://127.0.0.1:8000/api/health`
+- 验证项目可正常构建或启动、初始化无异常。
 - 在开始新功能前，先跑必需的 smoke test 或端到端验证, 如果基础验证一开始就失败，先修基础状态，不要在坏的起点上继续叠新功能。
 
 ## 工作规则

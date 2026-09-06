@@ -1,6 +1,8 @@
 # init.md -- 开始工作前，请验证项目可以正常无报错构建。
 
-- 如果存在后端项目, 验证后端项目可以正常构建与运行
+- 如果存在后端项目, 验证后端项目可以正常构建与运行:
+  - 启动：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
+  - 验证：`cd backend && uv run pytest`（全量 83 个自动化测试）；启动后 `curl http://127.0.0.1:8000/api/health`
 - 如果存在前端项目, 验证前端项目可以正常构建与运行
 
 - 检测AGENTS.md, progress.md, feature_list.json, clean-state-checklist.md, session-handoff.md 是否存在

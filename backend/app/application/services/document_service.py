@@ -47,12 +47,17 @@ class DocumentService:
     async def upload_document(self, filename: str, content: bytes) -> Document:
         """上传并入库一个文档，返回最终状态为 ready/failed 的元数据。"""
         if len(content) > _MAX_UPLOAD_SIZE:
+            # 埋点规则（RELIABILITY.md）：文件大小超限异常
+            logger.warning(
+                "Document too large",
+                extra={"service": "document", "file_name": filename, "size": len(content), "limit": _MAX_UPLOAD_SIZE},
+            )
             raise DocumentTooLargeError(f"文件超过大小上限（{_MAX_UPLOAD_SIZE // (1024 * 1024)}MB）")
         # 格式识别前置：不支持的格式在创建任何元数据前就拒绝
         self._parser_factory.get_parser(filename)
 
         document = await self._db.documents.create(Document(filename=filename, file_size=len(content)))
-        await self._db.documents.update_status(document.id, DocumentStatus.PROCESSING)
+        await self._set_status(document.id, DocumentStatus.PROCESSING)
         logger.info(
             "Document upload started",
             extra={"service": "document", "document_id": document.id, "file_name": filename, "size": len(content)},
@@ -67,13 +72,13 @@ class DocumentService:
                 )
         except Exception as error:
             # 解析/入库失败必须落库为 failed，调用方据此给用户失败反馈
-            await self._db.documents.update_status(document.id, DocumentStatus.FAILED)
+            await self._set_status(document.id, DocumentStatus.FAILED)
             logger.error(
                 "Document ingestion failed",
                 extra={"service": "document", "document_id": document.id, "error": str(error)},
             )
             raise
-        await self._db.documents.update_status(document.id, status)
+        await self._set_status(document.id, status)
         logger.info(
             "Document upload completed",
             extra={"service": "document", "document_id": document.id, "status": status.value, "chunk_count": len(chunk_ids)},
@@ -81,12 +86,25 @@ class DocumentService:
         document.status = status
         return document
 
+    async def _set_status(self, document_id: str, status: DocumentStatus) -> None:
+        """元数据状态更新的唯一入口（埋点规则：文档元数据更新需记录）。"""
+        await self._db.documents.update_status(document_id, status)
+        logger.info(
+            "Document metadata updated",
+            extra={"service": "document", "document_id": document_id, "status": status.value},
+        )
+
     async def list_documents(self) -> list[Document]:
         return await self._db.documents.list()
 
     async def get_document(self, document_id: str) -> Document:
         document = await self._db.documents.get(document_id)
         if document is None:
+            # 埋点规则（RELIABILITY.md）：文件未找到类错误
+            logger.warning(
+                "Document not found",
+                extra={"service": "document", "document_id": document_id},
+            )
             raise DocumentNotFoundError(f"文档不存在：{document_id}")
         return document
 
@@ -95,7 +113,14 @@ class DocumentService:
         await self.get_document(document_id)
         removed_chunks = await self._vector_store.delete_by_document(document_id)
         await self._db.documents.delete(document_id)
+        # 埋点规则（RELIABILITY.md）：文档删除并输出剩余文档数量
+        remaining_count = len(await self._db.documents.list())
         logger.info(
             "Document deleted",
-            extra={"service": "document", "document_id": document_id, "removed_chunks": removed_chunks},
+            extra={
+                "service": "document",
+                "document_id": document_id,
+                "removed_chunks": removed_chunks,
+                "remaining_count": remaining_count,
+            },
         )

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import AsyncIterator
 
 from app.application.services.conversation_service import ConversationService
@@ -45,10 +46,28 @@ class ChatService:
         为什么与流式共用图：检索与 Prompt 组装只存在图节点内一份实现，
         两条路径永远不会出现 Prompt 或上下文不一致。
         """
+        started_at = time.perf_counter()
+        # 埋点规则（RELIABILITY.md）：问答任务开始
+        logger.info(
+            "Chat task started",
+            extra={"service": "chat", "conversation_id": conversation_id, "question_length": len(question)},
+        )
         history = await self._snapshot_history(conversation_id)
         await self._conversations.add_message(conversation_id, MessageRole.USER, question)
         # 只经端口调用工作流：answer 字段由图状态返回（见 AgentState）
         result = await self._graph.ainvoke({"question": question, "history": history})
+        # 埋点规则（RELIABILITY.md）：生成回答记录耗时
+        # （回答置信度由检索侧记录：RagService 的 top_score 即检索相关度置信度）
+        duration_ms = int((time.perf_counter() - started_at) * 1000)
+        logger.info(
+            "Chat answer generated",
+            extra={
+                "service": "chat",
+                "conversation_id": conversation_id,
+                "answer_length": len(result["answer"]),
+                "duration_ms": duration_ms,
+            },
+        )
         return result["answer"]
 
     async def stream_answer(self, conversation_id: str, question: str) -> AsyncIterator[str]:
@@ -57,6 +76,12 @@ class ChatService:
         为什么在生成器内持久化：只有在正常完成时才落库，
         异常中断的回答不完整，不应以完整消息的形式入库。
         """
+        started_at = time.perf_counter()
+        # 埋点规则（RELIABILITY.md）：问答任务开始
+        logger.info(
+            "Chat task started",
+            extra={"service": "chat", "conversation_id": conversation_id, "question_length": len(question)},
+        )
         history = await self._snapshot_history(conversation_id)
         await self._conversations.add_message(conversation_id, MessageRole.USER, question)
 
@@ -76,11 +101,14 @@ class ChatService:
             raise
         full_answer = "".join(collected)
         await self._conversations.add_message(conversation_id, MessageRole.ASSISTANT, full_answer)
+        # 埋点规则（RELIABILITY.md）：生成回答记录耗时（置信度见 RagService top_score）
+        duration_ms = int((time.perf_counter() - started_at) * 1000)
         logger.info(
             "Chat stream completed",
             extra={
                 "service": "chat",
                 "conversation_id": conversation_id,
                 "answer_length": len(full_answer),
+                "duration_ms": duration_ms,
             },
         )

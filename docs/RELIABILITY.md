@@ -7,7 +7,7 @@
 
 ### 日志基础设施
 - 实现位置：`backend/app/common/logging.py`（`JsonFormatter` + `setup_logging()`，在应用导入时初始化）。
-- 每条日志为**单行 JSON 对象**，输出到 stdout：
+- 每条日志为**单行 JSON 对象**，输出到 stdout, 示例：
 
 ```json
 {
@@ -39,28 +39,21 @@
 LOG_LEVEL=INFO   # 输出 INFO、WARN、ERROR
 LOG_LEVEL=ERROR  # 仅输出 ERROR（默认值）
 ```
+### 各服务日志埋点规则
+根据实际需要, 在必要位置埋点, 记录重要业务事件、数据缺失但不影响主流程、程序运行失败等。示例:
+**文档服务(DocumentService)：**
+- 文档导入，记录文件大小与元数据
+- 文档删除并输出剩余文档数量
+- 文档元数据更新
+- 文件未找到类错误
+- 文件大小超限异常
+**问答服务(QaService)：**
+- 问答任务开始
+- 生成回答，记录置信度与耗时
+- 用户反馈提交
+- 会话历史清空
+**等等**
 
-### 各服务日志埋点（与代码一致，由 AST 扫描核对）
-下表为 `app/` 内全部真实日志事件（service → 事件 → 附加字段）：
-
-| service | 事件（level） | data 字段 | 位置 |
-|---------|--------------|-----------|------|
-| system | Application configured (INFO) | db/vector_store/llm_provider | app/main.py |
-| system | Infrastructure closed (INFO) / Health check requested (INFO) | — | app/main.py |
-| database | Database initialized (INFO) | provider | app/main.py |
-| vector_store | VectorStore initialized (INFO) | provider | app/main.py |
-| agent | Agent generate started/completed (INFO) | model, message_count / model, answer_length | app/agent/nodes.py |
-| chat | Chat stream completed (INFO) / failed (ERROR) | conversation_id, answer_length / conversation_id, error | app/application/services/chat_service.py |
-| conversation | Conversation created/deleted (INFO) | conversation_id, title / conversation_id, removed_messages | app/application/services/conversation_service.py |
-| document_pipeline | Document processing started/completed (INFO) | file_name, size / file_name, chunk_count | app/application/services/document_pipeline.py |
-| document | Document upload started/completed (INFO)，deleted (INFO)，produced no chunks (WARN)，ingestion failed (ERROR) | document_id, file_name, size / status, chunk_count / removed_chunks / error | app/application/services/document_service.py |
-| knowledge | Knowledge ingestion started/completed (INFO)，produced no chunks (WARN) | document_id, file_name, size / chunk_count | app/application/services/knowledge_service.py |
-| rag | RAG retrieval completed (INFO) | query_length, hit_count, top_score | app/application/services/rag_service.py |
-| embedding | Embedding requested/completed (INFO) | model, batch_size | app/infrastructure/embedding/ollama_embedding.py |
-| llm | Ollama/GLM chat·stream requested/completed (INFO) | model, message_count | app/infrastructure/llm/*.py |
-| api | Business error (WARN)，Unexpected error (ERROR，兜底 500) | code, detail / error | app/api/errors.py |
-
-维护约定：新增日志埋点时同步更新本表；`message` 与 `data` 键名不得与 LogRecord 保留字段冲突。
 
 ## 干净环境管理
 
