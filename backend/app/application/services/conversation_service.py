@@ -38,8 +38,16 @@ class ConversationService:
         return conversation
 
     async def list_conversations(self) -> list[Conversation]:
-        """列出全部会话（按创建时间倒序）。"""
-        return await self._db.conversations.list()
+        """列出全部会话：按创建时间正序（FE-012：最早创建的在最上面）。
+
+        为什么排序放在应用层（BE-024）：排序是产品展示规则，不是存储职责。
+        仓储不输出 SQL ORDER BY，服务层用 sorted 按 created_at 判断顺序——
+        这样换任何数据库实现，顺序都不变；也不再依赖 SQLite 专有的 rowid
+        作为"同一时刻"的第二排序键（MySQL 没有 rowid）。
+        Python 的 sorted 是稳定排序，同一份数据重复查询结果一致。
+        """
+        conversations = await self._db.conversations.list()
+        return sorted(conversations, key=lambda conversation: conversation.created_at)
 
     async def get_conversation(self, conversation_id: str) -> Conversation:
         """获取会话，不存在时抛出业务异常。"""
@@ -49,9 +57,14 @@ class ConversationService:
         return conversation
 
     async def get_messages(self, conversation_id: str) -> list[Message]:
-        """获取会话全部消息；会话不存在时抛出业务异常。"""
+        """获取会话全部消息；会话不存在时抛出业务异常。
+
+        消息顺序同样由应用层按 created_at 正序决定（BE-024）：
+        提问在上、对应回答在下，与具体数据库的物理返回顺序无关。
+        """
         await self.get_conversation(conversation_id)
-        return await self._db.messages.list_by_conversation(conversation_id)
+        messages = await self._db.messages.list_by_conversation(conversation_id)
+        return sorted(messages, key=lambda message: message.created_at)
 
     async def add_message(
         self,

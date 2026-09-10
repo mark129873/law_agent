@@ -13,8 +13,10 @@ import pathlib
 APP_ROOT = pathlib.Path(__file__).resolve().parents[2] / "app"
 
 # 领域层/应用层禁止引入的技术库；pydantic 仅允许 API 层 DTO 使用
+# BE-024 起数据库技术栈为 SQLAlchemy（aiosqlite 仅作为其 SQLite 异步驱动，
+# 同样禁止在领域层/应用层直接导入），两者都在守护名单内
 _TECH_LIBS = {
-    "fastapi", "httpx", "chromadb", "aiosqlite", "pypdf",
+    "fastapi", "httpx", "chromadb", "sqlalchemy", "aiosqlite", "pypdf",
     "langgraph", "pydantic", "pydantic_settings", "uvicorn",
 }
 

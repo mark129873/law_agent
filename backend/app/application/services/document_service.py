@@ -95,7 +95,14 @@ class DocumentService:
         )
 
     async def list_documents(self) -> list[Document]:
-        return await self._db.documents.list()
+        """列出全部文档：按上传时间倒序（最新上传的在最前）。
+
+        为什么排序放在应用层（BE-024）：与会话/消息列表同理，
+        排序是展示规则而非存储职责；仓储不输出 SQL ORDER BY，
+        服务层按 created_at 判断，换数据库实现顺序不变。
+        """
+        documents = await self._db.documents.list()
+        return sorted(documents, key=lambda document: document.created_at, reverse=True)
 
     async def get_document(self, document_id: str) -> Document:
         document = await self._db.documents.get(document_id)

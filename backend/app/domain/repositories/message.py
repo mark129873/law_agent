@@ -21,7 +21,11 @@ class MessageRepository(ABC):
 
     @abstractmethod
     async def list_by_conversation(self, conversation_id: str) -> list[Message]:
-        """按会话列出消息（按创建时间正序，保持对话顺序）。"""
+        """按会话列出消息。
+
+        契约说明（BE-024）：仓储不承诺消息顺序，对话顺序由应用服务层
+        按 created_at 正序决定（提问在前、回答在后）。
+        """
 
     @abstractmethod
     async def delete_by_conversation(self, conversation_id: str) -> int:

@@ -1,6 +1,6 @@
 {
   "project": "legal-knowledge-agent",
-  "description": "法律知识库与助手 Agent：基于 LangGraph 构建法律问答 Agent，支持 Ollama 本地模型和 GLM API，支持用户上传 PDF、TXT 等文档构建法律知识库，通过向量检索增强生成法律问题回答；支持多会话、历史消息、流式回答和对话删除。后端采用 Python 3.11.15 + FastAPI + SQLite + Chroma，并通过抽象接口为未来切换 MySQL 8.0、Milvus 和其他 LLM Provider 做好架构准备；前端采用 React + TypeScript + Vite + Tailwind CSS + Fetch + React Router，整体交互和视觉风格参考 Codex Web。",
+  "description": "法律知识库与助手 Agent：基于 LangGraph 构建法律问答 Agent，支持 Ollama 本地模型和 GLM API，支持用户上传 PDF、TXT 等文档构建法律知识库，通过向量检索增强生成法律问题回答；支持多会话、历史消息、流式回答和对话删除。后端采用 Python 3.11.15 + FastAPI + SQLAlchemy 2.0 async（当前 SQLite）+ Chroma，并通过抽象接口为未来切换 MySQL 8.0、Milvus 和其他 LLM Provider 做好架构准备；前端采用 React + TypeScript + Vite + Tailwind CSS + Fetch + React Router，整体交互和视觉风格参考 Codex Web。",
   "rules": {
     "single_active_feature": true,
     "passing_requires_evidence": true,
@@ -51,7 +51,7 @@
       "name": "SQLite 数据库实现与数据模型",
       "description": "实现当前版本 SQLite 数据库，建立 Conversation、Message、Document 等核心业务数据模型，并提供数据库初始化机制。",
       "status": "passing",
-      "evidence": "2026-09-06：app/infrastructure/database/sqlite/database.py 基于 aiosqlite 实现 Database 端口（三表幂等建表、外键级联删除、事务深度计数守卫提交边界，数据路径经 settings 锚定）；容器按 DB_PROVIDER 注册并接入 main.py lifespan 自动建库。验证：test_sqlite_database.py 6 passed（跨连接持久化/级联删除/真实事务回滚/幂等）；删除 db 文件后真实启动自动重建并输出结构化日志 Database initialized。",
+      "evidence": "2026-09-06：Database 端口实现（三表幂等建表、外键级联删除、事务深度计数守卫提交边界，数据路径经 settings 锚定）；容器按 DB_PROVIDER 注册并接入 main.py lifespan 自动建库。验证：test_sqlite_database.py 6 passed（跨连接持久化/级联删除/真实事务回滚/幂等）；删除 db 文件后真实启动自动重建并输出结构化日志 Database initialized。2026-09-10（BE-024）：实现载体由手写 SQL + aiosqlite 迁移为 SQLAlchemy 2.0 async Core（app/infrastructure/database/sqlalchemy/），本功能要求（SQLite 可自动初始化、核心数据模型可持久化）不变；对应测试文件更新为 test_sqlalchemy_database.py（9 passed，含事务提交/先读后事务），并以迁移前版本生成的旧库启动新实现通过兼容复验。",
       "testedAt": "2026-09-06"
     },
     {
@@ -285,14 +285,22 @@
       "status": "passing",
       "evidence": "2026-09-06：浏览器端到端验证通过（headless Edge 经 playwright-core 驱动本机 :5173/:8000，脚本与截图存仓库外 Temp/opencode/fe011/，仓库零污染）。RAG 场景：新对话提问专利法期限，流式完成后「参考文档」按钮出现（计数 4），点开展示按序号列表（首项为专利法 txt 及第二十六条命中内容），截图 fe011-A-expanded.png；刷新后重进会话按钮仍在（fe011-A-after-reload.png）。空知识库场景（测前经 API 临时删除唯一文档、测后即用 tests/data_source 原文件重传恢复 ready）：无关提问完成后按钮数量为 0（fe011-B-no-button.png）。契约层：真实 SSE 验证 sources 事件先于全部 delta、持久化来源与流内一致、GET 回读一致；后端 uv run pytest 92 passed；前端 npm run build 通过；测试会话已清理。注意：清理时按标题前缀删除误删 1 条历史同名提问会话（测试数据，非用户数据）。",
       "testedAt": "2026-09-06"
-    }
+    },
     {
       "id": "FE-012",
       "name": "侧边栏历史对话按创建时间正序展示",
       "description": "侧边栏历史对话按创建时间从上到下排列：最早创建的在最上面，新创建的会话追加到最下面；刷新重进后顺序一致。",
       "status": "passing",
-      "evidence": "2026-09-06：后端会话列表 ORDER BY created_at ASC, rowid ASC（同秒稳定顺序）；前端 createConversation 改为追加到底部，初次加载沿用后端顺序。验证：uv run pytest 92 passed（test_api 正序断言已同步）；npm run build 通过；真实浏览器（headless Edge）验证 API 顺序与侧边栏从上到下完全一致（旧在上、新在下，新建会话出现在底部），截图 fe012-sidebar-order.png 存仓库外 Temp/opencode/fe011/；测试会话已清理。",
+      "evidence": "2026-09-06：后端会话列表 ORDER BY created_at ASC, rowid ASC（同秒稳定顺序）；前端 createConversation 改为追加到底部，初次加载沿用后端顺序。验证：uv run pytest 92 passed（test_api 正序断言已同步）；npm run build 通过；真实浏览器（headless Edge）验证 API 顺序与侧边栏从上到下完全一致（旧在上、新在下，新建会话出现在底部），截图 fe012-sidebar-order.png 存仓库外 Temp/opencode/fe011/；测试会话已清理。2026-09-10 机制变更（BE-024）：排序从仓储 SQL 上移到应用层 ConversationService.list_conversations（sorted by created_at，仅按时间判断，不再使用 SQLite 专有 rowid 兜底），用户可见顺序不变。复验：uv run pytest 98 passed（test_api 正序断言 + test_ordering_contract 乱序落库仍按时间正序）；真实启动读取迁移前旧库，GET /api/conversations 返回 4 条按 created_at 正序（2026-09-06 → 2026-09-08），侧边栏顺序逻辑不变。",
       "testedAt": "2026-09-06"
+    },
+    {
+      "id": "BE-024",
+      "name": "数据库实现迁移到 SQLAlchemy async 并将列表排序职责上移应用层",
+      "description": "把 app/infrastructure/database/sqlite 的手写 SQL + aiosqlite 实现替换为 SQLAlchemy 2.0 async Core 实现（方言无关表结构与 DML、表级外键 ON DELETE CASCADE、ISO-8601 时区无损时间列类型、旧库 sources 列幂等迁移；aiosqlite 保留为 SQLAlchemy 的 SQLite 异步驱动）；同时把列表排序职责从仓储 SQL 上移到应用服务层，仅按 created_at 判断（移除 SQLite 专有的 rowid 第二排序键），为后续接入 MySQL 8.0 消除方言障碍。",
+      "status": "passing",
+      "evidence": "2026-09-10：新增 app/infrastructure/database/sqlalchemy/（schema.py 表元数据 / types.py IsoDateTime 时区无损列 / database.py 端口实现 + 三个 Core 仓储），删除手写 SQL 的 database/sqlite/ 与已无用的 mysql/ 空占位包；aiosqlite 从业务驱动降级为 SQLAlchemy 的 SQLite 异步驱动（sqlite+aiosqlite:///，经 sqlite_url() 统一拼装，Windows 路径转 POSIX）。方言无关设计：主键/外键用定长 VARCHAR（MySQL 的 TEXT 不能做主键/外键）、外键用表级 ForeignKey(ondelete=CASCADE)（列内联 REFERENCES 在 MySQL 被忽略）、SQLite 经 connect 事件开启 PRAGMA foreign_keys、旧库 sources 列迁移改用 SQLAlchemy inspect 反射（幂等）。排序职责上移：三个 Repository 的 list/list_by_conversation 去掉 ORDER BY（移除 SQLite 专有 rowid 第二排序键），ConversationService.list_conversations 与 get_messages 按 created_at 正序、DocumentService.list_documents 按 created_at 倒序，仓储端口文档同步声明\"不承诺顺序\"。事务语义保持：单连接 + 事务栈守卫提交边界，最外层复用 autobegin 事务（先读后开事务可用），嵌套用 SAVEPOINT。验证：uv run pytest → 98 passed（基线 92，新增事务一次性提交、先读后事务、排序契约 4 例等 6 例；test_sqlite_database.py 迁移为 test_sqlalchemy_database.py，同批行为断言在 SQLAlchemy 实现上全绿；DDD 守护名单加入 sqlalchemy/aiosqlite）；旧库兼容实测：用迁移前版本创建的 data/law_agent.db 直接走标准启动路径 uv run uvicorn app.main:app → /api/health ok，GET /api/conversations 返回 4 条会话按 created_at 正序、GET /api/documents 上传时间倒序、中文标题/文件名与 sources JSON 无损且时间戳带 +00:00，POST /api/conversations 201（4→5）、DELETE 204（回到 4，测试会话已清理），结构化日志正常。顺带修复 feature_list.json 缺逗号导致整体无法被 JSON 解析的缺陷。",
+      "testedAt": "2026-09-10"
     }
   ]
 }

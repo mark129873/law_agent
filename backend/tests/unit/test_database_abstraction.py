@@ -73,7 +73,10 @@ class _FakeConversationRepository(ConversationRepository):
         return self._db._conversations.get(conversation_id)
 
     async def list(self) -> list[Conversation]:
-        return sorted(self._db._conversations.values(), key=lambda c: c.created_at, reverse=True)
+        # BE-024：仓储端口不再承诺顺序（排序由应用服务层按 created_at 决定），
+        # 因此内存 Fake 也如实返回存储顺序，不再自行倒序——
+        # 修掉此前 Fake（倒序）与真实 SQLite 实现（正序）不一致的隐患。
+        return list(self._db._conversations.values())
 
     async def delete(self, conversation_id: str) -> bool:
         return self._db._conversations.pop(conversation_id, None) is not None
@@ -110,7 +113,8 @@ class _FakeDocumentRepository(DocumentRepository):
         return self._db._documents.get(document_id)
 
     async def list(self) -> list[Document]:
-        return sorted(self._db._documents.values(), key=lambda d: d.created_at, reverse=True)
+        # 同 ConversationRepository：不排序，顺序归应用层（BE-024）
+        return list(self._db._documents.values())
 
     async def delete(self, document_id: str) -> bool:
         return self._db._documents.pop(document_id, None) is not None

@@ -3,9 +3,32 @@
 ## 当前已验证状态
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
 - 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 标准验证路径：`cd backend && uv run pytest tests -q`；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：无——BE-001~023 与 FE-001~012 全部 passing
+- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 98 个自动化测试）；启动后 `curl http://127.0.0.1:8000/api/health`
+- 当前最高优先级未完成功能：无——BE-001~024 与 FE-001~012 全部 passing
 - 当前 blocker：无
+
+### Session 020（BE-024 数据库实现迁移到 SQLAlchemy + 排序职责上移应用层）
+- 日期：2026-09-10
+- 本轮目标：用户提问"数据库的代码可以改为 sqlalchemy 么"并选定方案——改用 SQLAlchemy Core（async）替换手写 SQL + aiosqlite，同时**排序逻辑放到 application 层且仅按时间判断**
+- 技术决策：
+  - 选 SQLAlchemy 2.0 **async Core** 而非 ORM：本项目查询全是简单 CRUD，领域实体已是干净 dataclass，引入 ORM 会多一层 Row↔实体映射并带来 AsyncSession/expire_on_commit/异步懒加载等与"每次写入即提交"模型冲突的复杂度；Core 恰好解决真正的问题——方言差异（为 MySQL 8.0 接入清障）
+  - 新增 `app/infrastructure/database/sqlalchemy/`（schema.py 表元数据 / types.py IsoDateTime / database.py 端口实现 + 三个仓储），删除 `database/sqlite/` 与已无用的 `mysql/` 空占位包；**aiosqlite 保留**（降级为 SQLAlchemy 的 SQLite 异步驱动，业务代码不再直接导入）
+  - 时区无损：SQLAlchemy 默认 DateTime 在 SQLite 会丢 tzinfo、MySQL DATETIME 无时区概念，会让既有断言"读回 tzinfo 必须存在"失败；故用 TypeDecorator 继续以 ISO-8601 字符串存取（与旧实现逐字节一致，旧库零迁移）
+  - 写进表级的方言无关细节：主键/外键用定长 VARCHAR（MySQL 的 TEXT 不能做主键/外键）、ForeignKey(ondelete="CASCADE") 生成表级约束（列内联 REFERENCES 在 MySQL 会被忽略）、SQLite 用 connect 事件开 `PRAGMA foreign_keys`
+  - 排序上移：三个 Repository 去掉 ORDER BY（移除 SQLite 专有 rowid 第二排序键），ConversationService.list_conversations/get_messages 按 created_at 正序、DocumentService.list_documents 按 created_at 倒序；仓储端口文档改写为"不承诺顺序"。顺带修掉内存 Fake（倒序）与真实实现（正序）此前的排序不一致
+  - 事务语义保持：单连接 + 事务栈守卫提交边界；最外层优先复用 SQLAlchemy 的 autobegin 事务（否则"先读后开事务"会抛 already begun），嵌套用 SAVEPOINT
+- 运行过的验证：
+  - `uv run pytest -q` → **98 passed**（迁移前基线 92；新增事务一次性提交、先读后事务、排序契约 4 例等共 6 例）；分层：unit 38（1.84s）、integration 52（21.97s）、api 8
+  - 旧库兼容实测：用**迁移前版本创建**的 `backend/data/law_agent.db` 走标准启动路径 → `/api/health` ok；`GET /api/conversations` 4 条按 created_at 正序、`GET /api/documents` 上传时间倒序、中文与 sources JSON 无损（时间戳带 +00:00）；`POST /api/conversations` 201（4→5）→ `DELETE` 204（回到 4，测试会话已清理）；结构化 JSON 日志正常
+  - 旧 schema 迁移：test_schema_migration_adds_sources_column 用同步引擎造 FE-023 之前的旧表 + 历史数据，验证幂等补列、数据保留、迁移后可写带来源消息
+  - DDD 守护更新：`test_ddd_boundaries.py` 的技术库名单加入 sqlalchemy（aiosqlite 保留），sqlalchemy 只出现在 infrastructure
+- 已记录证据：feature_list.json BE-024（passing）、BE-005 与 FE-012 evidence 同步更新；NEW_FEATURE.md 记录本轮功能与实测结果
+- 提交记录：本轮提交
+- 顺带修复：`feature_list.json` 在 FE-012 条目处缺逗号，导致整个文件无法被 JSON 解析（已修复并校验）
+- 已知风险或未解决问题：
+  - 同一 `created_at`（微秒级相同）时不再有第二排序键：顺序由底层返回顺序决定，`sorted` 稳定性保证重复查询一致，但"插入先后"不再被保证（本轮用户明确要求仅按时间判断；实际写入均间隔一次 IO，同微秒概率极低）
+  - MySQL 仍未启用：容器对 `DB_PROVIDER=mysql` 显式抛 NotImplementedError（接入只剩装 aiomysql + URL 分支 + 真实实例验证）；连接池化事务模型（每请求一连接）与当前 `transaction()` 端口形状不兼容，属独立改造
+- 下一步最佳动作：MySQL 8.0 接入（驱动 + URL 分支 + 真实实例集成验证 + 迁移方案如 Alembic），或 session-handoff 中列出的可选产品增强
 
 ### Session 019（FE-012 侧边栏历史对话正序）
 - 日期：2026-09-06

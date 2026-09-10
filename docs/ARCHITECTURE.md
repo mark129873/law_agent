@@ -5,6 +5,7 @@
 -后端使用fastapi, 接口使用异步函数
 -后端使用langraph, 大模型支持ollama本地部署以及使用glm的api, 
 -数据库此版本支持sqlite3, 后续版本支持mysql8.0根据配置进行切换, 做好数据库接口层抽象
+-数据库实现统一走 SQLAlchemy 2.0 async Core（方言无关的表结构与 DML），SQLite 是当前唯一已启用的 Provider，MySQL 8.0 接入只需换 URL 与异步驱动
 -向量数据库支持chroma, 后续版本支持milvus根据配置进行切换, 做好向量数据库接口层抽象
 
 ## 1. 系统概览
@@ -37,7 +38,7 @@
       └─────────────────────────────┘
 ```
 
-技术栈：Python 3.11 + FastAPI（全异步）+ uv 环境管理 + LangGraph + aiosqlite + Chroma + httpx。
+技术栈：Python 3.11 + FastAPI（全异步）+ uv 环境管理 + LangGraph + SQLAlchemy 2.0 async Core（当前挂 aiosqlite 驱动）+ Chroma + httpx。
 前端技术栈：React 19 + TypeScript（严格模式）+ Vite 8 + Tailwind CSS v4 + React Router 7 + 原生 Fetch（无 axios）。
 
 ## 2. 目录结构
@@ -65,7 +66,7 @@ backend/
 │   │   └── services/           # document_parser / embedding / qa_workflow 端口
 │   │
 │   ├── infrastructure/         # 基础设施实现（实现领域端口）
-│   │   ├── database/sqlite/    # SQLiteDatabase（aiosqlite；mysql/ 预留）
+│   │   ├── database/sqlalchemy/ # SQLAlchemyDatabase（schema.py 表结构 / types.py 时区无损时间列 / database.py 端口实现）；方言无关，MySQL 预留靠 URL 切换
 │   │   ├── vector_store/       # ChromaVectorStore；milvus.py 骨架预留
 │   │   ├── llm/                # OllamaProvider / GLMProvider
 │   │   ├── document_parser/    # PdfParser（pypdf）/ TextParser（txt/md，多编码回退）
@@ -140,18 +141,24 @@ Agent（工作流实现，独立模块）──▶ Domain 端口 + Application �
 ### 领域端口清单
 | 端口 | 定义位置 | 当前实现 |
 |------|---------|---------|
-| `Database` / `TransactionContext` | domain/repositories/database.py | SQLiteDatabase |
-| `ConversationRepository` / `MessageRepository` / `DocumentRepository` | domain/repositories/ | SQLiteDatabase 内置仓库 |
+| `Database` / `TransactionContext` | domain/repositories/database.py | SQLAlchemyDatabase（infrastructure/database/sqlalchemy/） |
+| `ConversationRepository` / `MessageRepository` / `DocumentRepository` | domain/repositories/ | SQLAlchemyDatabase 内置仓库（Core 表达式，方言无关） |
 | `VectorStore` | domain/repositories/vector_store.py | ChromaVectorStore（Milvus 骨架预留） |
 | `LLMProvider` | domain/repositories/llm_provider.py | OllamaProvider / GLMProvider |
 | `DocumentParser` | domain/services/document_parser.py | TextParser / PdfParser |
 | `EmbeddingService` | domain/services/embedding.py | OllamaEmbeddingService |
 | `QaWorkflow` | domain/services/qa_workflow.py | LangGraph 工作流（agent/，经 `create_qa_workflow` 工厂暴露） |
 
+### 排序职责（BE-024）
+- **仓储只负责读写，不负责排序**：三个 Repository 的 `list` / `list_by_conversation` 不再输出 SQL `ORDER BY`（原 `ORDER BY created_at ASC, rowid ASC` 依赖 SQLite 专有的 `rowid`，MySQL 无此概念）。
+- **排序规则集中在应用服务层，且只按创建时间判断**：`ConversationService.list_conversations`（`created_at` 正序）、`ConversationService.get_messages`（`created_at` 正序）、`DocumentService.list_documents`（`created_at` 倒序）。交换任何数据库实现，排序行为不变。
+- 同一 `created_at`（微秒级相同）的记录没有第二排序键：输出顺序由底层返回顺序决定，Python `sorted` 的稳定性保证同一份数据重复查询结果一致；不再引入"物理行号"这类存储耦合的兜底键。
+
 ### 合规守护
-- 领域层禁止导入任何技术库（fastapi/httpx/chromadb/aiosqlite/pypdf/langgraph/pydantic 等）与应用层。
+- 领域层禁止导入任何技术库（fastapi/httpx/chromadb/sqlalchemy/aiosqlite/pypdf/langgraph/pydantic 等）与应用层。
 - 应用层与 API 层禁止导入 `app.infrastructure`，只能依赖领域端口。
 - langgraph 是工作流引擎隔离区：只允许 `app/agent/` 导入；模块外部一律经 `app.agent.create_qa_workflow` 工厂获取工作流，不感知引擎存在。
+- sqlalchemy 是数据库技术隔离区：只允许 `app/infrastructure/database/` 导入；业务层拿到的永远是领域实体与端口。
 - 上表所列抽象只允许定义在 domain 层；新增端口时同步更新本清单。
 - 以上规则由 `backend/tests/unit/test_ddd_boundaries.py` 在每次 pytest 时以 AST 扫描机械校验（曾据此发现并修复 Database 端口错位、chat_service 依赖 langgraph 类型等违例）。
 
@@ -271,23 +278,23 @@ npm run build                                      # tsc 类型检查 + 生产�
 - 启动时 lifespan 自动：SQLite connect + init_schema（幂等建表）、Chroma initialize；关闭时释放。
 - 日志：单行 JSON（timestamp/level/service/message/data），等级由 `LOG_LEVEL` 控制，默认 ERROR；注意事项见 docs/RELIABILITY.md。
 
-## 9. 测试体系（四层，2026-09-06 全部验证通过）
+## 9. 测试体系（四层，2026-09-10 迁移后全量验证通过）
 
 | 层级 | 位置 | 数量 | 验证内容 |
 |------|------|------|---------|
-| 单元 | tests/unit/ | 37（~2s） | 纯逻辑与抽象层，无外部 IO：DI 容器、配置、DDD 边界守护（AST 扫描）、回答策略、Database/VectorStore/LLM 端口契约、文档 Pipeline、TXT/PDF 解析器、健康检查 |
-| 集成 | tests/integration/（除 API） | 39（~17s） | 真实 SQLite（持久化/级联/事务回滚）、真实 Chroma（写入/检索/删除/持久化）、LLM Provider 协议（MockTransport）、Embedding 入库、RAG 检索、Agent 图（含流式走图）、对话服务 |
-| 接口 | tests/integration/test_api.py | 7（~11s） | 完整应用（临时 SQLite/Chroma + Fake LLM，不启动真实服务）：会话 CRUD、统一错误结构、SSE 流式协议（delta/done + 持久化）、文档上传/删除/非法格式拒绝 |
+| 单元 | tests/unit/ | 38（~2s） | 纯逻辑与抽象层，无外部 IO：DI 容器、配置、DDD 边界守护（AST 扫描）、回答策略、Database/VectorStore/LLM 端口契约、文档 Pipeline、TXT/PDF 解析器、健康检查 |
+| 集成 | tests/integration/（除 API） | 52（~22s） | 真实 SQLite（SQLAlchemy 实现的持久化/外键级联/事务提交与回滚/建表幂等/旧库补列迁移/来源往返）、**排序契约（乱序落库后由服务层按时间排序 + 同时间稳定性）**、真实 Chroma（写入/检索/删除/持久化）、LLM Provider 协议（MockTransport）、Embedding 入库、RAG 检索、Agent 图（含流式走图）、对话服务 |
+| 接口 | tests/integration/test_api.py | 8（~11s） | 完整应用（临时 SQLite/Chroma + Fake LLM，不启动真实服务）：会话 CRUD、统一错误结构、SSE 流式协议（delta/done + 持久化）、文档上传/删除/非法格式拒绝 |
 | 端到端 | scripts/verify_real_e2e.py 等（手工运行） | 3 个脚本 | 真实 uvicorn + 真实 Ollama/embedding/Chroma：真实法律文档上传→向量化入库→流式 RAG 问答引用原文→消息持久化 |
 
 数据：tests/data_source/ 为 RAG 测试数据源（真实法律文档：专利法 TXT + MD）。
 
-- 自动化测试合计 83 个，`uv run pytest` 全量运行，无需任何外部服务（Fake/确定性实现遵循领域端口，与生产实现互换验证同一契约：InMemoryDatabase、DeterministicEmbedding、ScriptedLLM）。
+- 自动化测试合计 98 个，`uv run pytest` 全量运行，无需任何外部服务（Fake/确定性实现遵循领域端口，与生产实现互换验证同一契约：InMemoryDatabase、DeterministicEmbedding、ScriptedLLM）。
 - 端到端脚本依赖真实外部服务（本机 Ollama 模型、GLM 密钥），不纳入 pytest 自动化，保持自动化测试的封闭性与可重复性；运行方式见脚本头部说明，验证结论记录于 feature_list.json 各功能 evidence。
 
 ## 10. 扩展点与预留
 
-- **MySQL 8.0**：实现 `Database` 端口新增 `infrastructure/database/mysql/`，容器工厂加一个分支。
+- **MySQL 8.0**：表结构与 DML 已由 SQLAlchemy Core 统一（`infrastructure/database/sqlalchemy/`），接入只剩两步——安装异步驱动（`aiomysql`，纯 Python，Windows 无需编译）、在 `containers.py` 增加 `mysql+aiomysql://…` 的 URL 分支并启用 `DbProvider.MYSQL`；届时需补 MySQL 真实实例上的集成验证与迁移方案（Alembic 或等价机制）。
 - **Milvus**：实现 `VectorStore` 端口替换骨架 `milvus.py`；`VECTOR_STORE_PROVIDER=milvus` 时装配成功、调用时明确报错（拒绝静默空结果）。
 - **新文档格式**：实现 `DocumentParser` 策略并注册进 `DocumentParserFactory`。
 - **新 LLM Provider**：实现 `LLMProvider`（chat + stream + model_name），容器工厂加分支；密钥仅环境注入。

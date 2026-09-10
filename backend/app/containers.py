@@ -20,7 +20,7 @@ from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
 from app.domain.services.embedding import EmbeddingService
 from app.domain.repositories.database import Database
-from app.infrastructure.database.sqlite.database import SQLiteDatabase
+from app.infrastructure.database.sqlalchemy.database import SQLAlchemyDatabase, sqlite_url
 from app.infrastructure.document_parser.pdf_parser import PdfParser
 from app.infrastructure.document_parser.text_parser import TextParser
 from app.infrastructure.embedding.ollama_embedding import OllamaEmbeddingService
@@ -33,16 +33,19 @@ from app.infrastructure.vector_store.milvus import MilvusVectorStore
 def _build_database(settings: Settings) -> Database:
     """按配置构造数据库实现（工厂函数）。
 
-    为什么在工厂里分支：新增 MySQL 支持时只需在此增加分支并引入实现类，
-    业务层与装配结构完全不动。
+    为什么在工厂里分支：新增 MySQL 支持时只需在此增加 URL 分支
+    （SQLAlchemy 实现本身方言无关，无需新增实现类）。
+
+    注意：mysql 分支目前仍然显式拒绝而不是静默降级——
+    没有真实 MySQL 实例验证过的路径不允许被配置启用。
     """
     if settings.db_provider.value == "sqlite":
         # 使用锚定后的绝对路径，避免进程工作目录影响数据位置
-        return SQLiteDatabase(settings.resolved_sqlite_db_path)
-    # MySQL 实现将在后续版本提供（见 feature_list 架构预留）
+        return SQLAlchemyDatabase(sqlite_url(settings.resolved_sqlite_db_path))
+    # MySQL 接入只剩"异步驱动 + URL 映射"（见 ARCHITECTURE.md 第 10 节）
     raise NotImplementedError(
         f"数据库 Provider '{settings.db_provider.value}' 尚未实现；"
-        f"当前可用：sqlite"
+        f"当前可用：sqlite（SQLAlchemy 实现已就绪，接入 MySQL 需安装 aiomysql 驱动并补真实实例验证）"
     )
 
 

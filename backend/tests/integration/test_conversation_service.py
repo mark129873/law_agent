@@ -1,20 +1,26 @@
-"""对话服务测试（真实 SQLite 临时库）。"""
+"""对话服务测试（真实 SQLite 临时库，经 SQLAlchemy 实现）。"""
 
 import pytest
 import pytest_asyncio
 
 from app.application.services.conversation_service import ConversationNotFoundError, ConversationService
 from app.domain.entities.message import MessageRole
-from app.infrastructure.database.sqlite.database import SQLiteDatabase
+from app.infrastructure.database.sqlalchemy.database import SQLAlchemyDatabase, sqlite_url
 
 
 @pytest_asyncio.fixture
-async def service(tmp_path) -> ConversationService:
-    db = SQLiteDatabase(str(tmp_path / "conv.db"))
-    await db.connect()
-    await db.init_schema()
-    yield ConversationService(db)
-    await db.close()
+async def db(tmp_path) -> SQLAlchemyDatabase:
+    """独立的临时数据库：部分用例需要绕过服务层直接落库（如构造乱序时间）。"""
+    database = SQLAlchemyDatabase(sqlite_url(tmp_path / "conv.db"))
+    await database.connect()
+    await database.init_schema()
+    yield database
+    await database.close()
+
+
+@pytest_asyncio.fixture
+async def service(db: SQLAlchemyDatabase) -> ConversationService:
+    return ConversationService(db)
 
 
 @pytest.mark.asyncio

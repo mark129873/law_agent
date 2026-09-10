@@ -14,6 +14,7 @@ dependencies = [
     "pypdf>=5,<7",
     "langgraph>=0.2,<2.0",
     "python-multipart>=0.0.9",
+    "sqlalchemy[asyncio]>=2.0,<3.0",
 ]
 
 [dependency-groups]

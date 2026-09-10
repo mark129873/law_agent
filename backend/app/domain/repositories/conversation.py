@@ -24,7 +24,13 @@ class ConversationRepository(ABC):
 
     @abstractmethod
     async def list(self) -> list[Conversation]:
-        """列出全部会话（按创建时间倒序，最新的在前）。"""
+        """列出全部会话。
+
+        契约说明（BE-024）：仓储**不承诺任何顺序**——排序属于展示规则，
+        由应用服务层按 created_at 决定（会话列表为创建时间正序）。
+        仓储只保证不遗漏地取出数据，避免把某一种数据库的物理顺序
+        （如 SQLite 的 rowid）变成业务语义。
+        """
 
     @abstractmethod
     async def delete(self, conversation_id: str) -> bool:

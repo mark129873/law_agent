@@ -25,7 +25,11 @@ class DocumentRepository(ABC):
 
     @abstractmethod
     async def list(self) -> list[Document]:
-        """列出全部文档（按创建时间倒序）。"""
+        """列出全部文档。
+
+        契约说明（BE-024）：仓储不承诺顺序，文档列表的展示顺序
+        （上传时间倒序，最新在前）由应用服务层决定。
+        """
 
     @abstractmethod
     async def delete(self, document_id: str) -> bool:
