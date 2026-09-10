@@ -3,9 +3,34 @@
 ## 当前已验证状态
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
 - 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 106 个自动化测试）；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：无——BE-001~026 与 FE-001~012 全部 passing
+- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 117 个自动化测试）；启动后 `curl http://127.0.0.1:8000/api/health`
+- 当前最高优先级未完成功能：无——BE-001~027 与 FE-001~012 全部 passing
 - 当前 blocker：无
+
+### Session 024（BE-027 结构化日志落盘 backend/log + 日志规则强化）
+- 日期：2026-09-10
+- 本轮目标：用户要求"分析 RELIABILITY.md 日志规则可优化点"并"将日志落盘到 backend/log"；先改文档（RELIABILITY.md 已完成强化），再落地代码
+- 技术决策：
+  - 双 sink 复用同一 `JsonFormatter`：stdout 供开发/容器采集，`backend/log/app.log` 供事后追溯，避免两处格式漂移
+  - 落盘用标准库 `TimedRotatingFileHandler`（when=midnight、utc=True、backupCount 可配、encoding=utf-8、delay=True），不引入第三方依赖；按天轮转便于"找某天的日志"
+  - 目录锚定复用 `settings._anchor_path`，新增 `resolved_log_dir`（与 data/ 同一套机制，不随启动目录漂移）；目录不存在时 `mkdir(parents=True, exist_ok=True)` 幂等自愈
+  - **失败降级为硬要求**：`mkdir`/建 handler 抛 `OSError` 时只保留 stdout，绝不向上抛——日志故障不得把业务变成 5xx（同类于历史 extra 保留字段 404→500 事故）
+  - `setup_logging(settings)` 统一经配置读取（消除三处不一致：logging.py 直接 os.getenv、`.env` 的 LOG_LEVEL 实际不生效、settings.log_level 是死字段）；重复调用先 close+remove 旧 handler（Windows 下不关闭会占用文件句柄）
+  - 时间戳统一 UTC 毫秒 + `Z`（原实现是微秒 + `+00:00`，与文档示例不符）；`WARNING` 归一为 `WARN`；`service` 采用受控清单
+  - request_id 用**纯 ASGI 中间件 + ContextVar**：刻意不用 `@app.middleware("http")`（BaseHTTPMiddleware 会缓冲响应体、破坏 SSE 流式）；响应头回写 `x-request-id`，请求头传入则沿用
+  - 敏感键脱敏作为"密钥禁止进日志"的机械兜底；默认等级 ERROR→INFO（解决"INFO 用于重要业务事件却默认不可见"的矛盾）
+  - 测试产物隔离：新增 `tests/conftest.py`，在导入应用代码前把 `LOG_DIR` 指向系统临时目录，避免 pytest 往仓库写日志
+- 运行过的验证：
+  - `uv run pytest -q` → **117 passed**（基线 106；新增 `tests/unit/test_logging.py` 9 例 + test_settings 日志默认值与 resolved_log_dir 锚定 + test_api x-request-id 生成与透传）
+  - 干净环境（先删 `backend/data`）跑全量，分层：unit 48、integration（除 API）60、API 9
+  - 真实启动实测（8011 端口）：删 `backend/log` → 启动自动创建 `backend/log/app.log`；日志为标准单行 JSON（`timestamp` 形如 `2026-09-10T09:37:50.369Z`）；带 `X-Request-ID: verify-001` 请求 `/api/health` 后，`Health check requested` 与 `uvicorn.access` 两条日志均带 `request_id=verify-001`；验证后进程与 8011 端口已清理
+- 已记录证据：feature_list.json BE-027（passing）；RELIABILITY / ARCHITECTURE / .env.example / .gitignore / init.md / clean-state-checklist 同步
+- 提交记录：本轮提交
+- 已知风险或未解决问题：
+  - 默认等级改为 INFO 会增加输出量（属行为变化，已按分析建议确定，需要时可经 `LOG_LEVEL` 调回）
+  - 多 worker 部署时按天轮转会竞争同一文件，文档已注明需改按 PID 分文件或集中采集（当前单进程，不触发）
+  - 既有遗留项不变：MySQL 未启用、无连接池、同一 created_at 无第二排序键、Ollama 偶发上传后提问 500
+- 下一步最佳动作：可选产品增强（会话重命名 / 停止按钮 / 深色主题开关 / CORS 收敛 / OllamaProvider 重试）或 MySQL 8.0 接入
 
 ### Session 023（文档整理：PRODUCT.md 只留产品描述，架构内容归 ARCHITECTURE.md）
 - 日期：2026-09-10

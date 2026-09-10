@@ -63,20 +63,17 @@ class DeterministicEmbedding(EmbeddingService):
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path):
     """构建带临时基础设施与 Fake LLM 的完整应用。
 
-    LOG_LEVEL=INFO：让 warning 级别的业务错误日志真正流经日志格式化器，
-    保证 extra 键误用（如占用 LogRecord 保留字段）在测试期就暴露。
+    日志显式指定 INFO + 临时日志目录：让 warning 级别的业务错误日志真正
+    流经日志格式化器（extra 键误用会在此暴露），同时不污染 backend/log/。
     """
-    monkeypatch.setenv("LOG_LEVEL", "INFO")
-    from app.common.logging import setup_logging
-
-    setup_logging()
-
     settings = Settings(
         sqlite_db_path=str(tmp_path / "api.db"),
         chroma_persist_dir=str(tmp_path / "chroma"),
+        log_dir=str(tmp_path / "log"),
+        log_level="INFO",
         _env_file=None,
     )
     app = create_app(settings)
@@ -222,3 +219,13 @@ def test_validation_error_unified_shape(client: TestClient) -> None:
     response = client.post("/api/chat/stream", json={"conversation_id": "c"})
     assert response.status_code == 400
     assert response.json()["code"] == 40002
+
+
+def test_request_id_header_is_generated_and_forwarded(client: TestClient) -> None:
+    """每个响应都带 x-request-id；请求头传入时原样沿用（便于跨服务追踪）。"""
+    generated = client.get("/api/health")
+    assert generated.status_code == 200
+    assert generated.headers.get("x-request-id")  # 缺省自动生成
+
+    forwarded = client.get("/api/health", headers={"X-Request-ID": "trace-abc"})
+    assert forwarded.headers["x-request-id"] == "trace-abc"

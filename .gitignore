@@ -28,8 +28,9 @@ secrets/
 .coverage
 htmlcov/
 
-# 日志与临时文件
+# 日志与临时文件（日志目录含按天轮转文件，整目录忽略）
 *.log
+backend/log/
 
 # 系统文件
 .DS_Store

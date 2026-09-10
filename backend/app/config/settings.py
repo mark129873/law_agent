@@ -69,7 +69,13 @@ class Settings(BaseSettings):
     # ---- 服务基础配置 ----
     host: str = "0.0.0.0"
     port: int = 8000
-    log_level: str = "ERROR"
+    # 日志等级默认 INFO：保证"重要业务事件"默认可见（见 docs/RELIABILITY.md）
+    log_level: str = "INFO"
+
+    # ---- 日志落盘（RELIABILITY.md：stdout + backend/log 双 sink）----
+    log_dir: str = "log"
+    log_file_name: str = "app.log"
+    log_backup_count: int = 30  # 按天轮转，保留最近 30 天
 
     # ---- 数据库 Provider ----
     db_provider: DbProvider = DbProvider.SQLITE
@@ -104,6 +110,11 @@ class Settings(BaseSettings):
     def resolved_chroma_persist_dir(self) -> str:
         """Chroma 持久化目录的实际路径（相对路径锚定到 backend/）。"""
         return _anchor_path(self.chroma_persist_dir)
+
+    @property
+    def resolved_log_dir(self) -> str:
+        """日志目录的实际路径（相对路径锚定到 backend/）。"""
+        return _anchor_path(self.log_dir)
 
 
 @lru_cache

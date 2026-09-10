@@ -51,6 +51,7 @@ backend/
 │   ├── api/                    # API / Controller 层
 │   │   ├── dto.py              # 请求/响应模型（pydantic）
 │   │   ├── errors.py           # 统一 AppError 体系与全局异常处理器
+│   │   ├── middleware.py       # RequestIdMiddleware（纯 ASGI，注入请求链路标识）
 │   │   └── routes/             # conversations / chat / documents 路由
 │   │
 │   ├── application/            # Application 层：业务流程编排
@@ -81,7 +82,7 @@ backend/
 │   │   ├── prompts.py          # 法律问答策略 Prompt
 │   │   └── state.py            # AgentState
 │   │
-│   ├── common/                 # 横切基础设施：di.py 轻量容器 / logging.py 结构化 JSON 日志
+│   ├── common/                 # 横切基础设施：di.py 轻量容器 / logging.py 结构化 JSON 日志（stdout + backend/log 落盘）
 │   ├── config/settings.py      # 统一配置（pydantic-settings，相对路径锚定 backend/）
 │   ├── containers.py           # 唯一依赖装配点（工厂 + 单例注册）
 │   └── main.py                 # 应用入口（lifespan / CORS / 路由 / 异常处理）
@@ -90,6 +91,7 @@ backend/
 │   ├── unit/                   # 单元测试：纯逻辑与抽象层，无外部 IO
 │   ├── integration/            # 集成测试：真实 SQLite/Chroma/MockTransport/完整应用
 │   └── data_source/            # RAG 测试数据源（真实法律文档）
+├── log/                        # 运行日志（app.log + 按天轮转，gitignore，启动自动创建）
 ├── scripts/                    # 手工验证脚本（Ollama 流式 / 真实 embedding / E2E）
 ├── pyproject.toml / uv.lock
 └── .env                        # 本地敏感配置（gitignore，模板见 .env.example）
@@ -232,9 +234,10 @@ RAG： START → retrieve → generate → END
 | `VECTOR_STORE_PROVIDER` | chroma / milvus | chroma |
 | `LLM_PROVIDER` | ollama / glm | ollama |
 | `LLM_ENABLE_THINKING` | true / false | false（关闭思考模式） |
-| `HOST` / `PORT` / `LOG_LEVEL` | — | 0.0.0.0 / 8000 / ERROR |
+| `HOST` / `PORT` / `LOG_LEVEL` | — | 0.0.0.0 / 8000 / INFO |
 
-其余参数：`SQLITE_DB_PATH`、`MYSQL_URL`、`CHROMA_PERSIST_DIR`、`MILVUS_URI`、`OLLAMA_BASE_URL`、`OLLAMA_MODEL`（qwen3.5:4b）、`OLLAMA_EMBEDDING_MODEL`（nomic-embed-text:latest）、`GLM_BASE_URL`、`GLM_MODEL`、`GLM_API_KEY`。
+
+
 
 - **思考模式开关（`LLM_ENABLE_THINKING`，默认 false）**：qwen3.5 / glm-4.5 等推理模型默认会先"思考"再回答，显著拉长首字延迟（真实环境曾达 30~40s）。关闭时 Ollama 请求携带 `think: false`、GLM 请求携带 `thinking: {"type": "disabled"}`；需要深度推理时可显式开启。
 
@@ -289,20 +292,20 @@ npm run build                                      # tsc 类型检查 + 生产�
 ```
 - 启动时 lifespan 自动：SQLite connect + init_schema（幂等建表）、Chroma initialize；关闭时释放。
 - **首次启动自愈（BE-026）**：`backend/data/` 不存在时无需人工创建——数据库实现在建连接前创建 SQLite 文件的父目录，Chroma 自行创建持久化目录；两者都是幂等操作，重复启动安全。
-- 日志：单行 JSON（timestamp/level/service/message/data），等级由 `LOG_LEVEL` 控制，默认 ERROR；注意事项见 docs/RELIABILITY.md。
+- 日志：单行 JSON（timestamp/level/service/request_id/message/data），同时输出 stdout 与 `backend/log/app.log`（按天轮转、默认保留 30 天），等级由 `LOG_LEVEL` 控制，默认 INFO；每个 HTTP 响应带 `x-request-id`；注意事项见 docs/RELIABILITY.md。
 
-## 9. 测试体系（四层，2026-09-10 BE-026 修复后全量验证通过）
+## 9. 测试体系（四层，2026-09-10 BE-027 日志落盘后全量验证通过）
 
 | 层级 | 位置 | 数量 | 验证内容 |
 |------|------|------|---------|
-| 单元 | tests/unit/ | 38（~2s） | 纯逻辑与抽象层，无外部 IO：DI 容器、配置、DDD 边界守护（AST 扫描）、回答策略、Database/VectorStore/LLM 端口契约、文档 Pipeline、TXT/PDF 解析器、健康检查 |
+| 单元 | tests/unit/ | 48（~2s） | 纯逻辑与抽象层，无外部 IO：DI 容器、配置、DDD 边界守护（AST 扫描）、**日志契约（落盘/轮转/脱敏/降级/幂等/request_id：BE-027）**、回答策略、Database/VectorStore/LLM 端口契约、文档 Pipeline、TXT/PDF 解析器、健康检查 |
 | 集成 | tests/integration/（除 API） | 60（~28s） | 真实 SQLite（SQLAlchemy ORM 实现的持久化/外键级联/事务提交与回滚/建表幂等/旧库补列迁移/来源往返）、**首次启动自愈（数据目录不存在时自动建库、干净环境重置后可再次启动：BE-026）**、**ORM 契约（出口只返回领域实体、`expire_on_commit=False` 提交后可读、identity map 更新一致、批量删除无脏读、回滚撤销属性更新）**、**排序契约（乱序落库后由服务层按时间排序 + 同时间稳定性）**、真实 Chroma（写入/检索/删除/持久化）、LLM Provider 协议（MockTransport）、Embedding 入库、RAG 检索、Agent 图（含流式走图）、对话服务 |
-| 接口 | tests/integration/test_api.py | 8（~11s） | 完整应用（临时 SQLite/Chroma + Fake LLM，不启动真实服务）：会话 CRUD、统一错误结构、SSE 流式协议（delta/done + 持久化）、文档上传/删除/非法格式拒绝 |
+| 接口 | tests/integration/test_api.py | 9（~11s） | 完整应用（临时 SQLite/Chroma + Fake LLM，不启动真实服务）：会话 CRUD、统一错误结构、SSE 流式协议（delta/done + 持久化）、文档上传/删除/非法格式拒绝、**x-request-id 生成与透传（BE-027）** |
 | 端到端 | scripts/verify_real_e2e.py 等（手工运行） | 3 个脚本 | 真实 uvicorn + 真实 Ollama/embedding/Chroma：真实法律文档上传→向量化入库→流式 RAG 问答引用原文→消息持久化 |
 
 数据：tests/data_source/ 为 RAG 测试数据源（真实法律文档：专利法 TXT + MD）。
 
-- 自动化测试合计 106 个，`uv run pytest` 全量运行，无需任何外部服务（Fake/确定性实现遵循领域端口，与生产实现互换验证同一契约：InMemoryDatabase、DeterministicEmbedding、ScriptedLLM）。
+- 自动化测试合计 117 个，`uv run pytest` 全量运行，无需任何外部服务（Fake/确定性实现遵循领域端口，与生产实现互换验证同一契约：InMemoryDatabase、DeterministicEmbedding、ScriptedLLM）。
 - 端到端脚本依赖真实外部服务（本机 Ollama 模型、GLM 密钥），不纳入 pytest 自动化，保持自动化测试的封闭性与可重复性；运行方式见脚本头部说明，验证结论记录于 feature_list.json 各功能 evidence。
 
 ## 10. 扩展点与预留

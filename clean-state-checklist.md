@@ -14,4 +14,4 @@
 - 检查代码仓库状态
     - git 状态中无意外新增文件
     - 没有提交敏感文件（.env、密钥凭证）
-    - `dist` ,` node_modules`, `data` 目录文件未被提交
+    - `dist` ,` node_modules`, `data` 目录文件未被提交; `backend/log` 日志目录未被提交

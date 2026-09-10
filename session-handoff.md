@@ -2,24 +2,19 @@
 
 ## 当前已验证
 - 现在明确可用的部分：
-  - **后端 BE-001~026 全部 passing**（最新 BE-026：修复数据目录缺失时首次启动无法建库的回归）。
+  - **后端 BE-001~027 全部 passing**（最新 BE-027：结构化日志落盘 `backend/log/` 与日志规则强化）。
   - **前端 FE-001~012 全部 passing**（含 FE-012：侧边栏历史对话旧在上新在下）。
-  - **测试体系**：后端自动化 106 个（2026-09-10 全绿）；端到端脚本 3 个（依赖本机 Ollama，手工运行）。
-- 最近一轮实际跑过的验证（2026-09-10，Session 023，文档整理）：
-  - `docs/PRODUCT.md` 重写为纯产品描述（5 节），3 条实现说明移出（内容已在 ARCHITECTURE §3/§6/§8，并补了交叉引用）
-  - `docs/ARCHITECTURE.md` §0 新增文档职责声明；§3 排序职责新增"产品要求出处"
-  - 文档改动未触及代码；干净环境下 `uv run pytest` → 106 passed（与 Session 022 相同的 106 例）
-  - 上一轮（Session 022，BE-026）已验证：干净环境自愈两轮实测通过（删 `backend/data` → 启动自动重建目录与库 → health ok、空库、POST 201 / DELETE 204）
+  - **测试体系**：后端自动化 117 个（2026-09-10 全绿）；端到端脚本 3 个（依赖本机 Ollama，手工运行）。
+- 最近一轮实际跑过的验证（2026-09-10，Session 024，BE-027 日志落盘）：
+  - `uv run pytest -q` → 117 passed（基线 106）；分层 unit 48 / integration（除 API）60 / API 9
+  - 干净环境（先删 `backend/data`）跑全量通过
+  - 真实启动实测（8011 端口）：删 `backend/log` → 启动自动创建并写入 `app.log`（单行 JSON，`timestamp` 形如 `2026-09-10T09:37:50.369Z`）；带 `X-Request-ID: verify-001` 请求 `/api/health` 后日志带 `request_id=verify-001`；验证后进程与端口已清理
 
-## 本轮改动（Session 023：文档整理）
-- `docs/PRODUCT.md`：只留用户可见的产品行为与需求，重组为「1 产品定位 / 2 知识库（文档）/ 3 对话 / 4 参考文档（回答依据展示）/ 5 视觉与交互风格」；开头新增文档职责声明（本文件不写实现，行为要变先改本文件）
-- 从 PRODUCT.md 移除的 3 条实现内容及其归属：
-  - 排序由应用服务层按 `created_at` 决定 → `ARCHITECTURE.md` §3「排序职责（BE-024）」（新增"产品要求出处"一条指向 PRODUCT 第 2/3 节）
-  - SQLAlchemy ORM（声明式模型 + 领域实体映射）→ `ARCHITECTURE.md` §3「ORM 使用约定（BE-025）」
-  - 数据目录缺失时首次启动自动重建 → `ARCHITECTURE.md` §6「数据目录自动创建」+ §8「首次启动自愈（BE-026）」
-- 去实现化措辞（语义不变）：上传条目"解析为向量并存储到向量数据库"→"解析并纳入知识库，供问答检索使用"；参考文档条目"参考来源随回答一起持久化"→"刷新或重新打开会话后仍可查看"
-- `docs/ARCHITECTURE.md`：§0 新增"本文档只描述架构与实现，用户可见行为见 PRODUCT.md；实现变更不得改变 PRODUCT 描述的行为"
-- 产品要求无遗漏：原 22 行中除上述 3 条实现说明外全部保留（上传格式、知识库视图、文档明细与删除、新建/切换会话、首问定标题、新建回跳、流式回复、删除会话、三处排序、参考文档显示与不显示、视觉风格）
+## 本轮改动（Session 024：BE-027 日志落盘与规则强化）
+- `docs/RELIABILITY.md`：日志规则全面强化——双 sink（stdout + 文件）、落盘目录 `backend/log/`、按天轮转与保留 30 天、目录自愈、**写盘失败降级为仅 stdout**、`setup_logging` 幂等、service 受控清单、字段契约（`request_id` / ERROR 带堆栈 / 字段只增不改）、敏感键脱敏兜底、日志契约测试；时间戳与实现对齐为 UTC 毫秒 + `Z`；默认等级 `ERROR → INFO`
+- 代码：`app/common/logging.py`（双 sink + `TimedRotatingFileHandler` + 目录自愈 + `OSError` 降级 + 幂等关闭 + UTC 毫秒 Z + `WARNING→WARN` + 敏感键脱敏 + `RequestContextFilter`/ContextVar）；新增 `app/api/middleware.py`（纯 ASGI `RequestIdMiddleware`，避免 BaseHTTPMiddleware 破坏 SSE）；`settings.py`（`log_level` 默认 INFO + `log_dir`/`log_file_name`/`log_backup_count` + `resolved_log_dir`）；`main.py`（`create_app` 首行 `setup_logging(settings)` + 注册中间件）；新增 `tests/conftest.py`（测试日志隔离到系统临时目录）与 `tests/unit/test_logging.py`（9 例契约测试）
+- 配置与忽略：`.env.example` 新增日志配置段；`.gitignore` 新增 `backend/log/`
+- 文档同步：`ARCHITECTURE.md` §2（`api/middleware.py`、common 落盘、`log/` 目录）、§6（配置表 + 日志配置说明）、§8（日志行）、§9（48/60/9，合计 117）；`feature_list.json` BE-027；`init.md` 测试数量 117；`clean-state-checklist.md` 增加 `backend/log` 未提交校验
 
 ## 仍损坏或未验证
 - 已知缺陷：无

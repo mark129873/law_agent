@@ -5,6 +5,8 @@
 测试直接构造 Settings 实例（绕过 lru_cache），避免用例之间互相污染。
 """
 
+import pathlib
+
 import pytest
 from pydantic import ValidationError
 
@@ -16,13 +18,19 @@ from app.config.settings import (
 )
 
 
-def test_default_settings_use_current_generation_providers() -> None:
+def test_default_settings_use_current_generation_providers(monkeypatch: pytest.MonkeyPatch) -> None:
     """默认配置应指向第一代 Provider：sqlite + chroma + ollama。"""
+    # 测试进程可能由 conftest 注入 LOG_DIR（隔离测试产物），此处清除以断言真实默认值
+    monkeypatch.delenv("LOG_DIR", raising=False)
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     assert settings.db_provider is DbProvider.SQLITE
     assert settings.vector_store_provider is VectorStoreProvider.CHROMA
     assert settings.llm_provider is LlmProvider.OLLAMA
-    assert settings.log_level == "ERROR"
+    # BE-027：日志默认 INFO（保证"重要业务事件"默认可见），并落盘 backend/log/
+    assert settings.log_level == "INFO"
+    assert settings.log_dir == "log"
+    assert settings.log_file_name == "app.log"
+    assert settings.log_backup_count == 30
 
 
 def test_providers_switchable_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -58,3 +66,11 @@ def test_llm_thinking_disabled_by_default_and_switchable(monkeypatch: pytest.Mon
     monkeypatch.setenv("LLM_ENABLE_THINKING", "true")
     settings_enabled = Settings(_env_file=None)  # type: ignore[call-arg]
     assert settings_enabled.llm_enable_thinking is True
+
+
+def test_log_dir_relative_path_anchored_to_backend() -> None:
+    """日志目录相对路径必须锚定 backend/（不随进程工作目录漂移）。"""
+    backend_root = pathlib.Path(__file__).resolve().parents[2]
+    # 显式传入相对路径，避免 conftest 注入的 LOG_DIR 覆盖本用例意图
+    settings = Settings(log_dir="log", _env_file=None)  # type: ignore[call-arg]
+    assert pathlib.Path(settings.resolved_log_dir) == backend_root / "log"

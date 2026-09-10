@@ -317,6 +317,14 @@
       "status": "passing",
       "evidence": "2026-09-10：app/infrastructure/database/sqlalchemy/database.py 新增 _ensure_sqlite_parent_dir() 并在 connect() 首行调用——只对 sqlite 方言且非 :memory: 生效，用 make_url(url).database 解析路径（实测 Windows 绝对路径解析为 C:/... 形式、相对路径为 data/law_agent.db、:memory: 原样返回，MySQL URL 因方言判断直接跳过），mkdir(parents=True, exist_ok=True) 幂等，且仅在目录真的不存在时输出一条结构化 INFO 日志 Database directory created。新增 2 个回归测试：test_connect_creates_missing_data_directory（数据库文件位于多层都不存在的目录 → connect+init_schema 成功建库、可写入回读，重复连接同一路径仍可用）、test_clean_environment_reset_then_start_again（模拟 RELIABILITY.md 的干净环境流程：建库写入→删除整个 data 目录→再次启动得到可用空库）。验证：uv run pytest → 106 passed（基线 104，既有断言一行未改）；修复前复现证据：data 目录缺失时 connect 抛 sqlite3.OperationalError: unable to open database file；修复后真实启动两轮：删除 backend/data（确认不存在）→ uv run uvicorn app.main:app → 自动创建 data/ 与 law_agent.db（32768 字节）及 data/chroma/，日志出现 Database directory created + Database initialized + VectorStore initialized，/api/health ok、/api/conversations 与 /api/documents 均为 0（空库），POST /api/conversations 201 → DELETE 204（回到 0）；随后再次删除 data 目录重启，第二轮同样自愈成功（证明可重复，不是一次性巧合）。",
       "testedAt": "2026-09-10"
+    },
+    {
+      "id": "BE-027",
+      "name": "结构化日志落盘与日志规则强化",
+      "description": "按更新后的 docs/RELIABILITY.md 落地日志规则：日志同时输出 stdout 与 backend/log/app.log（按天轮转、默认保留 30 天、UTF-8）；日志目录相对路径锚定 backend/ 且不存在时幂等自愈，写盘不可用时静默降级为仅 stdout（绝不影响业务）；setup_logging(settings) 统一经配置读取并幂等（先关闭旧 handler）；时间戳统一为 UTC 毫秒 + Z；logging 的 WARNING 归一为 WARN；service 采用受控清单；新增 request_id 请求链路字段（纯 ASGI 中间件 + ContextVar 注入，兼容 SSE）与敏感键脱敏兜底；日志等级默认由 ERROR 调整为 INFO。",
+      "status": "passing",
+      "evidence": "2026-09-10：改造 backend/app/common/logging.py（stdout + TimedRotatingFileHandler(when=midnight, utc=True, backupCount 可配, encoding=utf-8, delay=True) 双 sink + 日志目录幂等自愈 + OSError 静默降级 + 幂等关闭旧 handler + UTC 毫秒 Z 时间戳 + WARNING→WARN + 敏感键黑名单脱敏 + RequestContextFilter/ContextVar request_id）；新增 backend/app/api/middleware.py（纯 ASGI RequestIdMiddleware：读/生成 x-request-id 并回写响应头，刻意不用 BaseHTTPMiddleware 以免缓冲破坏 SSE 流）；settings.py 新增 log_dir/log_file_name/log_backup_count + resolved_log_dir，log_level 默认改 INFO；main.py 在 create_app 首行 setup_logging(settings) 并注册中间件；新增 backend/tests/conftest.py 把测试日志隔离到系统临时目录；.env.example 与 .gitignore（backend/log/）同步。验证：uv run pytest → 117 passed（基线 106；新增 tests/unit/test_logging.py 9 例：单行 JSON 必需字段/UTC 毫秒 Z/WARNING 归一/service 不重复进 data/敏感键脱敏/request_id 注入与还原/落盘 UTF-8 中文/轮转参数(midnight+backupCount=7+utf-8)/非法日志目录降级为仅 stdout 不抛异常/幂等不叠加 handler；test_settings 新增日志默认值与 resolved_log_dir 锚定；test_api 新增 x-request-id 生成与透传）。真实启动实测（干净环境）：删除 backend/log → uv run uvicorn app.main:app（端口 8011）→ 自动创建 backend/log/app.log，内容为标准单行 JSON（timestamp 形如 2026-09-10T09:37:50.369Z）；带 X-Request-ID: verify-001 请求 /api/health 后，'Health check requested' 与 'uvicorn.access' 两条日志均带 request_id=verify-001；验证后进程已清理、8011 端口已释放。",
+      "testedAt": "2026-09-10"
     }
   ]
 }
