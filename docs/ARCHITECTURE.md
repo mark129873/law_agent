@@ -1,6 +1,8 @@
 # Architecture
 
 ## 0. 简单描述
+-本文档只描述**架构与实现**（分层、数据流、配置、契约、测试体系）；用户可见的行为需求见 docs/PRODUCT.md
+-实现变更不得改变 PRODUCT.md 描述的用户可见行为；行为要变，先改 PRODUCT.md，再改实现
 -后端使用python3.11.15, 使用uv进行环境管理,.venv是虚拟环境
 -后端使用fastapi, 接口使用异步函数
 -后端使用langraph, 大模型支持ollama本地部署以及使用glm的api, 
@@ -158,6 +160,7 @@ Agent（工作流实现，独立模块）──▶ Domain 端口 + Application �
 - **JSON 存储沿用 TEXT + `json.dumps(ensure_ascii=False)`**：不换用 SQLAlchemy `JSON` 类型，以保持与既有数据库文件逐字节一致的存储格式与中文可读性。
 
 ### 排序职责（BE-024）
+- **产品要求出处**：三处列表顺序（侧边栏会话按创建时间正序、对话内消息按时间正序、知识库文档按上传时间倒序）是 PRODUCT.md 第 2/3 节的产品要求；本节说明该要求由哪一层实现、按什么依据判断——因此这些描述不再重复写在 PRODUCT.md 里。
 - **仓储只负责读写，不负责排序**：三个 Repository 的 `list` / `list_by_conversation` 不再输出 SQL `ORDER BY`（原 `ORDER BY created_at ASC, rowid ASC` 依赖 SQLite 专有的 `rowid`，MySQL 无此概念）。
 - **排序规则集中在应用服务层，且只按创建时间判断**：`ConversationService.list_conversations`（`created_at` 正序）、`ConversationService.get_messages`（`created_at` 正序）、`DocumentService.list_documents`（`created_at` 倒序）。交换任何数据库实现，排序行为不变。
 - 同一 `created_at`（微秒级相同）的记录没有第二排序键：输出顺序由底层返回顺序决定，Python `sorted` 的稳定性保证同一份数据重复查询结果一致；不再引入"物理行号"这类存储耦合的兜底键。

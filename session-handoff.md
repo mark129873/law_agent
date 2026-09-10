@@ -5,19 +5,21 @@
   - **后端 BE-001~026 全部 passing**（最新 BE-026：修复数据目录缺失时首次启动无法建库的回归）。
   - **前端 FE-001~012 全部 passing**（含 FE-012：侧边栏历史对话旧在上新在下）。
   - **测试体系**：后端自动化 106 个（2026-09-10 全绿）；端到端脚本 3 个（依赖本机 Ollama，手工运行）。
-- 最近一轮实际跑过的验证（2026-09-10，Session 022）：
-  - 后端 `uv run pytest` → 106 passed（unit 38 / integration 60 / api 8）
-  - 干净环境自愈实测（两轮）：删除 `backend/data` → `uv run uvicorn app.main:app` → 自动创建 `data/`、`law_agent.db`、`data/chroma/`；日志 `Database directory created` → `Database initialized` → `VectorStore initialized`；`/api/health` ok、`/api/conversations` 与 `/api/documents` 均 0；`POST` 201 → `DELETE` 204。再删一次重启，第二轮同样成功
-  - 新增回归测试 2 例：多层目录不存在时自动建库并可读写；模拟干净环境重置（删整个 data 目录）后再次启动得到可用空库
+- 最近一轮实际跑过的验证（2026-09-10，Session 023，文档整理）：
+  - `docs/PRODUCT.md` 重写为纯产品描述（5 节），3 条实现说明移出（内容已在 ARCHITECTURE §3/§6/§8，并补了交叉引用）
+  - `docs/ARCHITECTURE.md` §0 新增文档职责声明；§3 排序职责新增"产品要求出处"
+  - 文档改动未触及代码；干净环境下 `uv run pytest` → 106 passed（与 Session 022 相同的 106 例）
+  - 上一轮（Session 022，BE-026）已验证：干净环境自愈两轮实测通过（删 `backend/data` → 启动自动重建目录与库 → health ok、空库、POST 201 / DELETE 204）
 
-## 本轮改动
-- 后端（只动 infrastructure 的一个文件）：
-  - `app/infrastructure/database/sqlalchemy/database.py`：新增 `_ensure_sqlite_parent_dir()` 并在 `connect()` 首行调用——只对文件型 SQLite 生效（`:memory:` 与 MySQL 跳过），路径经 `make_url(url).database` 解析，`mkdir(parents=True, exist_ok=True)` 幂等，仅在目录确实不存在时输出结构化 INFO 日志 `Database directory created`
-  - 修复的是 BE-024 重写时丢失的父目录创建逻辑（原 aiosqlite 实现在 `connect()` 里有 `self._db_path.parent.mkdir(...)`）
-- 测试：`tests/integration/test_sqlalchemy_database.py` 新增 2 例（9 → 11 例），既有断言一行未改
-- 文档：ARCHITECTURE.md（§6 配置“数据目录自动创建”、§8 启动“首次启动自愈”、§9 测试计数 106）、PRODUCT.md（补一条实现说明）、feature_list.json（BE-026 passing + 证据；BE-005 说明补充）、progress.md（Session 022）、init.md（测试数量 106）、session-handoff.md
-- 说明：按用户要求**数据位置保持不变**（仍为 `backend/data/law_agent.db` 与 `backend/data/chroma`）；"改到仓库根 `data/`"的方案已评估但未实施
-- 注意：`NEW_FEATURE.md` 已按新工作流从仓库移除（AGENTS.md 不再引用它），本轮未重建该文件
+## 本轮改动（Session 023：文档整理）
+- `docs/PRODUCT.md`：只留用户可见的产品行为与需求，重组为「1 产品定位 / 2 知识库（文档）/ 3 对话 / 4 参考文档（回答依据展示）/ 5 视觉与交互风格」；开头新增文档职责声明（本文件不写实现，行为要变先改本文件）
+- 从 PRODUCT.md 移除的 3 条实现内容及其归属：
+  - 排序由应用服务层按 `created_at` 决定 → `ARCHITECTURE.md` §3「排序职责（BE-024）」（新增"产品要求出处"一条指向 PRODUCT 第 2/3 节）
+  - SQLAlchemy ORM（声明式模型 + 领域实体映射）→ `ARCHITECTURE.md` §3「ORM 使用约定（BE-025）」
+  - 数据目录缺失时首次启动自动重建 → `ARCHITECTURE.md` §6「数据目录自动创建」+ §8「首次启动自愈（BE-026）」
+- 去实现化措辞（语义不变）：上传条目"解析为向量并存储到向量数据库"→"解析并纳入知识库，供问答检索使用"；参考文档条目"参考来源随回答一起持久化"→"刷新或重新打开会话后仍可查看"
+- `docs/ARCHITECTURE.md`：§0 新增"本文档只描述架构与实现，用户可见行为见 PRODUCT.md；实现变更不得改变 PRODUCT 描述的行为"
+- 产品要求无遗漏：原 22 行中除上述 3 条实现说明外全部保留（上传格式、知识库视图、文档明细与删除、新建/切换会话、首问定标题、新建回跳、流式回复、删除会话、三处排序、参考文档显示与不显示、视觉风格）
 
 ## 仍损坏或未验证
 - 已知缺陷：无
