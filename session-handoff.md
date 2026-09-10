@@ -30,7 +30,7 @@
   - 端到端脚本（真实 Ollama）与浏览器 E2E 本轮未执行
 - 下一轮会话需要注意的风险：
   - **数据目录现在会被自动重建，但内容不会回来**：`backend/data/` 已被清空（旧的历史会话/文档数据不复存在），当前是空库；`tests/data_source/` 里的真实法律文档仍在，可重新上传
-  - **测试干净环境流程**（RELIABILITY.md）：开工/收尾测试前删除 `backend/data/`，之后启动会自动重建（BE-026 已保证）；删除前请确认不需要其中的数据
+  - **测试干净环境流程**（RELIABILITY.md）：开工/收尾测试前删除 `backend/data/`
   - **ORM 新增的维护面**（已有 6 个契约测试锁住，但仍是新成本）：实体与 ORM 模型两套定义（字段增删要同时改 `models.py` 与 `mappers.py`）；session 状态语义（identity map、过期对象、批量操作需显式 `synchronize_session`）；异步 ORM 必须保持 `expire_on_commit=False`，否则提交后访问对象属性会抛 `MissingGreenlet`
   - 文档状态更新多了一次 SELECT（属性级更新换 identity map 一致性），属明确取舍
   - 同一 `created_at` 无第二排序键（用户指定"仅按时间判断"）：重复查询稳定，但插入先后不再保证
