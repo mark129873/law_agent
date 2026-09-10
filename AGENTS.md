@@ -12,7 +12,7 @@ legal-knowledge-agent 项目描述:
 - 阅读 docs/RELIABILITY.md，了解日志、可观测性以及干净环境的相关要求。
 - 读取 progress.md，了解最新已验证状态和下一步。
 - 读取 session‑handoff.md 获取上一轮开发上下文。
-- 查看 feature_list.json，确认当前所有功能的开发进度, 选择优先级最高的未完成功能
+- 查看 feature_list.json，确认当前所有功能的开发进度
 - 用 `git log --oneline -5` 看最近提交
 - 验证`init.md`的内容, 如未通过, 则修复问题。
 - 验证项目可正常构建或启动、初始化无异常。
