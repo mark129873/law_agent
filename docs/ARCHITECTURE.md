@@ -231,7 +231,7 @@ RAG： START → retrieve → generate → END
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | /api/conversations | 创建对话（title 可选，默认"新对话"） |
-| GET | /api/conversations | 对话列表（创建时间倒序） |
+| GET | /api/conversations | 对话列表（创建时间正序，最早创建在上） |
 | GET | /api/conversations/{id}/messages | 会话消息 |
 | DELETE | /api/conversations/{id} | 删除会话（级联消息） |
 | POST | /api/chat/stream | 提交问题，SSE 流式回答 |

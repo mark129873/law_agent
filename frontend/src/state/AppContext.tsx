@@ -110,12 +110,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSidebarView('chat')
   }, [])
 
-  /** 创建会话：置为当前会话并插入列表顶部 */
+  /** 创建会话：置为当前会话并追加到列表底部（FE-012：侧边栏按创建时间从上到下，旧在上新在下） */
   const createConversation = useCallback(async (title: string) => {
     const created = await conversationsApi.createConversation(title)
     setActiveId(created.id)
     setMessages([])
-    setConversations((prev) => [created, ...prev])
+    setConversations((prev) => [...prev, created])
     return created
   }, [])
 

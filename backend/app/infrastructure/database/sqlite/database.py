@@ -193,8 +193,11 @@ class _SQLiteConversationRepository(ConversationRepository):
         return Conversation(id=row[0], title=row[1], created_at=_from_iso(row[2]))
 
     async def list(self) -> list[Conversation]:
+        # 历史对话按创建时间正序返回（FE-012 产品要求：最早创建在最上面）。
+        # 为什么加 rowid 第二排序键：同一秒内连续创建的会话 created_at 可能相同，
+        # rowid 按插入先后单调递增，保证顺序稳定可重复（与消息列表的双键排序同理）。
         async with self._db._require_conn().execute(
-            "SELECT id, title, created_at FROM conversations ORDER BY created_at DESC"
+            "SELECT id, title, created_at FROM conversations ORDER BY created_at ASC, rowid ASC"
         ) as cursor:
             rows = await cursor.fetchall()
         return [Conversation(id=r[0], title=r[1], created_at=_from_iso(r[2])) for r in rows]

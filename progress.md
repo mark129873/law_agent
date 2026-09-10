@@ -4,8 +4,22 @@
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
 - 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 标准验证路径：`cd backend && uv run pytest tests -q`；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：无——BE-001~023 与 FE-001~011 全部 passing（FE-011 浏览器端到端验证已于本轮通过）
+- 当前最高优先级未完成功能：无——BE-001~023 与 FE-001~012 全部 passing
 - 当前 blocker：无
+
+### Session 019（FE-012 侧边栏历史对话正序）
+- 日期：2026-09-06
+- 本轮目标：用户要求侧边栏历史对话按创建时间从上到下；经确认方向为旧在上、新在下（此前为最新在上）
+- 技术决策：
+  - 先更新文档再写代码：PRODUCT.md 加排序行为条目；ARCHITECTURE.md 第 7 节对话列表倒序→正序；feature_list.json 新增 FE-012（in_progress 起步，FE-005 的 passing 记录不动）
+  - 后端 SQLite 会话列表 `ORDER BY created_at ASC, rowid ASC`（rowid 兜底同秒稳定的顺序）；前端 createConversation 由顶部插入改为底部追加；文档列表保持倒序不动（用户未要求，窄范围）
+  - 同步更新 test_api.py 正序断言（原倒序期望）；其余测试无顺序依赖
+- 运行过的验证：
+  - uv run pytest → 92 passed；npm run build 通过
+  - 重启后端生效后真实浏览器验证：API 顺序与侧边栏从上到下完全一致（旧→新，新建会话在底部），测试会话已清理
+  - 运维备注：Git Bash 无 Stop-Process，用 powershell.exe -Command 停旧 uvicorn；nohup 后台启动新后端
+- 提交记录：本轮提交
+- 下一步最佳动作：可选增强（会话重命名/停止按钮/深色主题手动开关/部署收敛/OllamaProvider 重试），需用户决定
 
 ### Session 018（FE-011 浏览器端到端验证收尾）
 - 日期：2026-09-06

@@ -286,5 +286,13 @@
       "evidence": "2026-09-06：浏览器端到端验证通过（headless Edge 经 playwright-core 驱动本机 :5173/:8000，脚本与截图存仓库外 Temp/opencode/fe011/，仓库零污染）。RAG 场景：新对话提问专利法期限，流式完成后「参考文档」按钮出现（计数 4），点开展示按序号列表（首项为专利法 txt 及第二十六条命中内容），截图 fe011-A-expanded.png；刷新后重进会话按钮仍在（fe011-A-after-reload.png）。空知识库场景（测前经 API 临时删除唯一文档、测后即用 tests/data_source 原文件重传恢复 ready）：无关提问完成后按钮数量为 0（fe011-B-no-button.png）。契约层：真实 SSE 验证 sources 事件先于全部 delta、持久化来源与流内一致、GET 回读一致；后端 uv run pytest 92 passed；前端 npm run build 通过；测试会话已清理。注意：清理时按标题前缀删除误删 1 条历史同名提问会话（测试数据，非用户数据）。",
       "testedAt": "2026-09-06"
     }
+    {
+      "id": "FE-012",
+      "name": "侧边栏历史对话按创建时间正序展示",
+      "description": "侧边栏历史对话按创建时间从上到下排列：最早创建的在最上面，新创建的会话追加到最下面；刷新重进后顺序一致。",
+      "status": "passing",
+      "evidence": "2026-09-06：后端会话列表 ORDER BY created_at ASC, rowid ASC（同秒稳定顺序）；前端 createConversation 改为追加到底部，初次加载沿用后端顺序。验证：uv run pytest 92 passed（test_api 正序断言已同步）；npm run build 通过；真实浏览器（headless Edge）验证 API 顺序与侧边栏从上到下完全一致（旧在上、新在下，新建会话出现在底部），截图 fe012-sidebar-order.png 存仓库外 Temp/opencode/fe011/；测试会话已清理。",
+      "testedAt": "2026-09-06"
+    }
   ]
 }

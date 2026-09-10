@@ -3,7 +3,7 @@
 ## 当前已验证
 - 现在明确可用的部分：
   - **后端 BE-001~023 全部 passing**（含 BE-023：流式回答参考来源）。
-  - **前端 FE-001~011 全部 passing**（含 FE-011：回答参考文档展示——2026-09-06 真实浏览器端到端验证通过）。
+  - **前端 FE-001~012 全部 passing**（含 FE-012：侧边栏历史对话按创建时间从上到下，旧在上新在下——2026-09-06 真实浏览器验证通过）。
   - **测试体系**：后端自动化 92 个 + 端到端脚本 3 个 + 真实浏览器 E2E（headless Edge，脚本与截图在仓库外 Temp/opencode/fe011/）。
 - 最近一轮实际跑过的验证（2026-09-06，Session 018）：
   - 后端 `uv run pytest` → 92 passed；前端 `npm run build`（tsc + vite）→ 通过
@@ -27,7 +27,8 @@
   - min_score 默认 0.0（不过滤）；E2E 脚本依赖本机 Ollama（qwen3.5:4b / nomic-embed-text:latest）与 .env 中 GLM_API_KEY
 
 ## 下一步最佳动作
-- FE-011 已 passing；全项目 BE-001~023 + FE-001~011 无未完成项
+- FE-012 已 passing；全项目 BE-001~023 + FE-001~012 无未完成项
+- 注意：后端 :8000 为本轮 nohup 后台重启的新进程（含 FE-012 正序代码）；如需停止用 powershell.exe 按端口找 PID 杀掉，勿用 taskkill（偶发超时）
 - 可选增强方向（需用户决定）：会话重命名（需后端 PATCH 端点）、回答停止按钮（需后端取消协议）、深色主题手动开关、部署方案与 CORS 收敛、OllamaProvider 加重试（上传后立即提问偶发 500）
 - 这一步中哪些东西不要动：后端 API 契约（ARCHITECTURE.md 第 7 节表格与 SSE 协议含 sources）；统一错误结构 {code,message}；前端 api/state 分层与主题 token 体系；messages.sources 的存储格式（JSON 数组 [{source,content}]）
 

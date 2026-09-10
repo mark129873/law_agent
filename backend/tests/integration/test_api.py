@@ -96,7 +96,7 @@ def client(tmp_path, monkeypatch):
 
 
 def test_create_and_list_conversations(client: TestClient) -> None:
-    """创建会话（含默认标题）并按时间倒序列出。"""
+    """创建会话（含默认标题）并按创建时间正序列出（FE-012：旧在上新在下）。"""
     created = client.post("/api/conversations", json={"title": "劳动法咨询"})
     assert created.status_code == 201
     body = created.json()
@@ -106,7 +106,7 @@ def test_create_and_list_conversations(client: TestClient) -> None:
     assert default.json()["title"] == "新对话"
 
     listed = client.get("/api/conversations").json()
-    assert [c["title"] for c in listed] == ["新对话", "劳动法咨询"]
+    assert [c["title"] for c in listed] == ["劳动法咨询", "新对话"]
 
 
 def test_messages_and_delete(client: TestClient) -> None:
