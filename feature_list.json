@@ -51,7 +51,7 @@
       "name": "SQLite 数据库实现与数据模型",
       "description": "实现当前版本 SQLite 数据库，建立 Conversation、Message、Document 等核心业务数据模型，并提供数据库初始化机制。",
       "status": "passing",
-      "evidence": "2026-09-06：Database 端口实现（三表幂等建表、外键级联删除、事务深度计数守卫提交边界，数据路径经 settings 锚定）；容器按 DB_PROVIDER 注册并接入 main.py lifespan 自动建库。验证：test_sqlite_database.py 6 passed（跨连接持久化/级联删除/真实事务回滚/幂等）；删除 db 文件后真实启动自动重建并输出结构化日志 Database initialized。2026-09-10（BE-024）：实现载体由手写 SQL + aiosqlite 迁移为 SQLAlchemy 2.0 async（BE-025 后为声明式 ORM 模型 + AsyncSession），本功能要求（SQLite 可自动初始化、核心数据模型可持久化）不变；对应测试文件更新为 test_sqlalchemy_database.py（9 passed，含事务提交/先读后事务），并以迁移前版本生成的旧库启动新实现通过兼容复验。",
+      "evidence": "2026-09-06：Database 端口实现（三表幂等建表、外键级联删除、事务深度计数守卫提交边界，数据路径经 settings 锚定）；容器按 DB_PROVIDER 注册并接入 main.py lifespan 自动建库。验证：test_sqlite_database.py 6 passed（跨连接持久化/级联删除/真实事务回滚/幂等）；删除 db 文件后真实启动自动重建并输出结构化日志 Database initialized。2026-09-10（BE-024）：实现载体由手写 SQL + aiosqlite 迁移为 SQLAlchemy 2.0 async（BE-025 后为声明式 ORM 模型 + AsyncSession），本功能要求（SQLite 可自动初始化、核心数据模型可持久化）不变；对应测试文件更新为 test_sqlalchemy_database.py（9 passed，含事务提交/先读后事务），并以迁移前版本生成的旧库启动新实现通过兼容复验。2026-09-10（BE-026）：本功能声称的\"删除 db 文件后真实启动自动重建\"在 BE-024 重写时一度失效（丢失父目录创建），已修复并加回归测试锁定（现为 11 passed）。",
       "testedAt": "2026-09-06"
     },
     {
@@ -308,6 +308,14 @@
       "description": "把 infrastructure 内的 SQLAlchemy Core 表达式写法改造为 SQLAlchemy 2.0 async ORM：新增声明式模型 models.py（取代 Core 的 schema.py，表结构/索引/外键级联保持不变）与显式的领域实体↔ORM 模型映射层 mappers.py；用 async_sessionmaker + AsyncSession（expire_on_commit=False，不引入连接池）取代裸连接，事务栈守卫提交边界的契约不变；仓储改用 session.add/session.get/属性赋值更新，批量删除用 synchronize_session=\"fetch\" 防脏读；不定义 relationship（无聚合导航需求，规避异步懒加载风险）；仓储出口仍只返回领域实体。领域层、端口与应用服务层零改动。",
       "status": "passing",
       "evidence": "2026-09-10：新增 models.py（DeclarativeBase + Conversation/Message/Document 三个声明式模型，表名/列/类型/索引/外键 ON DELETE CASCADE 与 BE-024 一致）与 mappers.py（Data Mapper：to_domain_*/to_model_* 双向映射，messages 的 sources JSON 编解码集中此处，ensure_ascii=False 保持中文可读），删除 Core 的 schema.py；database.py 改为 async_sessionmaker(expire_on_commit=False) + 单个 AsyncSession（等价于原来的进程级单连接，未引入连接池），事务栈守卫提交边界的契约不变（最外层优先复用 autobegin 事务、嵌套用 SAVEPOINT、异常回滚丢弃全部写入）；仓储改为 session.add/session.get/属性赋值更新；消息按会话删除保留批量 delete 并显式 synchronize_session=\"fetch\"（需要影响行数、避免 N+1 加载、防止 session 残留已删除对象）；刻意不定义 relationship（本项目无聚合导航需求，从而规避异步懒加载 MissingGreenlet 这一整类风险），级联删除由数据库外键保证。领域层、端口、应用服务层零改动（排序仍在应用层按 created_at 判断）。验证：uv run pytest → 104 passed（基线 98，新增 tests/integration/test_orm_contract.py 6 例全绿：仓储出口精确为领域 dataclass 且非 ORM 模型、expire_on_commit=False 下提交后仍可读属性（该访问在默认配置下会抛 MissingGreenlet）、文档状态属性级更新后同一会话回读不是过期值、批量删除后 session 无残留、事务回滚撤销属性级更新、整个数据库实例持有唯一会话）；BE-024 确立的全部行为断言（持久化/外键级联/事务提交与回滚/先读后事务/建表幂等/旧库补列迁移/来源往返/时间保留时区/乱序落库按时间排序）在新实现上原样通过。旧库兼容实测：迁移前版本创建的 data/law_agent.db 走标准启动路径 uv run uvicorn app.main:app → /api/health ok、会话列表 4 条按 created_at 正序、文档列表 4 条按上传时间倒序、首条会话消息角色为 user→assistant、POST /api/conversations 201（4→5）→ DELETE 204（回到 4，测试会话已清理）；旧库零破坏复核（只读 sqlite_master/PRAGMA 检查）：三张表定义未变、messages 仍含 sources 列、外键仍为 conversation_id→conversations.id ON DELETE CASCADE、索引 idx_messages_conversation 仍在、行数 4/8/4 与验证前一致。",
+      "testedAt": "2026-09-10"
+    },
+    {
+      "id": "BE-026",
+      "name": "修复数据目录缺失时首次启动无法建库（回归修复）",
+      "description": "按测试干净环境管理删除 backend/data/ 后，SQLite 报 unable to open database file 导致标准启动路径失败：BE-024 把手写 SQL + aiosqlite 实现重写为 SQLAlchemy 时丢失了原 connect() 中的父目录创建逻辑。修复方式为在数据库实现的 connect() 中对文件型 SQLite URL 幂等创建数据库文件父目录（内存库与 MySQL 跳过；路径经 make_url 解析以兼容相对路径与 Windows 绝对路径），并新增回归测试锁定该行为；Chroma 侧本就有 mkdir，不受影响。",
+      "status": "passing",
+      "evidence": "2026-09-10：app/infrastructure/database/sqlalchemy/database.py 新增 _ensure_sqlite_parent_dir() 并在 connect() 首行调用——只对 sqlite 方言且非 :memory: 生效，用 make_url(url).database 解析路径（实测 Windows 绝对路径解析为 C:/... 形式、相对路径为 data/law_agent.db、:memory: 原样返回，MySQL URL 因方言判断直接跳过），mkdir(parents=True, exist_ok=True) 幂等，且仅在目录真的不存在时输出一条结构化 INFO 日志 Database directory created。新增 2 个回归测试：test_connect_creates_missing_data_directory（数据库文件位于多层都不存在的目录 → connect+init_schema 成功建库、可写入回读，重复连接同一路径仍可用）、test_clean_environment_reset_then_start_again（模拟 RELIABILITY.md 的干净环境流程：建库写入→删除整个 data 目录→再次启动得到可用空库）。验证：uv run pytest → 106 passed（基线 104，既有断言一行未改）；修复前复现证据：data 目录缺失时 connect 抛 sqlite3.OperationalError: unable to open database file；修复后真实启动两轮：删除 backend/data（确认不存在）→ uv run uvicorn app.main:app → 自动创建 data/ 与 law_agent.db（32768 字节）及 data/chroma/，日志出现 Database directory created + Database initialized + VectorStore initialized，/api/health ok、/api/conversations 与 /api/documents 均为 0（空库），POST /api/conversations 201 → DELETE 204（回到 0）；随后再次删除 data 目录重启，第二轮同样自愈成功（证明可重复，不是一次性巧合）。",
       "testedAt": "2026-09-10"
     }
   ]

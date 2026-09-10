@@ -31,7 +31,7 @@ from types import TracebackType
 from typing import Any
 
 from sqlalchemy import delete, event, inspect, select, text
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -102,6 +102,39 @@ def _message_column_names(sync_conn: Connection) -> set[str]:
     return {column["name"] for column in inspect(sync_conn).get_columns("messages")}
 
 
+def _ensure_sqlite_parent_dir(url: str) -> None:
+    """建库前保证 SQLite 文件所在目录存在（BE-026 回归修复）。
+
+    ELI5（为什么需要这一步）：SQLite 就像一个只会往**已经存在的抽屉**里放文件的柜子，
+    抽屉（`data/` 目录）要是被搬走了，它不会自己造一个，而是直接喊"打不开数据库文件"。
+    所以开柜子之前，先确认抽屉在不在，不在就造一个。
+
+    为什么要放在数据库实现里（而不是启动脚本里）：数据目录属于存储细节，
+    放在这里后，任何入口（uvicorn、测试脚本、将来的 CLI）都自动获得
+    "首次启动自动建库"的能力，不需要每个入口各自记得建目录（否则会重复多份并迟早漏一处）。
+
+    为什么只处理 sqlite：
+    - `:memory:` 是内存库，没有磁盘目录可建；
+    - MySQL 的 URL 里是库名不是路径，目录由 DBA/部署负责。
+    `mkdir(parents=True, exist_ok=True)` 天然幂等——与 init_schema() 的幂等建表同一思路：
+    重复调用永远安全。
+    """
+    parsed = make_url(url)
+    if parsed.get_backend_name() != "sqlite":
+        return
+    database = parsed.database
+    if not database or database == ":memory:":
+        return
+    # make_url 已把 Windows 绝对路径解析为 "C:/.../law_agent.db" 形式，Path 可直接使用
+    parent = Path(database).parent
+    if not parent.exists():
+        parent.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            "Database directory created",
+            extra={"service": "database", "directory": str(parent)},
+        )
+
+
 class SQLAlchemyDatabase(Database):
     """基于 SQLAlchemy 2.0 async ORM 的 Database 实现。
 
@@ -126,7 +159,12 @@ class SQLAlchemyDatabase(Database):
     # ---------- 生命周期 ----------
 
     async def connect(self) -> None:
-        """创建引擎并建立唯一会话。"""
+        """创建引擎并建立唯一会话。
+
+        建引擎之前先确保 SQLite 文件所在目录存在（BE-026）：干净环境重置
+        （删除 backend/data/）后直接启动也不会报 unable to open database file。
+        """
+        _ensure_sqlite_parent_dir(self._url)
         engine = create_async_engine(self._url)
         if engine.dialect.name == "sqlite":
             # 监听底层 DBAPI 连接建立时机，保证每条连接都开启外键约束

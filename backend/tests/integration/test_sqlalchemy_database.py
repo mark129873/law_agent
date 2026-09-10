@@ -236,3 +236,70 @@ async def test_transaction_after_read_does_not_break(db: SQLAlchemyDatabase) -> 
         )
 
     assert len(await db.messages.list_by_conversation(conversation.id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_connect_creates_missing_data_directory(tmp_path) -> None:
+    """回归测试（BE-026）：数据目录不存在时首次启动必须能自动建库。
+
+    背景：按 docs/RELIABILITY.md 的"测试干净环境管理"删除 backend/data/ 后，
+    SQLite 会报 `unable to open database file`——因为 SQLite 不会创建父目录。
+    本用例让数据库文件放在**多层都不存在**的目录里，锁定"实现层自动建目录"这一行为；
+    它同时也是这类回归的守卫：以后重写数据库层若再丢掉建目录逻辑，这里会红。
+    """
+    db_path = tmp_path / "data" / "nested" / "law_agent.db"
+    assert not db_path.parent.exists()  # 前置条件：目录确实不存在
+
+    database = SQLAlchemyDatabase(sqlite_url(db_path))
+    await database.connect()
+    await database.init_schema()
+    try:
+        # 建库成功且可正常读写
+        await database.conversations.create(Conversation(title="首次启动自动建库"))
+        assert db_path.exists()
+        assert len(await database.conversations.list()) == 1
+    finally:
+        await database.close()
+
+    # 目录是被幂等创建的：重复连接同一路径不报错
+    reopened = SQLAlchemyDatabase(sqlite_url(db_path))
+    await reopened.connect()
+    await reopened.init_schema()
+    try:
+        assert len(await reopened.conversations.list()) == 1
+    finally:
+        await reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_clean_environment_reset_then_start_again(tmp_path) -> None:
+    """回归测试（BE-026）：模拟干净环境重置——删掉整个数据目录后重新启动仍可用。
+
+    这条路径就是 docs/RELIABILITY.md 规定的日常流程（开工/收尾测试前删除
+    backend/data/），因此必须长期成立：删目录 → 启动 → 得到可用空库。
+    """
+    import shutil
+
+    data_dir = tmp_path / "data"
+    db_path = data_dir / "law_agent.db"
+
+    # 第一次启动：建库并写入一条数据
+    first = SQLAlchemyDatabase(sqlite_url(db_path))
+    await first.connect()
+    await first.init_schema()
+    await first.conversations.create(Conversation(title="重置前"))
+    await first.close()
+
+    # 干净环境重置：直接删除整个数据目录（含 SQLite 文件）
+    shutil.rmtree(data_dir)
+    assert not data_dir.exists()
+
+    # 第二次启动：自动重建目录与数据库，且是空库
+    second = SQLAlchemyDatabase(sqlite_url(db_path))
+    await second.connect()
+    await second.init_schema()
+    try:
+        assert db_path.exists()
+        assert await second.conversations.list() == []
+    finally:
+        await second.close()

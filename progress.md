@@ -3,9 +3,35 @@
 ## 当前已验证状态
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
 - 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 104 个自动化测试）；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：无——BE-001~025 与 FE-001~012 全部 passing
+- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 106 个自动化测试）；启动后 `curl http://127.0.0.1:8000/api/health`
+- 当前最高优先级未完成功能：无——BE-001~026 与 FE-001~012 全部 passing
 - 当前 blocker：无
+
+### Session 022（BE-026 修复数据目录缺失时首次启动无法建库）
+- 日期：2026-09-10
+- 本轮目标：用户按新的开工流程清空 `backend/data/`（见 RELIABILITY.md 的"测试干净环境管理"）后发现标准启动路径失败，定位并修复该回归
+- 问题与根因：
+  - 现象：`SQLAlchemyDatabase.connect()` + `init_schema()` 抛 `sqlite3.OperationalError: unable to open database file`
+  - 根因：BE-024 把手写 SQL + aiosqlite 实现重写为 SQLAlchemy 时，丢失了原 `connect()` 里的 `self._db_path.parent.mkdir(parents=True, exist_ok=True)`；SQLite 不会自行创建父目录
+  - 为什么既有测试没抓到：106 个测试全部使用 pytest `tmp_path`（目录必然存在），没有任何用例覆盖"父目录不存在"；Chroma 侧本来就有 `mkdir`，所以只有数据库这一侧受影响
+  - 影响面：按 RELIABILITY.md 的流程，每次开工/收尾测试前都会删 `backend/data/`，等于每次都命中，属必须先修的基础状态问题
+- 技术决策：
+  - 修复放在**数据库实现内部**（`_ensure_sqlite_parent_dir()` + `connect()` 首行调用），而不是启动脚本或容器工厂：数据目录属存储细节，放实现里则任何入口（uvicorn、测试、将来的 CLI）都自动获得自愈能力，不需各自记得建目录
+  - 只处理文件型 SQLite：`make_url(url).get_backend_name() == "sqlite"` 且非 `:memory:`；MySQL 的 URL 里是库名不是路径，目录由部署负责
+  - 路径用 `make_url(url).database` 解析（只读实测：Windows 绝对路径 → `C:/.../law_agent.db`、相对路径 → `data/law_agent.db`、`:memory:` 原样、MySQL 跳过），因此锚定到 `backend/` 的相对路径与绝对路径都正确
+  - `mkdir(parents=True, exist_ok=True)` 幂等（与 `init_schema()` 幂等建表同一思路）；只在目录真的不存在时打一条结构化 INFO 日志 `Database directory created`，避免每次启动刷屏
+- 已完成：`database.py` 修复 + 2 个回归测试 + 文档同步（ARCHITECTURE §6/§8/§9、PRODUCT 实现说明、feature_list BE-026 与 BE-005 说明、init.md 测试数量）
+- 运行过的验证：
+  - `uv run pytest` → **106 passed**（基线 104，既有断言一行未改）；分层：unit 38、integration 60（28.21s）、api 8
+  - 新增回归测试：`test_connect_creates_missing_data_directory`（多层目录都不存在 → 建库成功且可读写；重复连接同路径仍可用）、`test_clean_environment_reset_then_start_again`（建库写入 → 删除整个 data 目录 → 再次启动得到可用空库）
+  - 真实启动两轮（干净环境流程复现）：删除 `backend/data`（确认不存在）→ `uv run uvicorn app.main:app` → 自动创建 `data/`、`law_agent.db`（32768 字节）与 `data/chroma/`；日志 `Database directory created` → `Database initialized` → `VectorStore initialized`；`/api/health` ok、`/api/conversations` 与 `/api/documents` 均为 0；`POST /api/conversations` 201 → `DELETE` 204（回到 0）。**再删一次 data 目录重启，第二轮同样自愈**（证明可重复）
+- 已记录证据：feature_list.json BE-026（passing，含修复前复现与修复后两轮实测数据）；BE-005 evidence 补充说明
+- 提交记录：本轮提交
+- 顺带说明：数据存放位置**保持不变**（仍为 `backend/data/law_agent.db` 与 `backend/data/chroma`）——用户明确要求本轮不改位置；关于"改到仓库根 `data/`"的两种方案（`.env` 覆盖 / 改 `_PROJECT_ROOT` 锚点为 `parents[3]`）已在会话中给过评估，未实施
+- 已知风险或未解决问题：
+  - 同一 `created_at` 无第二排序键（用户指定"仅按时间判断"，沿用）；MySQL 未启用、连接池未引入（同前）
+  - ORM 维护面（两套模型 + 映射层、session 状态语义）同前，已有 6 个契约测试锁定
+- 下一步最佳动作：可选产品增强（会话重命名 / 停止按钮 / 深色主题开关 / CORS 收敛 / OllamaProvider 重试）或 MySQL 8.0 接入，均需先立项
 
 ### Session 021（BE-025 数据库访问改造为 SQLAlchemy ORM）
 - 日期：2026-09-10
