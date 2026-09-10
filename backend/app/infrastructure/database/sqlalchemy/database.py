@@ -1,45 +1,65 @@
-"""SQLAlchemy async Core 的 Database 端口实现。
+"""SQLAlchemy 2.0 async ORM 的 Database 端口实现（BE-025）。
 
-为什么这样实现（与旧的手写 SQL + aiosqlite 实现的差别）：
-1. **方言无关**：建表、DML 全部由 SQLAlchemy Core 依据 schema.py 的
-   元数据生成，SQLite 与 MySQL 共用同一份代码，不必维护两套 SQL；
-2. **事务语义不变**：仍然由本类独占一条连接，并用事务栈守卫提交边界——
-   处于显式事务内时仓库写入不提交，退出最外层事务才提交/回滚，
-   保证"要么全部提交、要么全部回滚"（DDD 端口契约不变）；
-3. **级联删除由数据库保证**：外键写进表级约束（SQLite 需显式打开
-   `PRAGMA foreign_keys`，故在 connect 事件里开关）。
+与上一版（Core 表达式 + 裸连接，BE-024）的差别只在 infrastructure 内部：
+1. **会话取代裸连接**：改用 `async_sessionmaker` + 单个 `AsyncSession`，
+   仍是"进程级一个会话"，不引入连接池（池化会改变 `transaction()` 端口的
+   形状，属独立改造）；
+2. **仓储改用 ORM 写法**：`session.add()` / `session.get()` / 改属性，
+   领域实体与 ORM 模型之间的转换交给 mappers.py（Data Mapper）；
+3. **事务语义完全不变**：仍然由事务栈守卫提交边界——处于显式事务内时
+   仓储写入不提交，退出最外层事务才提交/回滚，嵌套用 SAVEPOINT，
+   保证"要么全部提交、要么全部回滚"（DDD 端口契约不变）。
 
-设计模式：本类是领域端口 `Database` 的适配器（Adapter），
-三个仓储是 `ConversationRepository` / `MessageRepository` /
-`DocumentRepository` 端口的适配器；仓储实例在构造时挂到端口声明的
-属性上，上层通过多态使用，可与其他实现（如测试用内存 Fake）互换。
+异步 ORM 的两个关键设置（为什么必须）：
+- `expire_on_commit=False`：默认 `True` 会在 commit 后让对象属性过期，
+  之后访问属性会触发同步刷新，在 asyncio 下抛 `MissingGreenlet`；
+- 不定义 relationship：本项目没有聚合内导航需求，不定义关系就没有
+  异步懒加载问题，级联删除由表级外键 `ON DELETE CASCADE` 保证。
+
+设计模式：本类是领域端口 `Database` 的适配器（Adapter）；三个仓储是
+Repository 端口的适配器 + 实体/模型映射（Data Mapper）。仓储实例在构造时
+挂到端口声明的属性上，上层通过多态使用，可与其他实现（测试用内存 Fake）
+互换。
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from pathlib import Path
 from types import TracebackType
 from typing import Any
 
-from sqlalchemy import delete, event, insert, inspect, select, text
+from sqlalchemy import delete, event, inspect, select, text
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncTransaction, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    AsyncSessionTransaction,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from app.domain.entities.conversation import Conversation
 from app.domain.entities.document import Document, DocumentStatus
-from app.domain.entities.message import Message, MessageRole
+from app.domain.entities.message import Message
 from app.domain.repositories.conversation import ConversationRepository
 from app.domain.repositories.database import Database, TransactionContext
 from app.domain.repositories.document import DocumentRepository
 from app.domain.repositories.message import MessageRepository
-from app.infrastructure.database.sqlalchemy.schema import (
-    conversations,
-    documents,
-    messages,
-    metadata,
+from app.infrastructure.database.sqlalchemy.mappers import (
+    conversation_to_domain,
+    conversation_to_model,
+    document_to_domain,
+    document_to_model,
+    message_to_domain,
+    message_to_model,
+)
+from app.infrastructure.database.sqlalchemy.models import (
+    Base,
+    ConversationModel,
+    DocumentModel,
+    MessageModel,
 )
 
 logger = logging.getLogger("app.database.sqlalchemy")
@@ -83,48 +103,54 @@ def _message_column_names(sync_conn: Connection) -> set[str]:
 
 
 class SQLAlchemyDatabase(Database):
-    """基于 SQLAlchemy 2.0 async Core 的 Database 实现。
+    """基于 SQLAlchemy 2.0 async ORM 的 Database 实现。
 
-    连接策略：整个应用生命周期持有一条连接（与旧实现一致）。
+    会话策略：整个应用生命周期持有一个 `AsyncSession`（与"单连接"策略等价）。
     为什么暂不引入连接池：端口契约（`transaction()` 挂在数据库实例上）
-    与"每请求一连接"的池化模型不兼容，池化属于接入 MySQL 并发时的
-    独立改造；当前规模下单连接足够且事务语义最简单。
+    与"每请求一个会话/连接"的池化模型不兼容，池化属于接入 MySQL 并发时的
+    独立改造；当前规模下单会话足够且事务语义最简单。
     """
 
     def __init__(self, url: str) -> None:
         self._url = url
         self._engine: AsyncEngine | None = None
-        self._conn: AsyncConnection | None = None
+        self._session_factory: async_sessionmaker[AsyncSession] | None = None
+        self._session: AsyncSession | None = None
         # 事务栈：非空表示处于显式事务内（栈深即嵌套深度）
-        self._tx_stack: list[AsyncTransaction] = []
+        self._tx_stack: list[AsyncSessionTransaction] = []
         # 仓库在构造时即可用，与抽象基类声明的属性对应
-        self.conversations = _SqlAlchemyConversationRepository(self)
-        self.messages = _SqlAlchemyMessageRepository(self)
-        self.documents = _SqlAlchemyDocumentRepository(self)
+        self.conversations = _OrmConversationRepository(self)
+        self.messages = _OrmMessageRepository(self)
+        self.documents = _OrmDocumentRepository(self)
 
     # ---------- 生命周期 ----------
 
     async def connect(self) -> None:
-        """创建引擎并建立唯一连接。"""
+        """创建引擎并建立唯一会话。"""
         engine = create_async_engine(self._url)
         if engine.dialect.name == "sqlite":
             # 监听底层 DBAPI 连接建立时机，保证每条连接都开启外键约束
             event.listen(engine.sync_engine, "connect", _enable_sqlite_foreign_keys)
         self._engine = engine
-        self._conn = await engine.connect()
+        # expire_on_commit=False 是异步 ORM 的必要设置（见模块 docstring）
+        self._session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        self._session = self._session_factory()
 
     async def init_schema(self) -> None:
         """建表 + 轻量迁移，要求幂等（重复调用不报错、不丢数据）。
 
         `create_all` 默认 checkfirst=True：已存在的表不会被重建，
         因此对既有数据库文件是"零破坏"的；列的增补由下面的迁移负责。
+        走会话自己的连接（而不是另开连接）以保持"单连接"语义，
+        对文件库与内存库都成立。
         """
-        conn = self._require_conn()
-        await conn.run_sync(_create_all)
-        await self._migrate_schema()
-        await conn.commit()
+        session = self._require_session()
+        conn = await session.connection()
+        await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn))
+        await self._migrate_schema(conn)
+        await session.commit()
 
-    async def _migrate_schema(self) -> None:
+    async def _migrate_schema(self, conn: Any) -> None:
         """历史库的轻量迁移：为旧 messages 表补齐 sources 列（FE-023）。
 
         为什么用 ALTER 而不是要求重建库：已有用户的对话数据必须原样保留；
@@ -132,7 +158,6 @@ class SQLAlchemyDatabase(Database):
         唯一幂等路径（列名反射走 SQLAlchemy inspect，方言无关）。
         ALTER TABLE ... ADD COLUMN 在 SQLite 与 MySQL 8 上语法一致。
         """
-        conn = self._require_conn()
         columns = await conn.run_sync(_message_column_names)
         if "sources" not in columns:
             await conn.execute(text("ALTER TABLE messages ADD COLUMN sources TEXT"))
@@ -142,10 +167,10 @@ class SQLAlchemyDatabase(Database):
             )
 
     async def close(self) -> None:
-        """释放连接与引擎资源。"""
-        if self._conn is not None:
-            await self._conn.close()
-            self._conn = None
+        """释放会话与引擎资源。"""
+        if self._session is not None:
+            await self._session.close()
+            self._session = None
         if self._engine is not None:
             await self._engine.dispose()
             self._engine = None
@@ -154,7 +179,7 @@ class SQLAlchemyDatabase(Database):
     # ---------- 事务 ----------
 
     def transaction(self) -> TransactionContext:
-        return _SqlAlchemyTransaction(self)
+        return _OrmTransaction(self)
 
     @property
     def _in_transaction(self) -> bool:
@@ -169,22 +194,17 @@ class SQLAlchemyDatabase(Database):
         只有不在事务内时才允许即时提交。
         """
         if not self._in_transaction:
-            await self._require_conn().commit()
+            await self._require_session().commit()
 
-    def _require_conn(self) -> AsyncConnection:
-        assert self._conn is not None, "必须先调用 connect()"
-        return self._conn
-
-
-def _create_all(sync_conn: Connection) -> None:
-    """在同步上下文里建表（AsyncConnection.run_sync 的桥接函数）。"""
-    metadata.create_all(sync_conn)
+    def _require_session(self) -> AsyncSession:
+        assert self._session is not None, "必须先调用 connect()"
+        return self._session
 
 
-class _SqlAlchemyTransaction(TransactionContext):
+class _OrmTransaction(TransactionContext):
     """显式事务上下文：最外层 BEGIN/COMMIT/ROLLBACK，嵌套用 SAVEPOINT。
 
-    为什么显式控制：SQLAlchemy 有 autobegin（一次读也会隐式开启事务），
+    为什么显式控制：Session 有 autobegin（一次读也会隐式开启事务），
     若直接再次 `begin()` 会抛 "a transaction is already begun"。
     因此进入最外层事务时优先复用已存在的隐式事务（`get_transaction()`），
     没有才新建；这样"先读后开事务"的调用顺序（如删除会话前先校验存在性）
@@ -193,15 +213,15 @@ class _SqlAlchemyTransaction(TransactionContext):
 
     def __init__(self, db: SQLAlchemyDatabase) -> None:
         self._db = db
-        self._tx: AsyncTransaction | None = None
+        self._tx: AsyncSessionTransaction | None = None
 
     async def __aenter__(self) -> None:
-        conn = self._db._require_conn()
+        session = self._db._require_session()
         if self._db._in_transaction:
             # 嵌套事务：SAVEPOINT 语义，内层回滚不影响外层已完成的写入
-            self._tx = await conn.begin_nested()
+            self._tx = await session.begin_nested()
         else:
-            self._tx = conn.get_transaction() or await conn.begin()
+            self._tx = session.get_transaction() or await session.begin()
         self._db._tx_stack.append(self._tx)
         return await super().__aenter__()
 
@@ -221,34 +241,25 @@ class _SqlAlchemyTransaction(TransactionContext):
         return False
 
 
-class _SqlAlchemyConversationRepository(ConversationRepository):
-    """ConversationRepository 端口的 SQLAlchemy 实现（多态：与内存 Fake 可互换）。"""
+class _OrmConversationRepository(ConversationRepository):
+    """ConversationRepository 端口的 ORM 实现（多态：与内存 Fake 可互换）。"""
 
     def __init__(self, db: SQLAlchemyDatabase) -> None:
         self._db = db
 
     async def create(self, conversation: Conversation) -> Conversation:
         conversation.id = conversation.id or _new_id()
-        await self._db._require_conn().execute(
-            insert(conversations).values(
-                id=conversation.id,
-                title=conversation.title,
-                created_at=conversation.created_at,
-            )
-        )
+        # session.add 后由 commit/flush 落库；主键与时间都由领域层给定，
+        # 不需要回读数据库生成的默认值（也就没有异步刷新的坑）
+        self._db._require_session().add(conversation_to_model(conversation))
         await self._db._commit()
         return conversation
 
     async def get(self, conversation_id: str) -> Conversation | None:
-        result = await self._db._require_conn().execute(
-            select(conversations.c.id, conversations.c.title, conversations.c.created_at).where(
-                conversations.c.id == conversation_id
-            )
-        )
-        row = result.first()
-        if row is None:
-            return None
-        return Conversation(id=row.id, title=row.title, created_at=row.created_at)
+        # session.get 走 identity map：同会话内重复取同一主键返回同一对象，
+        # 因此"更新后回读"不会读到过期数据
+        model = await self._db._require_session().get(ConversationModel, conversation_id)
+        return conversation_to_domain(model) if model is not None else None
 
     async def list(self) -> list[Conversation]:
         """列出全部会话。
@@ -257,21 +268,22 @@ class _SqlAlchemyConversationRepository(ConversationRepository):
         由应用服务层按 created_at 统一决定（见 BE-024 与 ARCHITECTURE 第 3 节），
         仓储只保证"把数据取出来"。
         """
-        result = await self._db._require_conn().execute(
-            select(conversations.c.id, conversations.c.title, conversations.c.created_at)
-        )
-        return [Conversation(id=row.id, title=row.title, created_at=row.created_at) for row in result]
+        result = await self._db._require_session().execute(select(ConversationModel))
+        return [conversation_to_domain(model) for model in result.scalars().all()]
 
     async def delete(self, conversation_id: str) -> bool:
-        result = await self._db._require_conn().execute(
-            delete(conversations).where(conversations.c.id == conversation_id)
-        )
+        session = self._db._require_session()
+        model = await session.get(ConversationModel, conversation_id)
+        if model is None:
+            return False
+        # ORM 属性级删除：外键 ON DELETE CASCADE 负责清理该会话的消息
+        await session.delete(model)
         await self._db._commit()
-        return result.rowcount > 0
+        return True
 
 
-class _SqlAlchemyMessageRepository(MessageRepository):
-    """MessageRepository 端口的 SQLAlchemy 实现。
+class _OrmMessageRepository(MessageRepository):
+    """MessageRepository 端口的 ORM 实现。
 
     排序说明：`list_by_conversation` 不做 SQL 排序，消息顺序由
     ConversationService 按 created_at 正序决定（时间之外的物理顺序
@@ -283,124 +295,76 @@ class _SqlAlchemyMessageRepository(MessageRepository):
 
     async def add(self, message: Message) -> Message:
         message.id = message.id or _new_id()
-        # 参考来源序列化为 JSON 文本存储（SQLite TEXT / MySQL TEXT 通用）；
-        # ensure_ascii=False 保证中文原样可读，便于排查问题
-        sources_json = json.dumps(message.sources, ensure_ascii=False) if message.sources else None
-        await self._db._require_conn().execute(
-            insert(messages).values(
-                id=message.id,
-                conversation_id=message.conversation_id,
-                role=message.role.value,
-                content=message.content,
-                created_at=message.created_at,
-                sources=sources_json,
-            )
-        )
+        self._db._require_session().add(message_to_model(message))
         await self._db._commit()
         return message
 
     async def list_by_conversation(self, conversation_id: str) -> list[Message]:
-        result = await self._db._require_conn().execute(
-            select(
-                messages.c.id,
-                messages.c.conversation_id,
-                messages.c.role,
-                messages.c.content,
-                messages.c.created_at,
-                messages.c.sources,
-            ).where(messages.c.conversation_id == conversation_id)
+        result = await self._db._require_session().execute(
+            select(MessageModel).where(MessageModel.conversation_id == conversation_id)
         )
-        return [
-            Message(
-                id=row.id,
-                conversation_id=row.conversation_id,
-                role=MessageRole(row.role),
-                content=row.content,
-                created_at=row.created_at,
-                # 空值/空串统一还原为 None：实体层"无来源"只有一种表示
-                sources=json.loads(row.sources) if row.sources else None,
-            )
-            for row in result
-        ]
+        return [message_to_domain(model) for model in result.scalars().all()]
 
     async def delete_by_conversation(self, conversation_id: str) -> int:
-        result = await self._db._require_conn().execute(
-            delete(messages).where(messages.c.conversation_id == conversation_id)
+        """按会话批量删除消息，返回删除条数。
+
+        为什么这里用批量 DELETE 而不是逐个 ORM 删除：
+        1) 端口契约要求返回删除条数，属性级删除拿不到影响行数；
+        2) 逐条加载再删除会造成 N+1 次查询。
+        `synchronize_session="fetch"` 让 session 与数据库保持一致
+        （先查出被删主键并从会话中移除），避免 identity map 残留
+        已删除对象导致后续读到脏数据。
+        """
+        result = await self._db._require_session().execute(
+            delete(MessageModel)
+            .where(MessageModel.conversation_id == conversation_id)
+            .execution_options(synchronize_session="fetch")
         )
         await self._db._commit()
         return result.rowcount
 
 
-class _SqlAlchemyDocumentRepository(DocumentRepository):
-    """DocumentRepository 端口的 SQLAlchemy 实现（列表不排序，由服务层按时间倒序）。"""
+class _OrmDocumentRepository(DocumentRepository):
+    """DocumentRepository 端口的 ORM 实现（列表不排序，由服务层按时间倒序）。"""
 
     def __init__(self, db: SQLAlchemyDatabase) -> None:
         self._db = db
 
     async def create(self, document: Document) -> Document:
         document.id = document.id or _new_id()
-        await self._db._require_conn().execute(
-            insert(documents).values(
-                id=document.id,
-                filename=document.filename,
-                file_size=document.file_size,
-                status=document.status.value,
-                created_at=document.created_at,
-            )
-        )
+        self._db._require_session().add(document_to_model(document))
         await self._db._commit()
         return document
 
     async def get(self, document_id: str) -> Document | None:
-        result = await self._db._require_conn().execute(
-            select(
-                documents.c.id,
-                documents.c.filename,
-                documents.c.file_size,
-                documents.c.status,
-                documents.c.created_at,
-            ).where(documents.c.id == document_id)
-        )
-        row = result.first()
-        if row is None:
-            return None
-        return _row_to_document(row)
+        model = await self._db._require_session().get(DocumentModel, document_id)
+        return document_to_domain(model) if model is not None else None
 
     async def list(self) -> list[Document]:
-        result = await self._db._require_conn().execute(
-            select(
-                documents.c.id,
-                documents.c.filename,
-                documents.c.file_size,
-                documents.c.status,
-                documents.c.created_at,
-            )
-        )
-        return [_row_to_document(row) for row in result]
+        result = await self._db._require_session().execute(select(DocumentModel))
+        return [document_to_domain(model) for model in result.scalars().all()]
 
     async def delete(self, document_id: str) -> bool:
-        result = await self._db._require_conn().execute(
-            delete(documents).where(documents.c.id == document_id)
-        )
+        session = self._db._require_session()
+        model = await session.get(DocumentModel, document_id)
+        if model is None:
+            return False
+        await session.delete(model)
         await self._db._commit()
-        return result.rowcount > 0
+        return True
 
     async def update_status(self, document_id: str, status: DocumentStatus) -> bool:
-        result = await self._db._require_conn().execute(
-            documents.update()
-            .where(documents.c.id == document_id)
-            .values(status=status.value)
-        )
+        """更新文档状态：取出模型改属性。
+
+        为什么用"改属性"而不是 Core 的批量 UPDATE：文档状态更新后，
+        调用方常会紧接着回读同一文档（见 DocumentService 与测试）；
+        属性级更新让 identity map 与数据库始终一致，代价是一次额外 SELECT
+        ——这是本实现明确接受的取舍（正确性优先于一次查询）。
+        """
+        session = self._db._require_session()
+        model = await session.get(DocumentModel, document_id)
+        if model is None:
+            return False
+        model.status = status.value
         await self._db._commit()
-        return result.rowcount > 0
-
-
-def _row_to_document(row: Any) -> Document:
-    """数据库行 -> Document 实体（仓储私有映射，保持领域实体与存储解耦）。"""
-    return Document(
-        id=row.id,
-        filename=row.filename,
-        file_size=row.file_size,
-        status=DocumentStatus(row.status),
-        created_at=row.created_at,
-    )
+        return True

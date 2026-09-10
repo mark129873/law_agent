@@ -1,40 +1,65 @@
 # NEW_FEATURE.md -- 本轮新增功能（待同步到 PRODUCT.md 与 feature_list.json）
 
-## BE-024 数据库实现迁移到 SQLAlchemy async，并将列表排序职责上移到应用层
+> 上一轮（BE-024：迁移到 SQLAlchemy Core + 排序上移应用层）的功能说明与实测结果已归档在
+> `feature_list.json`（BE-024 evidence）与 `progress.md`（Session 020），本文件只保留本轮内容。
+
+## BE-025 数据库访问从 SQLAlchemy Core 改造成 SQLAlchemy ORM（最小代价路径）
 
 ### 做了什么
-1. **数据库实现从「手写 SQL + aiosqlite」替换为 SQLAlchemy 2.0 async Core**：
-   - 新增 `backend/app/infrastructure/database/sqlalchemy/`（`schema.py` 表结构元数据、`types.py` 时区无损时间列、`database.py` Database 端口实现与三个仓储）。
-   - 删除原 `backend/app/infrastructure/database/sqlite/database.py` 与已无用的 `mysql/` 空占位包（保留 SQLite 作为默认 Provider，只是改用 SQLAlchemy 访问）。
-   - `aiosqlite` **保留为依赖**：它从"业务实现直接使用的驱动"降级为"SQLAlchemy 的 SQLite 异步驱动"（`sqlite+aiosqlite:///...`），业务代码不再直接导入它。
-   - 表结构保持与既有数据库文件兼容：三张表（conversations / messages / documents）+ `messages.conversation_id` 索引 + `sources` 列；旧库启动时仍幂等补 `sources` 列。
-2. **外键改为表级约束**：`messages.conversation_id → conversations.id ON DELETE CASCADE`，由 SQLAlchemy `ForeignKey(ondelete="CASCADE")` 生成表级 `FOREIGN KEY` 子句（列内联 `REFERENCES` 在 MySQL 上会被忽略，这是接入 MySQL 8.0 的必要前置修复）。
-3. **时间列时区无损**：自定义 `IsoDateTime` 类型装饰器，以 ISO-8601 字符串（`VARCHAR(32)`/`TEXT`）读写，读回仍是带 `tzinfo` 的 `datetime`，与旧实现逐字节一致（SQLAlchemy 默认 `DateTime` 会丢时区，会使"时间戳必须保留时区"的既有断言失败）。
-4. **排序职责上移到应用层，且只按时间判断**：
-   - 仓储 SQL 不再出现 `ORDER BY`（原 `ORDER BY created_at ASC, rowid ASC` 中的 `rowid` 是 SQLite 专有语法，MySQL 没有）。
-   - 应用服务负责排序：会话列表按 `created_at` 正序（最早在上）、会话消息按 `created_at` 正序（对话顺序）、文档列表按 `created_at` 倒序（最新在上）。
-   - 同一时刻（`created_at` 完全相同）的记录不再有第二排序键，顺序由底层返回顺序决定，Python `sorted` 稳定排序保证同一份数据多次查询结果一致。
+1. **表结构改为声明式 ORM 模型**：新增 `backend/app/infrastructure/database/sqlalchemy/models.py`
+   （`DeclarativeBase` + `ConversationModel` / `MessageModel` / `DocumentModel`），
+   取代原 Core 的 `schema.py`（已删除）。表名、列名、类型、索引、外键级联与 BE-024 完全一致。
+2. **新增显式的领域实体 ↔ ORM 模型映射层**：`mappers.py` 提供 `to_domain_*` / `to_model_*`。
+   领域层保持纯 dataclass（DDD 边界守护测试禁止 domain 导入 sqlalchemy），
+   因此 ORM 模型**只能**住在 infrastructure，两个模型体系之间必须有一层映射——
+   这层映射用 Data Mapper 模式固定下来，不再散落在各仓储方法里。
+3. **会话（Session）取代裸连接**：`SQLAlchemyDatabase` 改用 `async_sessionmaker` + 单个
+   `AsyncSession`（与 BE-024 的单连接策略等价，不引入连接池——池化需要改端口形状，属独立改造）。
+   关键配置：`expire_on_commit=False`（否则 commit 后访问属性在异步上下文抛 `MissingGreenlet`）。
+4. **仓储改为 ORM 写法**：`session.add()` + 事务栈守卫提交边界；`session.get()` 按主键取用；
+   文档状态更新改为"取出模型→改属性"（保持 identity map 与数据库一致）；
+   消息按会话删除保留批量 `delete()`（需要影响行数、避免 N+1 加载），
+   并显式使用 `synchronize_session="fetch"` 让 session 与数据库同步，避免脏读。
+5. **不使用 ORM 关系（relationship）**：本项目没有聚合内导航需求（消息永远按
+   `conversation_id` 显式查询），因此不定义 relationship，也就没有异步懒加载（`MissingGreenlet`）
+   这一整类风险；级联删除仍由表级外键 `ON DELETE CASCADE` 保证。
+6. **领域实体永不出界**：仓储出口一律返回领域 dataclass，ORM 模型不越过 infrastructure
+   边界（新增测试机械校验这一点），否则应用层会被 ORM 类型悄悄污染。
 
-### 为什么这么做
-- 架构第 10 节原本预留「新增 `infrastructure/database/mysql/` 实现」：那意味着两套手写 SQL 各自演化，极易出现「SQLite 测试全绿、MySQL 行为不同」的方言漂移。改用 SQLAlchemy Core 后，表结构、约束、DML 全部方言无关，MySQL 接入只剩「换 URL + 装异步驱动」。
-- 排序属于业务展示规则（FE-012 的"旧在上新在下"是产品要求），不属于存储职责。放进应用层后，同一份排序规则对任何存储实现都成立，仓储回归纯粹的 CRUD 契约；这也修掉了内存 Fake（倒序）与 SQLite 实现（正序）此前的排序不一致。
-- 只按时间排序是产品口径：排序依据唯一且可解释，不再依赖 SQLite 的物理行号。
+### 为什么这么做（在已知代价前提下的取舍）
+- ORM 的真实收益（关系图、工作单元、自动脏检查、Alembic autogenerate 闭环）在本项目当前
+  规模下几乎用不到，成本（多一层映射、session 状态语义、异步坑）却是实付的。
+  本轮是**按用户决策落地**，因此采用最小代价路径：不动领域层、不动端口、
+  不动应用服务层（排序仍在应用层按 created_at 判断），只替换 infrastructure 内部实现。
+- 保留的"ORM 语言一致性"收益：表结构即 Python 类、字段改动有类型提示、后续引入 Alembic
+  autogenerate 时模型即 schema 唯一真相。
 
 ### 验收标准
-- 全量 `uv run pytest` 通过（本轮基线 92 个，迁移后数量只增不减）。
-- 与旧实现同一套行为断言在 SQLAlchemy 实现上全绿：跨连接持久化、外键级联删除、真实事务回滚、建表幂等、旧库 `sources` 列迁移与数据保留、`sources` JSON 往返。
-- 新增排序验证：**乱序写入（先写入时间较晚、后写入时间较早）后，服务层按时间正序/倒序返回**；同时间和多次查询结果稳定。
-- 时间列读回保留 `tzinfo`。
-- `tests/unit/test_ddd_boundaries.py` 通过：sqlalchemy 只出现在 infrastructure 层。
-- 真实启动路径可用：`uv run uvicorn app.main:app` 自动建库，`curl /api/health` 返回 ok；`scripts/verify_real_e2e.py`（依赖本机 Ollama）可选执行。
+- 全量 `uv run pytest` 通过（本轮基线 98 个，数量只增不减）。
+- BE-024 的全部既有行为断言在新实现上全绿：跨连接持久化、外键级联删除、事务提交/回滚、
+  先读后开事务、建表幂等、旧库 `sources` 列迁移与数据保留、`sources` JSON 往返、时间保留时区。
+- 新增 ORM 特有契约测试：提交后属性可安全读取（不抛 `MissingGreenlet`）、
+  identity map 下"更新后回读"一致、批量删除后无脏读、仓储出口是领域实体而非 ORM 模型。
+- 真实启动路径可用（`uv run uvicorn app.main:app`），且能用 BE-024 之前版本创建的旧库直接读写。
 
 ### 用户可见影响
-无行为变化：会话列表仍是「旧在上新在下」、对话内消息仍是提问在前回答在后、知识库文档列表仍是最新上传在最前。
+无。API 契约、SSE 协议、排序行为、`sources` 存储格式全部不变。
 
 ### 实测结果（本轮真实验证）
-- `uv run pytest`：**98 passed**（迁移前基线 92，新增 6 个：事务提交/先读后事务/排序契约 4 例等），无失败无跳过。
-- 旧库兼容实测：用**迁移前版本创建的** `backend/data/law_agent.db`（4 条会话、4 个文档、含 `sources` 来源内容）直接启动新实现——`uv run uvicorn app.main:app` 启动正常、`/api/health` 返回 ok；`GET /api/conversations` 返回创建时间正序、`GET /api/documents` 返回上传时间倒序，中文标题/文件名与 `sources` JSON 完整无乱码、时间戳带 `+00:00`。
-- 写路径实测：在该旧库上 `POST /api/conversations` → 201（4→5 条），`DELETE` → 204（回到 4 条），会话已清理；结构化 JSON 日志（`Database initialized`、`Conversation created/deleted`）正常输出。
-- 新库迁移路径：`test_schema_migration_adds_sources_column` 用同步引擎构造 FE-023 之前的旧表 + 历史数据，验证 `init_schema` 幂等补列、数据保留、迁移后可写入带来源消息、重复调用不报错。
-- 顺带修复：`feature_list.json` 缺失逗号导致文件整体无法被 JSON 解析（FE-012 条目处），已修复并校验可解析。
+- `uv run pytest`：**104 passed**（本轮基线 98，新增 ORM 契约测试 6 例）。
+- ORM 特有契约测试（`tests/integration/test_orm_contract.py`，6 例全绿）：
+  仓储出口是领域实体而非 ORM 模型（类型与模块双重断言）、
+  `expire_on_commit=False` 下提交后仍可安全读属性（否则异步访问过期属性会抛 `MissingGreenlet`）、
+  文档状态"改属性更新"后同一会话内回读不是过期值、
+  批量删除后 session 内无残留（`synchronize_session="fetch"` 生效）、
+  事务回滚能撤销属性级更新、整个数据库实例持有唯一会话。
+- BE-024 的全部行为断言在新实现上原样通过（跨连接持久化/外键级联/事务提交与回滚/先读后事务/
+  建表幂等/旧库补列迁移/来源 JSON 往返/时间保留时区/乱序落库仍按时间排序）。
+- 旧库兼容实测：用**迁移前版本创建的** `backend/data/law_agent.db` 走标准启动路径
+  `uv run uvicorn app.main:app` → `/api/health` ok；`GET /api/conversations` 4 条按 `created_at` 正序、
+  `GET /api/documents` 4 条按上传时间倒序、`GET .../messages` 首条会话角色为 user → assistant；
+  `POST /api/conversations` 201（4→5）→ `DELETE` 204（回到 4，测试会话已清理）。
+- 旧库零破坏复核（只读 PRAGMA/sqlite_master 检查）：三张表未变、`messages` 仍含 `sources` 列、
+  外键仍为 `conversation_id → conversations.id ON DELETE CASCADE`、索引 `idx_messages_conversation` 仍在、
+  行数与验证前一致（4 会话 / 8 消息 / 4 文档）——ORM 的 `create_all` 对已存在表零改动。
 

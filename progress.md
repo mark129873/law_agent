@@ -3,9 +3,34 @@
 ## 当前已验证状态
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
 - 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 98 个自动化测试）；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：无——BE-001~024 与 FE-001~012 全部 passing
+- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 104 个自动化测试）；启动后 `curl http://127.0.0.1:8000/api/health`
+- 当前最高优先级未完成功能：无——BE-001~025 与 FE-001~012 全部 passing
 - 当前 blocker：无
+
+### Session 021（BE-025 数据库访问改造为 SQLAlchemy ORM）
+- 日期：2026-09-10
+- 本轮目标：用户询问"用 SQLAlchemy ORM 是不是更好"，在评估结论为"本项目不划算"后仍选定**改成 ORM（最小代价路径）**
+- 技术决策：
+  - 最小代价路径 = 不动领域层、不动 `Database`/三个 Repository 端口、不动应用服务层（排序仍在应用层按 created_at 判断），只替换 infrastructure 内部实现
+  - 新增 `models.py`（DeclarativeBase + 三个声明式模型，取代 Core 的 `schema.py`）与 `mappers.py`（Data Mapper：`to_domain_*` / `to_model_*` 双向映射，sources 的 JSON 编解码集中此处）
+  - `async_sessionmaker(expire_on_commit=False)` + 单个 `AsyncSession` 取代裸连接：仍是"进程级单连接"语义，**不引入连接池**（池化会改端口形状，属独立改造）。`expire_on_commit=False` 是异步 ORM 的必要设置，否则 commit 后访问属性会抛 `MissingGreenlet`
+  - 事务栈守卫提交边界的契约完全保留：最外层优先复用 autobegin 事务（"先读后开事务"可用）、嵌套 SAVEPOINT、异常回滚丢弃全部写入
+  - 仓储写法：`session.add` / `session.get` / 属性赋值更新（文档状态），消息按会话删除保留批量 `delete` 并显式 `synchronize_session="fetch"`（需要影响行数、避免 N+1、防止 session 残留已删除对象）
+  - **刻意不定义 relationship**：本项目无聚合内导航需求（消息永远按 conversation_id 显式查询），不定义关系就没有异步懒加载风险；级联删除由表级 `ON DELETE CASCADE` 保证
+  - 明确接受的一处取舍：文档状态更新从 Core 的批量 UPDATE 改为"取出模型→改属性"，多一次 SELECT，换来 identity map 与数据库始终一致（否则"更新后回读"会拿到过期状态）
+- 运行过的验证：
+  - `uv run pytest -q` → **104 passed**（基线 98；新增 `tests/integration/test_orm_contract.py` 6 例）；分层：unit 38（~2s）、integration 58（25.63s）、api 8
+  - ORM 特有契约（新增测试锁定）：仓储出口精确为领域 dataclass 且非 ORM 模型、`expire_on_commit=False` 下提交后仍可读属性（默认配置下该访问会抛 `MissingGreenlet`）、状态属性级更新后同一会话回读非过期值、批量删除后 session 无残留、事务回滚能撤销属性级更新、数据库实例持有唯一会话
+  - BE-024 全部行为断言原样通过（持久化/外键级联/事务提交与回滚/先读后事务/建表幂等/旧库补列迁移/来源往返/时间保留时区/乱序落库按时间排序）
+  - 旧库兼容实测（迁移前版本创建的 `backend/data/law_agent.db`）：标准启动 `/api/health` ok、会话 4 条按 created_at 正序、文档 4 条按上传时间倒序、首条会话消息 user→assistant、`POST` 201（4→5）→ `DELETE` 204（回到 4，测试会话已清理）
+  - 旧库零破坏复核（只读 sqlite_master/PRAGMA）：三表定义未变、`sources` 列在、外键 `ON DELETE CASCADE` 在、`idx_messages_conversation` 在、行数 4/8/4 与验证前一致 → ORM 的 `create_all` 对既有表零改动
+- 已记录证据：feature_list.json BE-025（passing）、BE-024 与 BE-005 evidence 补充"实现载体已改造为 ORM"的说明；NEW_FEATURE.md 记录本轮功能与实测结果；ARCHITECTURE.md 新增"ORM 使用约定"小节
+- 提交记录：本轮提交
+- 已知风险或未解决问题：
+  - ORM 带来的固有复杂度已确认并记录在案：多一层实体↔模型映射（字段增删需同时改 models/mappers）、session 状态语义（identity map、过期对象）、批量操作需显式同步策略。本轮用 6 个契约测试把这些点锁住，但它们是新引入的维护面
+  - 仍未引入连接池（单会话/单连接）；MySQL 仍未启用（容器对 `DB_PROVIDER=mysql` 显式 NotImplementedError），接入只剩装 aiomysql + URL 分支 + 真实实例验证
+  - 同一 `created_at` 仍无第二排序键（沿用用户指定口径：仅按时间判断）
+- 下一步最佳动作：MySQL 8.0 接入（驱动 + URL 分支 + 真实实例集成验证 + Alembic autogenerate 可直接消费现有声明式模型），或 session-handoff 中列出的可选产品增强
 
 ### Session 020（BE-024 数据库实现迁移到 SQLAlchemy + 排序职责上移应用层）
 - 日期：2026-09-10
