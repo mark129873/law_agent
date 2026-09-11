@@ -188,7 +188,7 @@ POST /api/chat/stream {conversation_id, question}
        data: {"type":"delta","content":"增量"} ... {"type":"done"} / {"type":"error"}
   ▼ 流正常结束：完整回答与参考来源一起持久化为 assistant 消息（异常中断不落库）
 ```
-- **所有 LLM 问答必须走图**：流式与非流式执行同一节点，检索、Prompt 组装、模型调用只有一份实现；禁止在图外直连 LLMProvider 做问答。
+- **所有 LLM 问答必须走图**：对外唯一问答入口是 SSE 流式接口（`ChatService.stream_answer` → `astream`），检索、Prompt 组装、模型调用只有一份实现；禁止在图外直连 LLMProvider 做问答。图引擎本身仍支持非流式执行（`ainvoke`，测试与脚本经 `run_qa` 使用），与流式执行同一节点实例。
 - ChatService 只依赖 `QaWorkflow` 端口，负责会话持久化，不直接依赖 RAG/LLM。
 
 ### 文档入库全链路
@@ -211,10 +211,27 @@ DELETE /api/documents/{id}：向量按 document_id 删除 + 元数据删除（�
 - `LangGraphQaWorkflow`（适配器模式）：显式继承并实现 `QaWorkflow` 领域端口，langgraph 引擎封在适配器之内。
 - `create_qa_workflow(llm, rag=None)`：模块对外唯一入口（工厂），rag 为 None 时为基础工作流。
 
-### 拓扑
+### 图拓扑（LangGraph 图的图形化表示）
+
+由 `QaGraphBuilder.build()` 装配；`rag=None` 时为基础工作流（`START` 直连 `generate`）：
+
 ```text
-基础：START → generate → END
-RAG： START → retrieve → generate → END
+RAG 工作流：
+
+        START
+          │
+          ▼
+    ┌───────────┐
+    │ retrieve  │   RagService 检索 → 写状态 {context}；命中时推 sources 事件
+    └─────┬─────┘
+          ▼
+    ┌───────────┐
+    │ generate  │   组装 Prompt → LLM 流式生成 → 写状态 {answer, history}；逐 token 推 delta 事件
+    └─────┬─────┘
+          ▼
+         END
+
+基础工作流：START → generate → END
 ```
 
 ### 法律问答策略（agent/prompts.py，BE-017）

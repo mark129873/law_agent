@@ -1,8 +1,8 @@
 """聊天服务：问答流程编排（会话持久化 + LangGraph Agent）。
 
-为什么所有问答都走 LangGraph 图：流式与非流式共享同一个工作流，
-检索、Prompt 组装、模型调用只有一份实现（在图节点内），
-服务层只负责会话持久化与图执行，杜绝两条路径行为漂移。
+为什么所有问答都走 LangGraph 图的流式执行：对外唯一问答入口是 SSE
+流式接口（stream_answer），检索、Prompt 组装、模型调用只有一份实现
+（在图节点内），服务层只负责会话持久化与图执行，杜绝行为漂移。
 """
 
 from __future__ import annotations
@@ -40,36 +40,6 @@ class ChatService:
         history_entities = await self._conversations.get_messages(conversation_id)
         return [ChatMessage(role=m.role, content=m.content) for m in history_entities]
 
-    async def send_message(self, conversation_id: str, question: str) -> str:
-        """非流式问答：走 Agent 图（ainvoke），返回完整回答。
-
-        为什么与流式共用图：检索与 Prompt 组装只存在图节点内一份实现，
-        两条路径永远不会出现 Prompt 或上下文不一致。
-        """
-        started_at = time.perf_counter()
-        # 埋点规则（RELIABILITY.md）：问答任务开始
-        logger.info(
-            "Chat task started",
-            extra={"service": "chat", "conversation_id": conversation_id, "question_length": len(question)},
-        )
-        history = await self._snapshot_history(conversation_id)
-        await self._conversations.add_message(conversation_id, MessageRole.USER, question)
-        # 只经端口调用工作流：answer 字段由图状态返回（见 AgentState）
-        result = await self._graph.ainvoke({"question": question, "history": history})
-        # 埋点规则（RELIABILITY.md）：生成回答记录耗时
-        # （回答置信度由检索侧记录：RagService 的 top_score 即检索相关度置信度）
-        duration_ms = int((time.perf_counter() - started_at) * 1000)
-        logger.info(
-            "Chat answer generated",
-            extra={
-                "service": "chat",
-                "conversation_id": conversation_id,
-                "answer_length": len(result["answer"]),
-                "duration_ms": duration_ms,
-            },
-        )
-        return result["answer"]
-
     async def stream_answer(
         self, conversation_id: str, question: str
     ) -> AsyncIterator[QaStreamEvent]:
@@ -92,7 +62,7 @@ class ChatService:
         collected: list[str] = []
         sources: list[dict[str, str]] = []
         try:
-            # 检索与 Prompt 组装都在图节点内完成（与 send_message 同一路径）
+            # 检索与 Prompt 组装都在图节点内完成（图内部唯一实现）
             async for event in self._graph.astream(
                 {"question": question, "history": history}, stream_mode="custom"
             ):

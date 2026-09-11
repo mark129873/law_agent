@@ -7,6 +7,25 @@
 - 当前最高优先级未完成功能：无——BE-001~027 与 FE-001~012 全部 passing
 - 当前 blocker：无
 
+### Session 025（删除非流式问答死代码 send_message + ARCHITECTURE §5 图拓扑图形化）
+- 日期：2026-09-11
+- 本轮目标：用户要求①确认非流式问答接口不存在且 send_message 无调用后删除之；②ARCHITECTURE.md 第 5 节以图的形式表现代码中的 LangGraph 图（随后要求简化为只表达节点流转）
+- 技术决策：
+  - 调用面核实：`send_message` 在路由、测试、脚本中零调用（接口层唯一问答端点是 `POST /api/chat/stream`），判定为死代码；且其内部本就不持久化 assistant 回答、丢失 sources，与流式路径行为漂移，删除优于修补
+  - 删除范围仅限 `ChatService.send_message`：`QaWorkflow.ainvoke` 端口与 `run_qa`/`build_qa_graph` 兼容入口保留（test_agent_graph.py 经它们以非流式方式测图，属图引擎能力而非业务接口）
+  - 先文档后代码：ARCHITECTURE.md §4"流式与非流式执行同一节点"改写为"对外唯一入口是 SSE 流式接口，图引擎仍支持 ainvoke（测试与脚本使用）"；§5 拓扑小节改为图形化 LangGraph 图（节点流转 + 单行职责注记：写状态、推事件），按用户要求从展开版简化为简洁版
+  - chat_service.py 模块 docstring 与注释同步（不再提"两条路径"）
+- 运行过的验证：
+  - 干净环境（先删 `backend/data`）`uv run pytest tests -q` → **117 passed**（数量与基线一致，无测试依赖 send_message）
+  - 真实启动 smoke（8012 端口）：启动日志全链正常（Application configured → Database directory created → Database initialized → VectorStore initialized），`/api/health` ok、`/api/conversations` 返回 `[]`；验证后进程已清理、端口已释放
+  - 端到端（clean-state-checklist 新增要求）：本机 Ollama 的 llama-server 进程崩溃（`exit status 0xc0000409` 栈溢出，直接 curl `/api/chat` 亦失败，与本轮改动无关的模型服务侧故障），改以 `LLM_PROVIDER=glm`（glm-4.5-air，.env 已有密钥）走真实 E2E——上传专利法 TXT+MD 入库 → 流式 RAG 问答正确引用第四十二条"二十年" → sources 事件契约（4 条、先于 delta、source/content 齐全）→ user/assistant 持久化且 assistant sources 与流内一致。**E2E PASS**
+  - 运维备注：Git Bash 的 `kill` 杀不掉 Windows PID 的监听进程（新 uvicorn 绑定 8000 失败静默退出，旧 Ollama Provider 进程继续服务导致误判）；必须 `netstat -ano` 找 PID 后 `taskkill //PID //F`
+- 已记录证据：本轮为死代码清理与文档同步，feature_list.json 无功能状态变化（BE-001~027 与 FE-001~012 保持 passing，文件 JSON 校验通过）
+- 已知风险或未解决问题：
+  - **本机 Ollama 0.32.0 llama-server 进程崩溃未恢复**（原"上传后偶发 500"恶化为持续 500）：E2E 的 Ollama 路径本轮无法验证，需重启 Ollama 服务后补验；GLM 路径已验证通过
+  - 既有遗留项不变：MySQL 未启用、无连接池、min_score 默认 0.0
+- 下一步最佳动作：可选产品增强（会话重命名 / 停止按钮 / 深色主题开关 / CORS 收敛 / OllamaProvider 重试）或 MySQL 8.0 接入
+
 ### Session 024（BE-027 结构化日志落盘 backend/log + 日志规则强化）
 - 日期：2026-09-10
 - 本轮目标：用户要求"分析 RELIABILITY.md 日志规则可优化点"并"将日志落盘到 backend/log"；先改文档（RELIABILITY.md 已完成强化），再落地代码
