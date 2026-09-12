@@ -15,11 +15,10 @@ APP_ROOT = pathlib.Path(__file__).resolve().parents[2] / "app"
 # 领域层/应用层禁止引入的技术库；pydantic 仅允许 API 层 DTO 使用
 # BE-024 起数据库技术栈为 SQLAlchemy（aiosqlite 仅作为其 SQLite 异步驱动，
 # 同样禁止在领域层/应用层直接导入），两者都在守护名单内
-# BE-028 起关键词检索技术栈为 jieba/rank_bm25，只允许出现在 infrastructure
+# BE-029 起向量库技术栈为 pymilvus，只允许出现在 infrastructure
 _TECH_LIBS = {
-    "fastapi", "httpx", "chromadb", "sqlalchemy", "aiosqlite", "pypdf",
+    "fastapi", "httpx", "pymilvus", "sqlalchemy", "aiosqlite", "pypdf",
     "langgraph", "pydantic", "pydantic_settings", "uvicorn",
-    "jieba", "rank_bm25",
 }
 
 # 全项目只允许在 app/agent/ 内导入 langgraph（工作流引擎隔离区）

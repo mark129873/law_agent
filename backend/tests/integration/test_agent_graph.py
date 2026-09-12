@@ -1,6 +1,6 @@
 """LangGraph Agent 工作流测试（BE-015 基础工作流 + BE-016 RAG 工作流）。
 
-用 Fake LLM 与真实 Chroma（确定性 embedding）分别验证：
+用 Fake LLM 与内存 Fake 向量库（确定性 embedding）分别验证：
 基础工作流完成一次问答；RAG 工作流把知识库上下文注入 Prompt。
 """
 
@@ -21,7 +21,7 @@ from app.domain.entities.message import MessageRole
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.services.embedding import EmbeddingService
 from app.infrastructure.document_parser.text_parser import TextParser
-from app.infrastructure.vector_store.chroma import ChromaVectorStore
+from tests.fakes import InMemoryVectorStore
 
 
 class RecordingFakeLLM(LLMProvider):
@@ -102,8 +102,8 @@ async def test_basic_graph_includes_history() -> None:
 
 @pytest_asyncio.fixture
 async def rag_graph_factory(tmp_path):
-    """构建接入真实 Chroma 知识库的 RAG 工作流。"""
-    store = ChromaVectorStore(str(tmp_path / "chroma"))
+    """构建接入内存 Fake 知识库的 RAG 工作流。"""
+    store = InMemoryVectorStore()
     await store.initialize()
     embedding = DeterministicEmbedding()
     ingestion = KnowledgeIngestionService(
@@ -139,7 +139,7 @@ async def test_rag_graph_injects_knowledge_context(rag_graph_factory) -> None:
 @pytest.mark.asyncio
 async def test_rag_graph_empty_knowledge_marks_no_context(tmp_path) -> None:
     """知识库无命中时，Prompt 不应包含参考依据段（供模型走信息不足策略）。"""
-    store = ChromaVectorStore(str(tmp_path / "empty_chroma"))
+    store = InMemoryVectorStore()
     await store.initialize()
     llm = RecordingFakeLLM("知识库中暂无相关依据。")
     graph = build_qa_graph(llm, rag=RagService(DeterministicEmbedding(), store))
@@ -155,7 +155,7 @@ async def test_rag_graph_empty_knowledge_marks_no_context(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_rag_service_min_score_filters_weak_hits(tmp_path) -> None:
     """min_score 过滤：低于阈值的弱命中不应进入上下文（BE-017 信息不足策略的机制）。"""
-    store = ChromaVectorStore(str(tmp_path / "weak_chroma"))
+    store = InMemoryVectorStore()
     await store.initialize()
     embedding = DeterministicEmbedding()
     content = "劳动合同违约金条款：劳动者违反服务期约定的，应当按照约定向用人单位支付违约金。"
@@ -233,7 +233,7 @@ async def test_rag_graph_astream_emits_sources_before_deltas(rag_graph_factory) 
 @pytest.mark.asyncio
 async def test_rag_graph_empty_knowledge_no_sources_event(tmp_path) -> None:
     """检索无命中时不应产生 sources 事件（等价于"无参考文档"契约）。"""
-    store = ChromaVectorStore(str(tmp_path / "empty_stream_chroma"))
+    store = InMemoryVectorStore()
     await store.initialize()
     llm = MultiChunkLLM("知识库中暂无相关依据。")
     graph = build_qa_graph(llm, rag=RagService(DeterministicEmbedding(), store))

@@ -39,8 +39,7 @@
 | `system` | 应用生命周期、健康检查、全局异常兜底 |
 | `api` | API 层业务异常与未预期异常处理 |
 | `database` | 数据库连接与建表 |
-| `vector_store` | 向量库初始化与读写 |
-| `keyword_index` | BM25 关键词索引初始化、双写与删除（BE-028） |
+| `vector_store` | 向量库（Milvus）初始化与读写 |
 | `document` | 文档元数据状态机、上传与删除 |
 | `document_pipeline` | 解析 → 清洗 → 段落切分 Pipeline |
 | `knowledge` | 向量化与入库编排 |
@@ -104,7 +103,8 @@ LOG_LEVEL=ERROR  # 仅输出 ERROR
 干净环境管理保证测试从一个已知的空白状态启动，避免历史遗留数据干扰测试结果，引发未知异常。
 
 ### 重置机制
-1. 删除本地数据库与向量库文件 `backend/data/`, 里面存放的均为测试遗留数据, 可以直接删除
+1. 删除本地数据库文件 `backend/data/`, 里面存放的均为测试遗留数据, 可以直接删除
+2. 删除 Milvus 中的知识库集合（BE-029 起向量数据由 Milvus 容器卷持久化，不在 `backend/data/`）：在 Milvus 服务运行的前提下执行 `cd backend && uv run python scripts/reset_milvus.py`（幂等删除 `law_chunks` 集合，下次启动/入库自动重建）
 
 ### 需要重置干净环境的场景
 - 开工测试之前

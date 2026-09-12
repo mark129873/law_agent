@@ -1,7 +1,7 @@
 """FastAPI 应用入口。
 
 为什么用工厂函数：便于测试中按需构建应用实例（注入临时配置），
-也为后续根据配置装配不同 Provider（SQLite/MySQL、Chroma/Milvus 等）留出扩展点。
+也为后续根据配置装配不同 Provider（SQLite/MySQL、Milvus 等）留出扩展点。
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from app.common.logging import setup_logging
 from app.config.settings import Settings, get_settings
 from app.containers import create_container
 from app.domain.repositories.vector_store import VectorStore
-from app.domain.repositories.keyword_index import KeywordIndex
 from app.domain.repositories.database import Database
 
 logger = logging.getLogger("app.main")
@@ -49,22 +48,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "Database initialized",
             extra={"service": "database", "provider": settings.db_provider.value},
         )
-        # 向量库随应用一起初始化，保证首次请求前存储就绪
+        # 向量库（Milvus 混合检索）随应用一起初始化：建立连接并加载
+        # 已有集合（集合不存在时由首次入库懒建，见 BE-029）
         vector_store: VectorStore = container.resolve(VectorStore)
         await vector_store.initialize()
         logger.info(
             "VectorStore initialized",
             extra={"service": "vector_store", "provider": settings.vector_store_provider.value},
         )
-        # 关键词索引（BM25）随应用初始化：加载语料快照并重建索引；
-        # 混合检索关闭时跳过（检索退化为纯向量，见 BE-028）
-        if settings.hybrid_search_enabled:
-            keyword_index: KeywordIndex = container.resolve(KeywordIndex)
-            await keyword_index.initialize()
-            logger.info("KeywordIndex initialized", extra={"service": "keyword_index"})
         yield
-        if settings.hybrid_search_enabled:
-            await (container.resolve(KeywordIndex)).close()
         await vector_store.close()
         await database.close()
         logger.info("Infrastructure closed", extra={"service": "system"})
@@ -78,7 +70,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "db_provider": settings.db_provider.value,
             "vector_store_provider": settings.vector_store_provider.value,
             "llm_provider": settings.llm_provider.value,
-            "hybrid_search_enabled": settings.hybrid_search_enabled,
         },
     )
 

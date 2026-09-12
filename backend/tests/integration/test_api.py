@@ -1,6 +1,6 @@
 """API 层集成测试（BE-019/020/021/022）。
 
-测试环境：临时 SQLite + 临时 Chroma + Fake LLM/Embedding；
+测试环境：临时 SQLite + 内存 Fake 向量库 + Fake LLM/Embedding；
 覆盖统一错误结构、会话 CRUD、SSE 流式协议、文档上传入库与删除。
 """
 
@@ -15,9 +15,9 @@ from app.application.services.rag_service import RagService
 from app.containers import create_container
 from app.config.settings import Settings
 from app.domain.entities.llm import ChatMessage, LlmParams
-from app.domain.repositories.keyword_index import KeywordIndex
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
+from tests.fakes import InMemoryVectorStore
 from app.domain.services.embedding import EmbeddingService
 from app.main import create_app
 
@@ -72,8 +72,6 @@ def client(tmp_path):
     """
     settings = Settings(
         sqlite_db_path=str(tmp_path / "api.db"),
-        chroma_persist_dir=str(tmp_path / "chroma"),
-        bm25_index_path=str(tmp_path / "bm25_index.json"),
         log_dir=str(tmp_path / "log"),
         log_level="INFO",
         _env_file=None,
@@ -81,16 +79,17 @@ def client(tmp_path):
     app = create_app(settings)
     container = app.state.container
     llm = ScriptedLLM()
-    # 在启动前替换 LLM 与 Embedding/RAG 检索（避免测试触网）：
+    # 在启动前替换 LLM / Embedding / 向量库（避免测试触网与依赖外部 Milvus）：
     # 入库（KnowledgeIngestionService）与检索（RagService）必须用同一个
-    # 确定性 embedding，否则向量维度不一致会导致检索报错（曾踩坑）。
-    # RAG 检索保留关键词索引注入（与生产装配一致，覆盖混合检索路径）
+    # 确定性 embedding，否则向量维度不一致会导致检索报错（曾踩坑）
     embedding = DeterministicEmbedding()
+    store = InMemoryVectorStore()
     container.register(LLMProvider, lambda c: llm)
     container.register(EmbeddingService, lambda c: embedding)
+    container.register(VectorStore, lambda c: store)
     container.register(
         RagService,
-        lambda c: RagService(embedding, c.resolve(VectorStore), keyword_index=c.resolve(KeywordIndex)),
+        lambda c: RagService(embedding, c.resolve(VectorStore)),
     )
 
     with TestClient(app) as test_client:

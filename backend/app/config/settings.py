@@ -1,6 +1,6 @@
 """统一配置管理。
 
-为什么这么做：BE-002 的目标是让 SQLite/MySQL、Chroma/Milvus、Ollama/GLM
+为什么这么做：BE-002 的目标是让 SQLite/MySQL、Milvus、Ollama/GLM
 等 Provider 全部通过配置切换，业务代码不出现任何具体实现的名字；
 用 pydantic-settings 统一读取环境变量与 .env，同时获得类型校验，
 避免错误配置在运行中段才暴露。
@@ -15,7 +15,7 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 项目根锚点：backend/ 目录（本文件位于 backend/app/config/）。
-# 为什么需要锚定：sqlite/chroma 的路径默认是相对路径，若直接按
+# 为什么需要锚定：sqlite 的路径默认是相对路径，若直接按
 # 进程工作目录解析，启动方式不同（如在仓库根启动）会把数据写到
 # 错误位置；统一锚定到 backend/ 保证数据位置只由配置决定。
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -39,9 +39,12 @@ class DbProvider(str, Enum):
 
 
 class VectorStoreProvider(str, Enum):
-    """向量数据库 Provider 枚举。"""
+    """向量数据库 Provider 枚举。
 
-    CHROMA = "chroma"
+    BE-029 起向量库为 Milvus（稠密 + 稀疏 BM25 混合检索）；
+    Chroma 已随迁移删除，枚举保留仅为未来扩展 Provider 预留。
+    """
+
     MILVUS = "milvus"
 
 
@@ -82,16 +85,9 @@ class Settings(BaseSettings):
     sqlite_db_path: str = "data/law_agent.db"
     mysql_url: str = ""  # 仅 db_provider=mysql 时使用
 
-    # ---- 向量数据库 Provider ----
-    vector_store_provider: VectorStoreProvider = VectorStoreProvider.CHROMA
-    chroma_persist_dir: str = "data/chroma"
-    milvus_uri: str = ""  # 仅 vector_store_provider=milvus 时使用
-
-    # ---- 混合检索（BE-028：BM25 关键词 + 向量，RRF 融合）----
-    # 回退开关：false 时装配层不注入关键词索引，RagService 退化为纯向量检索
-    hybrid_search_enabled: bool = True
-    # BM25 语料快照落点：与 Chroma 同在 data/ 下，干净环境重置时一并清除
-    bm25_index_path: str = "data/bm25_index.json"
+    # ---- 向量数据库 Provider（Milvus，见 backend/docker-compose.yml）----
+    vector_store_provider: VectorStoreProvider = VectorStoreProvider.MILVUS
+    milvus_uri: str = "http://127.0.0.1:19530"
 
     # ---- 大模型 Provider ----
     llm_provider: LlmProvider = LlmProvider.OLLAMA
@@ -111,16 +107,6 @@ class Settings(BaseSettings):
     def resolved_sqlite_db_path(self) -> str:
         """SQLite 数据库文件的实际路径（相对路径锚定到 backend/）。"""
         return _anchor_path(self.sqlite_db_path)
-
-    @property
-    def resolved_chroma_persist_dir(self) -> str:
-        """Chroma 持久化目录的实际路径（相对路径锚定到 backend/）。"""
-        return _anchor_path(self.chroma_persist_dir)
-
-    @property
-    def resolved_bm25_index_path(self) -> str:
-        """BM25 语料快照文件的实际路径（相对路径锚定到 backend/）。"""
-        return _anchor_path(self.bm25_index_path)
 
     @property
     def resolved_log_dir(self) -> str:

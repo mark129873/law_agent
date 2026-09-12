@@ -15,8 +15,7 @@ from app.application.services.document_service import DocumentService
 from app.application.services.knowledge_service import KnowledgeIngestionService
 from app.application.services.rag_service import RagService
 from app.common.di import DIContainer
-from app.config.settings import Settings, get_settings
-from app.domain.repositories.keyword_index import KeywordIndex
+from app.config.settings import Settings, VectorStoreProvider, get_settings
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
 from app.domain.services.embedding import EmbeddingService
@@ -25,10 +24,8 @@ from app.infrastructure.database.sqlalchemy.database import SQLAlchemyDatabase, 
 from app.infrastructure.document_parser.pdf_parser import PdfParser
 from app.infrastructure.document_parser.text_parser import TextParser
 from app.infrastructure.embedding.ollama_embedding import OllamaEmbeddingService
-from app.infrastructure.keyword_index.bm25 import Bm25KeywordIndex
 from app.infrastructure.llm.glm import GLMProvider
 from app.infrastructure.llm.ollama import OllamaProvider
-from app.infrastructure.vector_store.chroma import ChromaVectorStore
 from app.infrastructure.vector_store.milvus import MilvusVectorStore
 
 
@@ -52,36 +49,14 @@ def _build_database(settings: Settings) -> Database:
 
 
 def _build_vector_store(settings: Settings) -> VectorStore:
-    """按配置构造向量库实现（工厂函数，BE-008）。
+    """按配置构造向量库实现（工厂函数，BE-029）。
 
-    为什么骨架也纳入工厂：VECTOR_STORE_PROVIDER=milvus 时装配成功、
-    使用时才报"未实现"，这样 Provider 的表达能力与 Chroma 完全一致，
-    未来 Milvus 落地只改本函数的一行分支。
+    为什么工厂仍然保留：未来接入其他向量库 Provider 时只需在此
+    增加分支，业务代码与分层结构不动。
     """
-    if settings.vector_store_provider.value == "chroma":
-        # 使用锚定后的绝对路径，避免进程工作目录影响数据位置
-        return ChromaVectorStore(settings.resolved_chroma_persist_dir)
-    if settings.vector_store_provider.value == "milvus":
+    if settings.vector_store_provider == VectorStoreProvider.MILVUS:
         return MilvusVectorStore(settings.milvus_uri)
     raise NotImplementedError(f"向量库 Provider '{settings.vector_store_provider.value}' 尚未实现")
-
-
-def _build_keyword_index(settings: Settings) -> KeywordIndex:
-    """构造 BM25 关键词索引实现（BE-028 混合检索的关键词通道）。
-
-    为什么没有 Provider 分支：关键词索引当前只有 BM25 一种实现，
-    未来若引入 SQLite FTS 等实现再按配置分支（与向量库工厂同一模式）。
-    """
-    return Bm25KeywordIndex(settings.resolved_bm25_index_path)
-
-
-def _resolve_keyword_index(c: DIContainer, settings: Settings) -> KeywordIndex | None:
-    """按 HYBRID_SEARCH_ENABLED 决定是否注入关键词索引。
-
-    为什么开关在装配点判断而不是在服务内部：业务服务保持
-    "依赖什么就做什么"的纯粹性，功能开关属于装配决策。
-    """
-    return c.resolve(KeywordIndex) if settings.hybrid_search_enabled else None
 
 
 def _build_llm_provider(settings: Settings) -> LLMProvider:
@@ -122,10 +97,8 @@ def create_container(settings: Settings | None = None) -> DIContainer:
     container.register(Settings, lambda c: settings, singleton=True)
     # 数据库：按 DB_PROVIDER 配置注册对应实现（BE-005）
     container.register(Database, lambda c: _build_database(settings), singleton=True)
-    # 向量库：按 VECTOR_STORE_PROVIDER 配置注册对应实现（BE-006~008）
+    # 向量库：Milvus（稠密 + 稀疏 BM25 混合检索，BE-029）
     container.register(VectorStore, lambda c: _build_vector_store(settings), singleton=True)
-    # 关键词索引：BM25 实现，是否参与检索由 HYBRID_SEARCH_ENABLED 决定（BE-028）
-    container.register(KeywordIndex, lambda c: _build_keyword_index(settings), singleton=True)
     # 大模型：按 LLM_PROVIDER 配置注册对应实现（BE-010）
     container.register(LLMProvider, lambda c: _build_llm_provider(settings), singleton=True)
     # 文档处理 Pipeline 与知识库入库服务（BE-011/BE-013）
@@ -137,19 +110,14 @@ def create_container(settings: Settings | None = None) -> DIContainer:
             pipeline=c.resolve(DocumentPipeline),
             embedding_service=c.resolve(EmbeddingService),
             vector_store=c.resolve(VectorStore),
-            keyword_index=_resolve_keyword_index(c, settings),
         ),
         singleton=True,
     )
-    # 业务服务（BE-014/018/019/020/021/028）
+    # 业务服务（BE-014/018/019/020/021/029）
     container.register(ConversationService, lambda c: ConversationService(c.resolve(Database)), singleton=True)
     container.register(
         RagService,
-        lambda c: RagService(
-            c.resolve(EmbeddingService),
-            c.resolve(VectorStore),
-            keyword_index=_resolve_keyword_index(c, settings),
-        ),
+        lambda c: RagService(c.resolve(EmbeddingService), c.resolve(VectorStore)),
         singleton=True,
     )
     container.register(
@@ -159,7 +127,6 @@ def create_container(settings: Settings | None = None) -> DIContainer:
             parser_factory=c.resolve(DocumentPipeline).parser_factory,
             ingestion_service=c.resolve(KnowledgeIngestionService),
             vector_store=c.resolve(VectorStore),
-            keyword_index=_resolve_keyword_index(c, settings),
         ),
         singleton=True,
     )

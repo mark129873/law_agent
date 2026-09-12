@@ -1,6 +1,6 @@
 """文档服务：知识库文档元数据与向量内容的业务管理。
 
-为什么入库状态机放在 Service：上传结果是"元数据 + 知识库内容（向量库与关键词索引）"两侧的
+为什么入库状态机放在 Service：上传结果是"元数据 + 向量"两侧的
 最终一致性协议——解析失败时元数据必须标记 failed 而不是留下
 processing 的僵尸记录，该规则只能有一处实现。
 """
@@ -13,7 +13,6 @@ from app.application.services.document_pipeline import DocumentParserFactory, Un
 from app.application.services.knowledge_service import KnowledgeIngestionService
 from app.domain.entities.document import Document, DocumentStatus
 from app.domain.repositories.database import Database
-from app.domain.repositories.keyword_index import KeywordIndex
 from app.domain.repositories.vector_store import VectorStore
 
 logger = logging.getLogger("app.document.service")
@@ -39,14 +38,11 @@ class DocumentService:
         parser_factory: DocumentParserFactory,
         ingestion_service: KnowledgeIngestionService,
         vector_store: VectorStore,
-        keyword_index: KeywordIndex | None = None,
     ) -> None:
         self._db = database
         self._parser_factory = parser_factory
         self._ingestion = ingestion_service
         self._vector_store = vector_store
-        # 关键词索引可选：None 时删除只清理向量库（混合检索关闭的回退路径）
-        self._keyword_index = keyword_index
 
     async def upload_document(self, filename: str, content: bytes) -> Document:
         """上传并入库一个文档，返回最终状态为 ready/failed 的元数据。"""
@@ -120,14 +116,9 @@ class DocumentService:
         return document
 
     async def delete_document(self, document_id: str) -> None:
-        """删除文档：向量库、关键词索引与元数据必须同时清理（双清）。"""
+        """删除文档：向量内容与元数据必须同时清理。"""
         await self.get_document(document_id)
         removed_chunks = await self._vector_store.delete_by_document(document_id)
-        # 关键词索引同步清理：漏删会让已删除文档的内容继续被
-        # BM25 词面检索召回（比向量侧漏删更隐蔽，词面匹配很稳定）
-        keyword_removed = 0
-        if self._keyword_index is not None:
-            keyword_removed = await self._keyword_index.delete_by_document(document_id)
         await self._db.documents.delete(document_id)
         # 埋点规则（RELIABILITY.md）：文档删除并输出剩余文档数量
         remaining_count = len(await self._db.documents.list())
@@ -137,7 +128,6 @@ class DocumentService:
                 "service": "document",
                 "document_id": document_id,
                 "removed_chunks": removed_chunks,
-                "keyword_removed_chunks": keyword_removed,
                 "remaining_count": remaining_count,
             },
         )

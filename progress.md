@@ -2,10 +2,37 @@
 
 ## 当前已验证状态
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
-- 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 134 个自动化测试）；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：无——BE-001~028 与 FE-001~012 全部 passing
+- 标准启动路径：`cd backend && docker compose up -d（Milvus）&& uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
+- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 119 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
+- 当前最高优先级未完成功能：无——BE-001~029 与 FE-001~012 全部 passing（BE-007/008/028 置 deprecated）
 - 当前 blocker：无
+
+### Session 027（BE-029 向量库全面迁移到 Milvus hybrid_search）
+- 日期：2026-09-12
+- 本轮目标：用户要求"全面改为 Milvus 进行 hybrid_search 来解决（BE-028 自研 BM25 全量重建）问题，chroma 相关代码全部删掉"
+- 技术决策：
+  - **单一 Milvus 集合承载混合检索**：稠密 FLOAT_VECTOR(COSINE) + 稀疏 SPARSE_FLOAT_VECTOR；content 字段启用 jieba 分词器 + BM25 Function（服务端自动生成稀疏表示，客户端零分词逻辑）；hybrid_search 一次调用发起两路 AnnSearchRequest，服务端 RRFRanker(k=60) 融合——BE-028 的全量重建问题、双写双清编排、JSON 快照、自研 RRF 函数全部随之消失
+  - **端口演进**：VectorStore.search(query_embedding) 升级为 hybrid_search(query_text, query_embedding, top_k, min_score)；接口以"知识库混合检索"能力命名，调用方不感知融合细节
+  - **一致性实测结论**（探针脚本对真实 v3.0.0 验证）：必须 consistency_level="Strong"——默认 Bounded 下新插入数据不可见，且 hybrid_search 空结果触发 Milvus 已知缺陷 #50969（误报 unsupported ID type），曾据此误判 VARCHAR 主键不支持；min_score 经稠密请求 range search(radius) 实现，min_score<=0 时不加 radius（COSINE range 为严格大于，radius=0 会误滤 0 分结果）；主键结果以字段名 chunk_id 返回而非固定键 id
+  - **集合懒建**：首次 add_chunks 按实际 embedding 维度建集合（测试 64 维确定性 embedding 与生产 768 维 nomic 都无需配置）；检索在集合不存在时返回空（空知识库语义）；document_id 上 INVERTED 索引支撑按文档删除
+  - **删除清单**：chroma.py、KeywordIndex 端口、Bm25KeywordIndex、reciprocal_rank_fusion、test_keyword_index/test_rag_fusion/test_chroma_vector_store/test_hybrid_retrieval；依赖 chromadb/jieba/rank-bm25 卸载，pymilvus 3.0.1 入列；settings 删除 CHROMA 枚举/chroma_persist_dir/bm25_index_path/HYBRID_SEARCH_ENABLED（默认 milvus），并加回归断言 vector_store_provider=chroma 被拒绝
+  - **测试封闭性策略**：新增 tests/fakes.py 共享 InMemoryVectorStore（余弦 + 子串词面 + RRF 近似，遵循混合检索契约），API/Agent/RAG/Embedding 集成测试全部改用 Fake；唯一例外是新增 test_milvus_vector_store.py 5 例需真实 Milvus，服务不可达时 skip 并注明
+  - **发现并记录的第三方行为**：pymilvus 在 import 时调用 load_dotenv 把 backend/.env 灌入进程环境——敏感配置测试改为先 delenv 再断言默认空值（测试注释已说明）
+  - docker-compose.yml 无需更新（etcd+minio+milvusdb/milvus:v3.0.0 standalone 已就绪）；PRODUCT.md 无改动（用户可见行为不变）
+- 运行过的验证：
+  - 探针脚本对真实 Milvus v3.0.0 实测 schema/插入/hybrid_search/radius/删除/空结果路径（一次性脚本，验证后删除）
+  - 干净环境（删 backend/data + scripts/reset_milvus.py）uv run pytest → **119 passed**（含真实 Milvus 5 例；分层 unit 50 / integration 60 / api 9）
+  - 真实端到端（uvicorn 8013，GLM glm-4.5-air + Ollama nomic-embed-text + 真实 Milvus）：上传专利法 TXT 201 ready（VectorStore connected 日志 collection_exists=false → 首次入库懒建）→ 流式提问"发明专利权的保护期限是多长时间？"→ sources 事件 4 条先于 delta、来源含第四十二条"二十年" → 回答正确引用"发明专利权的期限为二十年，自申请日起计算" → 消息持久化且 sources 回读一致 → 删除文档 204 后 Milvus 集合 count(*)=0；检索日志 hit_count=4/top_score≈0.032（双通道 RRF 叠加）
+  - Ollama LLM 路径本机仍故障（llama-server 500，Session 025 已知问题），以 GLM Provider 等价验证
+  - 验证后进程清理、端口释放、backend/data 与 law_chunks 集合重置
+- 已记录证据：feature_list.json BE-029（passing）、BE-007/008/028（deprecated，历史证据指向 git 历史）
+- 已知风险或未解决问题：
+  - **测试套件封闭性出现唯一例外**：test_milvus_vector_store.py 需要真实 Milvus（docker compose up -d），否则 5 例 skip——已写入 ARCHITECTURE §9 与 RELIABILITY
+  - **干净环境重置多了一步**：删除 backend/data 之外还需 `uv run python scripts/reset_milvus.py`（RELIABILITY.md 已更新）
+  - **pymilvus import 副作用**：load_dotenv 会把 .env 灌入进程环境，业务代码若直接读 os.environ 会读到 .env 值（当前全部经 settings 读取，无实际影响，已记录）
+  - **MILVUS_URI 默认指向 127.0.0.1:19530**：部署形态变化（本机需常驻 Milvus 容器），启动前置条件从"无"变为"Milvus 可达"
+  - 既有遗留项不变：MySQL 未启用、无连接池、min_score 默认 0.0、Ollama 0.32.0 崩溃
+- 下一步最佳动作：可选产品增强（会话重命名 / 停止按钮 / 深色主题开关 / CORS 收敛 / OllamaProvider 重试）或 MySQL 8.0 接入
 
 ### Session 026（BE-028 RAG 混合检索：BM25 关键词 + 向量，RRF 融合）
 - 日期：2026-09-12

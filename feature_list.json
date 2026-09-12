@@ -66,16 +66,16 @@
       "id": "BE-007",
       "name": "Chroma 向量数据库实现",
       "description": "实现 Chroma VectorStore，负责保存文档 chunk、embedding 和 metadata，并支持根据用户问题进行相似度检索。",
-      "status": "passing",
-      "evidence": "2026-09-06：backend/app/infrastructure/vector_store/chroma.py 基于 chromadb PersistentClient 实现 VectorStore 抽象（law_chunks 集合、cosine 空间 score=1-distance、metadata 过滤按文档删除）；所有阻塞调用经 asyncio.to_thread 包装避免阻塞事件循环；不使用内置 embedding 函数，向量由调用方传入。验证：uv run pytest tests -q → 25 passed，其中 test_chroma_vector_store.py 4 passed 覆盖写入检索排序、按文档删除隔离、跨连接持久化、initialize 幂等。",
+      "status": "deprecated",
+      "evidence": "2026-09-06 首次验证通过（真实验证记录见 git 历史 9aa3ece）。2026-09-12 BE-029：向量库全面迁移到 Milvus hybrid_search，按用户要求 Chroma 相关代码全部删除（chroma.py、chromadb 依赖、相关测试），本功能由 BE-029（Milvus 实现）替代。",
       "testedAt": "2026-09-06"
     },
     {
       "id": "BE-008",
       "name": "Milvus 扩展架构",
       "description": "基于 VectorStore 抽象层预留 Milvus 实现能力，并使向量数据库 Provider 可以通过配置进行选择。第一版不要求完整实现 Milvus。",
-      "status": "passing",
-      "evidence": "2026-09-06：backend/app/infrastructure/vector_store/milvus.py 提供 MilvusVectorStore 骨架（履行全部接口签名，调用时抛明确 NotImplementedError）；容器装配点按 VECTOR_STORE_PROVIDER 分支注册 chroma/milvus（backend/app/containers.py），并接入 main.py lifespan。验证：uv run pytest tests -q → 28 passed（test_vector_store_factory.py 3 passed：chroma 配置解析出可用单例、milvus 配置解析成功、milvus 调用报错明确）；真实启动日志 \"VectorStore initialized (provider: chroma)\"，curl /api/health 返回 ok。RAG 业务代码仅依赖 domain/repositories/vector_store.py 抽象，无 Chroma 强耦合。",
+      "status": "deprecated",
+      "evidence": "2026-09-06 首次验证通过（骨架 + 工厂分支，记录见 git 历史 664d8f4）。2026-09-12 BE-029：MilvusVectorStore 已实现为完整生产实现（dense+sparse 单集合、服务端 hybrid_search），骨架被真实现替代，本功能由 BE-029 替代。",
       "testedAt": "2026-09-06"
     },
     {
@@ -330,8 +330,16 @@
       "id": "BE-028",
       "name": "RAG 混合检索（BM25 关键词 + 向量，RRF 融合）",
       "description": "把 RAG 检索从单一向量检索升级为混合检索：新增 KeywordIndex 领域端口与 Bm25KeywordIndex 基础设施实现（jieba 中文分词 + rank_bm25，语料快照 JSON 持久化于 backend/data/）；文档入库时向量库与关键词索引双写、删除时双清；RagService 同时走向量通道与关键词通道，用 Reciprocal Rank Fusion（RRF，k=60）融合两路排序输出最终 top_k；min_score 相似度阈值语义保持不变（仅过滤向量通道弱命中）；HYBRID_SEARCH_ENABLED=false 时可整体回退纯向量检索。",
+      "status": "deprecated",
+      "evidence": "2026-09-12 首次验证通过（117→134 全量测试 + 真实端到端，记录见 git 历史 81248d3 与 progress.md Session 026）。2026-09-12 BE-029：按用户要求向量库全面迁移到 Milvus hybrid_search（服务端 BM25 稀疏向量 + RRFRanker 原生融合），解决自研 BM25Okapi 全量重建的扩展性瓶颈——KeywordIndex 端口、Bm25KeywordIndex、自研 RRF 融合函数与 jieba/rank-bm25 依赖随之删除，本功能由 BE-029 替代。",
+      "testedAt": "2026-09-12"
+    },
+    {
+      "id": "BE-029",
+      "name": "向量库全面迁移到 Milvus hybrid_search（稠密 + 稀疏 BM25，服务端 RRF 融合）",
+      "description": "把向量库从 Chroma 与自研 BM25 关键词索引整体迁移到 Milvus standalone：单一集合同时持有稠密向量（FLOAT_VECTOR/COSINE，Ollama embedding 传入）与稀疏 BM25 向量（content 字段启用 jieba 分词器 + BM25 Function，服务端自动生成）；检索经 VectorStore.hybrid_search 一次调用发起稠密+稀疏两路请求，由 Milvus 服务端 RRFRanker(k=60) 融合返回 top_k；min_score 语义保持（稠密通道 range 过滤）；集合按实际 embedding 维度懒建；双写双清编排、JSON 快照、自研 RRF 融合与 jieba/rank-bm25/chromadb 依赖全部移除；部署由 backend/docker-compose.yml（etcd+minio+milvus v3.0.0）承载，干净环境重置新增 scripts/reset_milvus.py。",
       "status": "passing",
-      "evidence": "2026-09-12：domain/repositories/keyword_index.py 定义 KeywordIndex 端口（add_chunks/search/delete_by_document/生命周期）；infrastructure/keyword_index/bm25.py 实现 Bm25KeywordIndex（jieba 分词 + BM25Okapi 打分，词面不相交的 chunk 被排除、小语料 IDF 归零时按命中词数兜底排序，语料快照原子写 backend/data/bm25_index.json，阻塞操作经 asyncio.to_thread + 锁保护）；rag_service.py 新增模块级纯函数 reciprocal_rank_fusion（RRF k=60，多路命中叠加得分天然去重，单路保序）；KnowledgeIngestionService 入库双写（在向量库写入之后复用其生成的 chunk_id）、DocumentService 删除双清（日志新增 keyword_removed_chunks）；containers/main lifespan/settings（HYBRID_SEARCH_ENABLED 默认 true、BM25_INDEX_PATH 锚定 backend/）接线，DDD 边界守护名单加入 jieba/rank_bm25。验证：uv run pytest → 134 passed（基线 117，新增 17：test_keyword_index 7 例、test_rag_fusion 6 例、test_hybrid_retrieval 4 例——双写两路 chunk_id 一致/融合去重降序/双清后两路皆空/无关键词索引时优雅回退）。真实端到端（干净环境 + 真实 uvicorn 8013 + Ollama qwen3.5:4b/nomic-embed-text）：上传专利法 TXT（29 chunk 双写入库，bm25_index.json 可查）→ 流式提问『发明专利权的保护期限是多长时间？』→ sources 事件 4 条先于 delta、回答正确引用『二十年』（第四十二条）→ 消息持久化且 sources 回读一致 → 删除文档后 bm25 快照归零（双清）；检索日志 RAG hybrid retrieval completed 显示 vector_hits=4/keyword_hits=4/top_score≈1/61+1/62（双通道叠加生效）。回退开关实测：HYBRID_SEARCH_ENABLED=false 启动（8014）→ 日志 hybrid_search_enabled=false、无 KeywordIndex initialized、流式问答走纯向量正常。同问题对照观察（单次抽样，非严格对照）：混合模式回答引用『二十年』、纯向量回退模式未引用，BM25 通道对法条词面召回的价值得到真实体现。运维备注：双 uvicorn 实例并存时第二个实例可能因 OpenBLAS 内存分配失败启动崩溃（环境问题，与本功能无关，单实例正常）。",
+      "evidence": "2026-09-12：MilvusVectorStore 完整实现（MilvusClient + asyncio.to_thread/Lock；VARCHAR 主键 chunk_id；consistency_level=Strong 保证入库即可检索——默认 Bounded 下新数据不可见且 hybrid_search 空结果触发 Milvus 已知缺陷 #50969 误报 unsupported ID type，实测确认；min_score 经稠密 AnnSearchRequest 的 range search(radius) 实现，min_score<=0 时不加 radius 因 COSINE range 为严格大于会误滤 0 分结果——均经真实服务实测确认）；VectorStore 端口 search 升级为 hybrid_search(query_text, query_embedding, top_k, min_score)；删除 chroma.py、KeywordIndex 端口、Bm25KeywordIndex、reciprocal_rank_fusion 与 chromadb/jieba/rank-bm25 依赖，uv add pymilvus 3.0.1；knowledge_service/document_service 双写双清编排消失；settings 移除 CHROMA 枚举/chroma_persist_dir/bm25_index_path/HYBRID_SEARCH_ENABLED（默认 milvus），新增回归断言 vector_store_provider=chroma 被拒绝；tests/fakes.py 共享内存 Fake（余弦+子串词面+RRF 近似）支撑封闭性测试；新增真实 Milvus 集成测试 test_milvus_vector_store.py 5 例（双通道命中/RRF 降序/min_score 过滤/按文档删除/跨连接持久化，服务不可达时 skip，独立集合名测后清理）；scripts/reset_milvus.py 干净环境重置。docker-compose.yml 无需更新（etcd+minio+milvusdb/milvus:v3.0.0 standalone 已就绪）。验证：干净环境（删 backend/data + reset_milvus）uv run pytest → 119 passed（含真实 Milvus 5 例）；真实端到端（uvicorn 8013 + GLM glm-4.5-air + Ollama nomic-embed-text + 真实 Milvus）：上传专利法 TXT 201 ready → 流式提问『发明专利权的保护期限是多长时间？』→ sources 事件 4 条先于 delta 且来源含第四十二条『二十年』→ 回答正确引用『发明专利权的期限为二十年，自申请日起计算』→ 消息持久化且 sources 回读一致 → 删除文档 204 后 Milvus 集合 count(*)=0；检索日志 RAG hybrid retrieval completed hit_count=4/top_score≈0.032（双通道 RRF 叠加）。运维备注：Ollama 0.32.0 llama-server 崩溃问题依旧（上传后提问 500），LLM 侧以 GLM Provider 等价验证，与本迁移无关。",
       "testedAt": "2026-09-12"
     }
   ]
