@@ -1,9 +1,15 @@
-version: '3.5'
+# 内存上限说明（WSL2 总内存已配置为 4GB，上限合计必须低于 VM 总量）：
+# 实测占用 milvus ~160-254MB / etcd ~30-43MB / minio ~90-138MB；
+# 三容器合计 2.5GB ≈ VM 的 62%，留 ~1.5GB 给 VM 内核与页缓存。
+# milvus 2GB 约为当前用量的 8~12 倍；知识库规模大幅增长时需同步调大
+# WSL2 内存（.wslconfig）与本文件上限。
 
 services:
   etcd:
     container_name: milvus-etcd
     image: quay.io/coreos/etcd:v3.5.25
+    # 内存上限 256MB：etcd 只存 Milvus 元数据，实测占用 ~30-43MB
+    mem_limit: 256m
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
       - ETCD_AUTO_COMPACTION_RETENTION=1000
@@ -21,6 +27,8 @@ services:
   minio:
     container_name: milvus-minio
     image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    # 内存上限 256MB：对象存储主要吃磁盘，实测占用 ~90-138MB
+    mem_limit: 256m
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
@@ -39,6 +47,9 @@ services:
   standalone:
     container_name: milvus-standalone
     image: milvusdb/milvus:v3.0.0
+    # 内存上限 2GB：Milvus 是内存大头（向量索引/增长段常驻），实测 ~160-254MB；
+    # 防止无界增长挤爆 4GB 的 Docker VM（VM 内还需留内核与页缓存开销）
+    mem_limit: 2g
     command: ["milvus", "run", "standalone"]
     security_opt:
     - seccomp:unconfined

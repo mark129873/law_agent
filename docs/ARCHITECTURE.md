@@ -349,7 +349,7 @@ npm run build                                      # tsc 类型检查 + 生产�
 ## 10. 扩展点与预留
 
 - **MySQL 8.0**：表结构与 DML 已由 SQLAlchemy ORM 统一（`infrastructure/database/sqlalchemy/models.py` 声明式模型），接入只剩两步——安装异步驱动（`aiomysql`，纯 Python，Windows 无需编译）、在 `containers.py` 增加 `mysql+aiomysql://…` 的 URL 分支并启用 `DbProvider.MYSQL`；届时需补 MySQL 真实实例上的集成验证与迁移方案（Alembic autogenerate 可直接消费现有声明式模型）。
-- **Milvus**（BE-029 已实现）：`MilvusVectorStore` 实现完整 VectorStore 端口——单一集合同时持有稠密向量（COSINE）与稀疏 BM25 向量，`hybrid_search` 经 `RRFRanker(60)` 服务端融合；部署由 `backend/docker-compose.yml`（etcd + minio + standalone）承载，`MILVUS_URI` 默认指向 `http://127.0.0.1:19530`。
+- **Milvus**（BE-029 已实现）：`MilvusVectorStore` 实现完整 VectorStore 端口——单一集合同时持有稠密向量（COSINE）与稀疏 BM25 向量，`hybrid_search` 经 `RRFRanker(60)` 服务端融合；部署由 `backend/docker-compose.yml`（etcd + minio + standalone）承载，`MILVUS_URI` 默认指向 `http://127.0.0.1:19530`；容器内存上限 milvus 2GB / etcd 256MB / minio 256MB（合计 2.5GB，为 4GB WSL2 VM 的 ~62%，防止无界增长拖垮宿主机）。
 - **新文档格式**：实现 `DocumentParser` 策略并注册进 `DocumentParserFactory`。
 - **新 LLM Provider**：实现 `LLMProvider`（chat + stream + model_name），容器工厂加分支；密钥仅环境注入。
 - **新问答节点**：继承 `AgentNode`，在 `QaGraphBuilder.build()` 中接线。

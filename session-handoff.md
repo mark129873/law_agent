@@ -30,6 +30,7 @@
   - Ollama LLM 路径（本机 llama-server 崩溃中，恢复后可补验 Ollama Provider 完整链路）
 - 下一轮会话需要注意的风险：
   - **启动前置条件变化**：后端启动前 Milvus 必须可达（`cd backend && docker compose up -d`）；容器当前由另一项目目录（code1/milvus）创建的同名容器承载，backend/docker-compose.yml 与其配置一致，`docker compose up -d` 会因容器名冲突报错——直接 `docker start milvus-etcd milvus-minio milvus-standalone` 即可
+  - **容器内存上限（2026-09-12，按 4GB WSL2 重新收紧）**：milvus 2GB / etcd 256MB / minio 256MB，合计 2.5GB ≈ VM 的 62%（docker-compose.yml 已定义，并已对运行中容器 docker update 热应用）；若 Milvus 因内存压力被 OOM kill，先检查知识库规模是否已超出 2GB 上限承载，必要时同步调大 .wslconfig 与 mem_limit；注意 WSL 配置改动需 `wsl --shutdown` 重启后才生效
   - **pymilvus import 副作用**：import pymilvus 会 load_dotenv 把 backend/.env 灌入进程环境；新增依赖或测试时注意环境变量污染（敏感配置测试已加 delenv 防御）
   - **Milvus 一致性契约**：生产代码所有 create/search 都显式 Strong，改动检索代码时勿去掉（否则触发 #50969 空结果误报）
   - **测试干净环境流程**：删 `backend/data/` + `uv run python scripts/reset_milvus.py`（两步都要）
