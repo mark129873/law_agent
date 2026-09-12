@@ -9,6 +9,7 @@
 - progress.md 记录到当前会话的进度
 - feature_list.json 功能状态与实际开发进度一致, 真实反映 passing 和未验证的边界
 - session-handoff.md 确认记录当前会话的交接摘要
+- 冷热分层沉降检查（规则见 AGENTS.md）：progress.md Session 数 ≤ 15、feature_list.json passing 条目 ≤ 40；
 - 没有任何半成品步骤处于未记录状态
 
 - 检查代码仓库状态

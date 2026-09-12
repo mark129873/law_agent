@@ -10,8 +10,8 @@
 2. 阅读 docs/ARCHITECTURE.md，了解完整架构与数据流定义
 3. 阅读 docs/PRODUCT.md，了解功能需求与用户侧交互行为
 4. 阅读 docs/RELIABILITY.md，了解日志、可观测性以及干净环境的相关要求
-5. 读取 progress.md，了解最新已验证状态和下一步任务
-6. 查看 feature_list.json，确认当前所有功能的开发进度
+5. 读取 progress.md，了解最新已验证状态和下一步任务（更早的历史 Session 在 docs/archive/progress-archive-*.md 冷分卷中，按起止序号命名, 按需读取）
+6. 查看 feature_list.json，确认当前所有功能的开发进度。**冷热分层不变量：不在 features 中的历史功能条目均为 passing**，完整条目见 docs/archive/feature-archive-*.json, 按需读取；planned / in_progress / blocked / deprecated 的功能必须显式保留在热层
 7. 读取 session‑handoff.md 获取记录当前会话的交接摘要, 上一轮开发上下文。
 8. 用 `git log --oneline -5` 看最近提交
 9. 执行`init.md`的内容, 确保项目可正常构建或启动、初始化无异常。
@@ -40,11 +40,24 @@
 ## 收尾
 结束会话前：
 - 更新 `progress.md`
-- 更新 `feature_list.json`
+- 更新 `feature_list.json`, 其中evidence字段在300字以内
 - 更新 `session‑handoff.md`
 - 记录仍未解决的风险或 blocker
+- 执行冷热分层沉降检查（规则见下节）
 - 确认 clean‑state‑checklist.md 所有校验项通过。
 - 在工作处于安全状态后，用清晰的提交信息提交
+
+## 进度文档冷热分层规则
+progress.md 与 feature_list.json 采用冷热数据分层，热层只放"当前状态"，历史沉入 `docs/archive/` 冷分卷（分卷生成后只读不改，文件名标注条目起止序号）：
+
+| 文件 | 热层保留 | 沉降触发 | 每批沉降量 | 冷分卷命名 |
+|------|---------|---------|-----------|-----------|
+| progress.md | 头部状态 + 最近的 Session | Session 数 > 15 | 固定 10 个（最旧的优先） | `progress-archive-{起始}-{结束}.md` |
+| feature_list.json | 最近 passing 条目 + 全部非 passing 条目 | passing 条目 > 40 | 固定 20 条（最旧的优先） | `feature-archive-{起始}-{结束}.json` |
+
+- **写 evidence 直接写结论级**（≤200 字：日期 + 关键验证数字 + 结论 + commit/归档指针）；验证过程细节随条目沉降进冷分卷，不写在热层。
+- 沉降时 passing 条目**整条原样**搬入新分卷（不精简），并同步递增 feature_list.json 顶层 `archivedPassing.count`；全部功能数 = 热层条目数 + archivedPassing.count，收尾时对账。
+- 冷分卷序号连续不重叠；需要历史细节按需读取冷分卷。
 
 ## 后端代码规范
 - 要求代码必须包含中文注释, 并解释做了什么, 这么做的原因, 涉及的设计模式, 涉及的DDD, OOP原则

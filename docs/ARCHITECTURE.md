@@ -121,149 +121,74 @@ frontend/                        # 前端独立项目（React + TS + Vite）
     └── utils/format.ts          # 纯函数工具（文件大小/日期格式化）
 ```
 
-### 前端数据流（FE-002 起）
-- UI 组件一律经 `state/AppContext` 的动作方法读写数据，动作内部调用 `api/*` 模块，组件禁止直接 `fetch`，请求与错误解析只保留一份实现。
-- 错误契约：后端非 2xx 统一 `{code,message}`，`api/client.ts` 解析为 `ApiError` 抛出，UI 展示 `message`。
-- 提问数据流（FE-004）：ChatPage 输入框 → `AppContext.sendQuestion` →（无会话时先 `POST /api/conversations`，title=提问截短 20 字）→ 本地乐观插入 user 消息与空 assistant 消息 → `api/chat.ts` 消费 SSE，delta 增量写回 messages → done 后由后端持久化；error 移除空占位并展示错误条。
-- 回答渲染（FE-010）：助手消息经 `react-markdown` 渲染（模型输出含 Markdown 格式；默认不解析原始 HTML，无 XSS 风险）；用户消息保持纯文本。流式过程中的未闭合标记会短暂显示为字面字符，完成后即正常渲染。
-- 参考文档（FE-011）：`api/chat.ts` 消费 `sources` 事件暂存来源，done 后随助手消息写入本地状态；消息带 `sources`（含历史恢复的消息）且不在流式生成中时渲染「参考文档」折叠按钮，点开按序号显示文档名与命中内容；来源内容按纯文本渲染（不进 Markdown 解析）。
-- 图标统一使用 `@phosphor-icons/react`；不手绘 SVG 图标，不引入第二套图标族。
+### 前端数据流
+前端数据流要点：提问经 `AppContext.sendQuestion`（无会话先建会话，title=提问截短 20 字）乐观插入消息后由 `api/chat.ts` 消费 SSE 增量写回；助手消息经 react-markdown 渲染（不解析原始 HTML，无 XSS），流式中未闭合标记短暂显示为字面字符；带 `sources` 的消息（含历史恢复）渲染「参考文档」折叠列表，来源内容按纯文本渲染；图标统一 `@phosphor-icons/react`，不引第二套图标族
 
 ## 3. 分层架构与领域端口
 
-### 分层依赖原则
-```text
-API ──▶ Application ──▶ Domain（实体 + 端口，零技术依赖）
-                            ▲
-Infrastructure implements Domain ports
-Agent（工作流实现，独立模块）──▶ Domain 端口 + Application 服务
-```
-- 业务代码只依赖领域端口；具体实现由 `containers.py`（唯一装配点）按配置注入。
-- `common/di.py` 提供轻量 `DIContainer`：按抽象接口注册工厂（工厂模式），单例缓存（双重检查锁，支持依赖链装配）。
-- 配置读取统一走 `config/settings.py` 的 `get_settings()`，禁止业务代码散读环境变量。
+### 依赖原则与合规守护
+- 依赖方向：API → Application → Domain；Infrastructure / Agent 实现领域端口；具体实现由 `containers.py` 按配置注入（工厂模式 + 双重检查锁单例）。
+- 隔离区：langgraph 只允许 `app/agent/` 导入（外部一律经 `create_qa_workflow` 工厂）；sqlalchemy 只允许 `app/infrastructure/database/` 导入；应用层与 API 层禁止导入 `app.infrastructure`；领域层禁止导入任何技术库；抽象只允许定义在 domain 层（新增端口同步更新下表）。
+- 以上由 `tests/unit/test_ddd_boundaries.py` 以 AST 扫描在每次 pytest 机械校验（曾据此发现 Database 端口错位、chat_service 依赖 langgraph 类型等违例）。
 
 ### 领域端口清单
 | 端口 | 定义位置 | 当前实现 |
 |------|---------|---------|
-| `Database` / `TransactionContext` | domain/repositories/database.py | SQLAlchemyDatabase（infrastructure/database/sqlalchemy/） |
-| `ConversationRepository` / `MessageRepository` / `DocumentRepository` | domain/repositories/ | SQLAlchemyDatabase 内置仓库（ORM Session + Data Mapper，方言无关） |
-| `VectorStore` | domain/repositories/vector_store.py | MilvusVectorStore（dense+sparse 单集合，服务端 hybrid_search，BE-029） |
+| `Database` / `TransactionContext` | domain/repositories/database.py | SQLAlchemyDatabase（方言无关，MySQL 靠 URL 切换） |
+| `ConversationRepository` / `MessageRepository` / `DocumentRepository` | domain/repositories/ | SQLAlchemyDatabase 内置仓库（ORM Session + Data Mapper） |
+| `VectorStore` | domain/repositories/vector_store.py | MilvusVectorStore（dense+sparse 单集合，服务端 hybrid_search） |
 | `LLMProvider` | domain/repositories/llm_provider.py | OllamaProvider / GLMProvider |
-| `DocumentParser` | domain/services/document_parser.py | TextParser / PdfParser |
-| `EmbeddingService` | domain/services/embedding.py | OllamaEmbeddingService |
-| `QaWorkflow` | domain/services/qa_workflow.py | LangGraph 工作流（agent/，经 `create_qa_workflow` 工厂暴露） |
+| `DocumentParser` | domain/services/document_parser.py | TextParser（txt/md 多编码回退）/ PdfParser（pypdf） |
+| `EmbeddingService` | domain/services/embedding.py | OllamaEmbeddingService（/api/embed 批量） |
+| `QaWorkflow` | domain/services/qa_workflow.py | LangGraph 工作流（agent/，`create_qa_workflow` 工厂） |
 
-### ORM 使用约定（BE-025）
-- **两套模型、一层映射**：表结构用声明式 ORM 模型（`models.py`，只属于 infrastructure），领域实体保持纯 dataclass；两者之间由 `mappers.py` 显式双向映射（Data Mapper 模式）。为什么必须有这层：领域层零技术依赖由 AST 守护测试强制执行，ORM 模型不可能同时充当领域实体；把它固定成一层后，字段漂移只会在一个文件里暴露。
-- **仓储出口只返回领域实体**：ORM 模型不得越过 infrastructure 边界（`test_orm_contract.py` 有断言锁定），否则应用层会被 ORM 类型与其会话状态悄悄污染。
-- **Session 配置**：`async_sessionmaker(expire_on_commit=False)` + 单个 `AsyncSession`（对应"进程级单连接"策略）。`expire_on_commit=False` 是异步 ORM 的必要设置：默认 `True` 会在 commit 后使属性过期，之后访问会触发同步刷新，在 asyncio 下抛 `MissingGreenlet`。
-- **不定义 relationship**：消息永远按 `conversation_id` 显式查询，没有聚合内导航需求；不定义关系就没有异步懒加载（`MissingGreenlet`）风险，级联删除仍由表级 `ON DELETE CASCADE` 保证（策略：用不到的关系图能力不引入）。
-- **更新语义**：文档状态更新用"取出模型→改属性"（保持 identity map 与数据库一致，代价是一次额外 SELECT）；消息按会话删除用批量 `delete()` 并显式 `synchronize_session="fetch"`（需要影响行数、避免 N+1 加载，同时防止 session 内残留已删除对象造成脏读）。
-- **JSON 存储沿用 TEXT + `json.dumps(ensure_ascii=False)`**：不换用 SQLAlchemy `JSON` 类型，以保持与既有数据库文件逐字节一致的存储格式与中文可读性。
+### ORM 使用约定（BE-025，精要）
+- **两套模型、一层映射（Data Mapper）**：ORM 模型（models.py）只属于 infrastructure，领域实体保持纯 dataclass，`mappers.py` 显式双向映射；仓储出口只返回领域实体，ORM 模型不得越过 infrastructure 边界（测试锁定）。
+- **Session**：`async_sessionmaker(expire_on_commit=False)` + 单个 `AsyncSession`（进程级单连接）——默认 True 时 commit 后访问属性会触发同步刷新，asyncio 下抛 `MissingGreenlet`。
+- **不定义 relationship**：消息按 `conversation_id` 显式查询，级联删除靠表级 `ON DELETE CASCADE`；用不到的关系图能力不引入（无异步懒加载风险）。
+- **更新/删除语义**：文档状态更新用"取出模型→改属性"（保持 identity map 一致）；批量删除用 `delete()` + `synchronize_session="fetch"`（要影响行数、防脏读）；JSON 沿用 TEXT + `json.dumps(ensure_ascii=False)`。
 
 ### 排序职责（BE-024）
-- **产品要求出处**：三处列表顺序（侧边栏会话按创建时间正序、对话内消息按时间正序、知识库文档按上传时间倒序）是 PRODUCT.md 第 2/3 节的产品要求；本节说明该要求由哪一层实现、按什么依据判断——因此这些描述不再重复写在 PRODUCT.md 里。
-- **仓储只负责读写，不负责排序**：三个 Repository 的 `list` / `list_by_conversation` 不再输出 SQL `ORDER BY`（原 `ORDER BY created_at ASC, rowid ASC` 依赖 SQLite 专有的 `rowid`，MySQL 无此概念）。
-- **排序规则集中在应用服务层，且只按创建时间判断**：`ConversationService.list_conversations`（`created_at` 正序）、`ConversationService.get_messages`（`created_at` 正序）、`DocumentService.list_documents`（`created_at` 倒序）。交换任何数据库实现，排序行为不变。
-- 同一 `created_at`（微秒级相同）的记录没有第二排序键：输出顺序由底层返回顺序决定，Python `sorted` 的稳定性保证同一份数据重复查询结果一致；不再引入"物理行号"这类存储耦合的兜底键。
-
-### 合规守护
-- 领域层禁止导入任何技术库（fastapi/httpx/pymilvus/sqlalchemy/aiosqlite/pypdf/langgraph/pydantic 等）与应用层。
-- 应用层与 API 层禁止导入 `app.infrastructure`，只能依赖领域端口。
-- langgraph 是工作流引擎隔离区：只允许 `app/agent/` 导入；模块外部一律经 `app.agent.create_qa_workflow` 工厂获取工作流，不感知引擎存在。
-- sqlalchemy 是数据库技术隔离区：只允许 `app/infrastructure/database/` 导入；业务层拿到的永远是领域实体与端口。
-- 上表所列抽象只允许定义在 domain 层；新增端口时同步更新本清单。
-- 以上规则由 `backend/tests/unit/test_ddd_boundaries.py` 在每次 pytest 时以 AST 扫描机械校验（曾据此发现并修复 Database 端口错位、chat_service 依赖 langgraph 类型等违例）。
+仓储不排序（不用 SQLite 专有 `rowid`）；三处列表顺序由应用服务层按 `created_at` 实现：会话、消息正序，文档倒序——换数据库排序行为不变。同一 `created_at` 靠 Python `sorted` 稳定性保证结果一致，不引入物理行号兜底键。
 
 ## 4. 核心数据流
 
 ### RAG 问答全链路（流式）
 ```text
 POST /api/chat/stream {conversation_id, question}
-  ▼ ChatService：历史快照 → 保存用户消息 → astream(stream_mode="custom")
-  ▼ LangGraph 图：retrieve（RagService 检索 + build_context）→ generate（build_messages → LLMProvider.stream）
-  ▼ retrieve 命中时经 get_stream_writer 推送 sources 事件（参考来源，先于一切 delta）
-  ▼ generate 节点逐 token 推送 delta 事件（领域事件 QaStreamEvent 统一承载）
-  ▼ SSE：data: {"type":"sources","sources":[...]}（仅检索有命中时出现）
-       data: {"type":"delta","content":"增量"} ... {"type":"done"} / {"type":"error"}
+  ▼ ChatService：历史快照 → 保存用户消息 → QaWorkflow 端口 astream（图执行见 §5）
+  ▼ 节点经 get_stream_writer 推领域事件（QaStreamEvent）→ SSE：plan / sources / delta* / regenerating / done | error
   ▼ 流正常结束：完整回答与参考来源一起持久化为 assistant 消息（异常中断不落库）
 ```
-- **所有 LLM 问答必须走图**：对外唯一问答入口是 SSE 流式接口（`ChatService.stream_answer` → `astream`），检索、Prompt 组装、模型调用只有一份实现；禁止在图外直连 LLMProvider 做问答。图引擎本身仍支持非流式执行（`ainvoke`，测试与脚本经 `run_qa` 使用），与流式执行同一节点实例。
+- **所有 LLM 问答必须走图**：唯一问答入口是 SSE 流式接口；检索、Prompt 组装、模型调用只有一份实现，禁止图外直连 LLMProvider 问答。图引擎的 `ainvoke`（测试/脚本经 `run_qa`）与流式共用同一节点实例。
 - ChatService 只依赖 `QaWorkflow` 端口，负责会话持久化，不直接依赖 RAG/LLM。
 
 ### 文档入库全链路
 ```text
-POST /api/documents (multipart)
-  ▼ DocumentService：扩展名白名单（不支持→400）→ 大小上限 20MB（超限→413）
-  ▼ 创建元数据(processing) → DocumentPipeline：格式识别→解析→清洗→段落感知切分→chunk
-  ▼ 回填 document_id → EmbeddingService 批量向量化 → VectorStore.add_chunks
+POST /api/documents (multipart)：白名单（40001）/ 20MB 上限（41301）→ 元数据(processing)
+  ▼ DocumentPipeline：格式识别 → 解析 → 清洗 → 段落感知切分 → 批量 embedding → VectorStore.add_chunks
   ▼ 状态机：processing → ready（chunk 为空或异常 → failed，不产生僵尸记录）
 DELETE /api/documents/{id}：向量按 document_id 删除 + 元数据删除（必须同时清理）
 ```
-- 切分策略（段落感知）：`chunk_size` 默认 500 字符、`chunk_overlap` 默认 50。优先按换行段落打包保证一条法规完整入同一个 chunk，单段超限才退化为定长滑动窗口——定长切分曾把《专利法》第四十二条截断到两个 chunk，导致检索命中也答不全。
-- 入库即写单个 Milvus 集合：稠密向量由 EmbeddingService 生成后传入，稀疏 BM25 表示由 Milvus 服务端按 content 字段自动生成（BM25 Function），两路数据天然同源，不存在双写一致性问题。
+- 段落感知切分（`chunk_size` 500 / `chunk_overlap` 50）：优先按换行段落打包，保证一条法规完整入同一 chunk——定长切分会把长条文截断到两个 chunk，检索命中也答不全。
+- 稠密向量由 EmbeddingService 传入，稀疏 BM25 由 Milvus 服务端按 content 字段自动生成（BM25 Function），两路同源、无双写一致性问题。
 
 ### RAG 混合检索（BE-029，Milvus 服务端 hybrid_search）
-```text
-query ──┬─▶ embed_query ──────────────┐
-        └─▶ 原始查询文本（服务端 jieba 分词）─┤
-                                          ▼
-        VectorStore.hybrid_search：一次调用同时发起两路检索
-          ├─ 稠密请求：FLOAT_VECTOR（COSINE），带 min_score range 过滤
-          └─ 稀疏请求：SPARSE_FLOAT_VECTOR（BM25 词面打分）
-                     ▼
-        Milvus 服务端 RRFRanker(k=60) 融合 → 直接返回融合后的 top_k
-```
-- **为什么混合**：向量检索擅长语义相似（问法不同、含义相近），但法条编号、专有名词等精确词面匹配是弱项；BM25 恰好补足词面精确召回。
-- **融合在服务端**：`hybrid_search` + `RRFRanker(k=60)` 是 Milvus 原生能力——BM25 分数与余弦相似度量纲不同不可直接加权，RRF 只用排名、无需调权（k=60 为论文推荐值）；同一 chunk 两路同时命中排名叠加、天然靠前。
-- **为什么从自研 BM25 索引迁移到 Milvus（BE-028 → BE-029）**：自研方案（jieba + rank_bm25 进程内索引 + JSON 快照）每次增删要全量重建索引，万级 chunk 以上不可持续；Milvus 稀疏向量服务端增量建索引，且省去双写编排、快照管理与自研融合代码。
-- **min_score 语义保持**：仍只作用于稠密通道的相似度过滤（默认 0.0 不过滤），经 range search（radius）在服务端执行；融合后得分为 RRF 分数（量纲约 1/k 级别），不参与 min_score 过滤。
-- `build_context` / `format_context` 行为不变：仍产出带【来源：文件名】标注的上下文，无命中返回空串，衔接"信息不足"策略；参考来源事件（sources）与 Prompt 上下文依然同源。
-- **集合懒建**：Milvus 集合在首次 `add_chunks` 时按实际 embedding 维度创建（稠密维度跟随 embedding 模型，无需配置）；检索在集合不存在时返回空（空知识库语义）。
-- **数据落点**：Milvus 数据由 standalone 容器持久化（docker volume），不在 `backend/data/`；干净环境重置除删除 `backend/data/` 外还需运行 `scripts/reset_milvus.py` 删除集合（见 RELIABILITY.md）。
+`VectorStore.hybrid_search` 一次调用同时发起两路：稠密（FLOAT_VECTOR/COSINE，min_score 经 range search 只过滤稠密通道）+ 稀疏（SPARSE_FLOAT_VECTOR，服务端 jieba 分词 BM25 打分）→ Milvus 服务端 `RRFRanker(k=60)` 融合直接返回 top_k。
+- **为什么混合/服务端融合**：向量检索擅长语义相似，法条编号等精确词面靠 BM25 补足；BM25 分数与余弦量纲不同不可加权，RRF 只用排名无需调权（k=60 论文推荐值）。自研 BM25（BE-028，已废弃）每次增删全量重建索引，万级 chunk 以上不可持续。
+- `build_context` 仍产出带【来源：文件名】的上下文，无命中返回空串，衔接"信息不足"策略；sources 事件与 Prompt 上下文同源。
+- 集合懒建（首次 `add_chunks` 按实际 embedding 维度创建）；集合不存在时检索返回空 = 空知识库语义。
+- Milvus 数据由容器卷持久化，不在 `backend/data/`——干净环境重置除删 data 外还需运行 `scripts/reset_milvus.py`（见 RELIABILITY.md）。
 
 ## 5. Agent 工作流（LangGraph）
 
 ### 面向对象结构
-- `AgentNode`（抽象基类）+ `PlanNode` / `RetrieveNode` / `GenerateNode` / `VerifyNode`（命令模式）：`__call__` 使节点实例可直接注册进图，新增节点继承基类即可（多态）。
-- `QaGraphBuilder`（建造者模式）：统一装配 Plan-and-Execute 闭环（rag 为必选依赖，检索节点永远在图中），装配与条件边规则集中一处。
-- `LangGraphQaWorkflow`（适配器模式）：显式继承并实现 `QaWorkflow` 领域端口，langgraph 引擎封在适配器之内。
-- `create_qa_workflow(llm, rag, planner=None)`：模块对外唯一入口（工厂）；rag 必选（知识库检索是问答的固有环节），planner 缺省时用主 LLM 规划。
+- `AgentNode`（抽象基类）+ `PlanNode` / `RetrieveNode` / `GenerateNode` / `VerifyNode`（命令模式）：`__call__` 使节点实例直接注册进图，新增节点继承基类即可。
+- `QaGraphBuilder`（建造者）：统一装配 Plan-and-Execute 闭环（rag 必选——知识库检索是问答固有环节，"无知识库"由空命中路径承接），装配与条件边规则集中一处。
+- `LangGraphQaWorkflow`（适配器）显式实现 `QaWorkflow` 领域端口，langgraph 引擎封在适配器之内；对外唯一入口 `create_qa_workflow(llm, rag, planner=None)` 工厂（planner 缺省跟随主 LLM，BE-030）。
+- 所有问题统一进规划闭环：简单问题 = 规划器输出单子查询透传原问题的退化情形，不做问题分类路由。
 
-### 图拓扑（LangGraph 图的图形化表示，BE-030）
-
-所有问题统一走规划闭环，不区分简单/复杂（简单问题 = 规划器输出单子查询透传原问题的退化情形）：
-
-```text
-              START
-                │
-                ▼
-          ┌───────────┐  输出子查询列表；推 plan 事件
-          │   plan    │  （重规划时也推，前端据此清空重画）
-          └─────┬─────┘
-                ▼
-          ┌───────────┐  逐子查询混合检索 → 按 chunk id 合并去重
-          │ retrieve  │  → 推 sources 事件（契约不变：一次、先于全部 delta）
-          └─────┬─────┘
-                │  空命中且 plan 预算未用尽 → 回 plan（带"改写子查询"反馈）
-                ▼
-          ┌───────────┐  组装 Prompt → LLM 流式生成；逐 token 推 delta
-          │ generate  │  verify_feedback 非空时附带修正指令
-          └─────┬─────┘
-                ▼
-          ┌───────────┐  规则档：引用来源存在性 / BE-017 信息不足声明 / 退化检查
-          │  verify   │  judge 档：LLM groundedness 判分 → {verdict, feedback, unsupported}
-          └─────┬─────┘
-                │  依据不足(grounding) 且预算未用尽 → 回 plan（带无依据结论建议）
-                │  表达契约失败(contract) 且预算未用尽 → 回 generate（推 regenerating 事件）
-              pass
-                ▼
-               END
-
-预算：plan_runs ≤ 2、generate_runs ≤ 2；超限输出当前答案并记 WARN 日志（防死循环）
-```
-
-上面的 ASCII 图是人工注解版；下面是可交互渲染版（Mermaid，由 `backend/scripts/export_qa_graph.py` 自动生成，图拓扑变更后运行 `cd backend && uv run python scripts/export_qa_graph.py` 重新导出，虚线为条件边）：
+### 图拓扑（BE-030；由 scripts/export_qa_graph.py 生成，拓扑变更后重跑即可同步）
 
 ```mermaid
 ---
@@ -291,17 +216,15 @@ graph TD;
 	classDef last fill:#bfb6fc
 ```
 
-条件边分支语义：`retrieve` 空命中且 `plan_runs` 未用尽 → `replan`（回 plan），否则默认进 `generate`；`verify` 按 `verify_verdict` 三态路由——`grounding` → `replan`、`contract` → `regenerate`、`pass`（或预算用尽降级放行）→ `end`。
+条件边分支语义：`retrieve` 空命中且 `plan_runs` 未用尽 → `replan`（回 plan 改写子查询），否则默认进 `generate`；`verify` 按 `verify_verdict` 三态路由——`grounding`（依据不足）→ `replan`、`contract`（表达契约失败）→ `regenerate`、`pass`（或预算用尽降级放行）→ `end`。
 
-- 为什么 verify 打回分两路：依据不足是"检索缺口"，重规划补检索比重写答案有效；表达契约失败（如未按格式声明信息不足）是"生成缺口"，直接带反馈重生成更便宜。
-- judge 判分解析失败视为 pass（记 WARN 日志，不阻塞主流程）——判分是增强而非闸门，判分器自身不可靠时不得阻断问答。
+- **预算防死循环**：`plan_runs ≤ 2`、`generate_runs ≤ 2`，超限输出当前答案并记 WARN。verify 打回分两路的原因：依据不足是"检索缺口"，重规划补检索比重写有效；表达契约失败是"生成缺口"，带反馈（verify_feedback）重生成更便宜。
+- **LangGraph 陷阱（踩坑记录）**：同一节点的静态出边与条件边不能并存——replan 路径下 generate 会在同一超级步并发执行并写同一 state 键，触发 `InvalidUpdateError`；故 retrieve 出边只保留条件边。
+- **verify 两档**：规则档（引用来源存在性 / BE-017 信息不足声明 / 退化检查）零成本先行；judge 档 LLM groundedness 判分，解析失败视为 pass（记 WARN）——判分是增强而非闸门。
+- 节点行为：plan 产出 `sub_queries` 并推 plan 事件（前端据此展示问题拆解，重规划时也推）；retrieve 逐子查询混合检索按 chunk 合并去重，有命中推 sources 事件（契约：先于当轮全部 delta，重规划后以最新一批为准）；generate 组装 Prompt 流式生成逐 token 推 delta；verify 校验打回前推 regenerating 事件。
 
 ### 法律问答策略（agent/prompts.py，BE-017）
-1. 优先依据知识库上下文回答，并注明来源文件；
-2. 依据为空或不足时，明确告知"知识库中暂无相关依据，建议咨询专业律师"，禁止编造；
-3. 严禁虚构法律条文、案例编号或结论；先给结论再给依据。
-
-真实模型验证（qwen3.5:4b / glm-4.5-air）：有依据时正确引用条文与来源；无依据或检索到无关内容时明确声明信息不足，不虚构。
+优先依据知识库上下文回答并注明来源文件；依据为空或不足时明确告知"知识库中暂无相关依据，建议咨询专业律师"；严禁虚构法律条文、案例编号或结论，先给结论再给依据。
 
 ## 6. 配置管理
 
@@ -313,35 +236,26 @@ graph TD;
 | `VECTOR_STORE_PROVIDER` | milvus（当前唯一已启用 Provider） | milvus |
 | `LLM_PROVIDER` | ollama / glm | ollama |
 | `PLANNER_PROVIDER` | follow / ollama / glm | follow（跟随 LLM_PROVIDER，BE-030） |
-| `PLANNER_MODEL` | 模型名 | 空（用所选 Provider 的默认模型，BE-030） |
-| `LLM_ENABLE_THINKING` | true / false | false（关闭思考模式） |
+| `PLANNER_MODEL` | 模型名 | 空（用所选 Provider 的默认模型） |
+| `LLM_ENABLE_THINKING` | true / false | false |
 | `MILVUS_URI` | — | http://127.0.0.1:19530 |
 | `HOST` / `PORT` / `LOG_LEVEL` | — | 0.0.0.0 / 8000 / INFO |
 
-
-
-
-- **思考模式开关（`LLM_ENABLE_THINKING`，默认 false）**：qwen3.5 / glm-4.5 等推理模型默认会先"思考"再回答，显著拉长首字延迟（真实环境曾达 30~40s）。关闭时 Ollama 请求携带 `think: false`、GLM 请求携带 `thinking: {"type": "disabled"}`；需要深度推理时可显式开启。
-
-- **敏感配置**：`GLM_API_KEY` 等密钥只经环境变量或本地 `.env` 注入，禁止提交仓库、禁止写入日志。
-- **路径锚定**：相对路径统一锚定到 `backend/`（`resolved_sqlite_db_path`），数据位置不随进程工作目录变化。
-- **数据目录自动创建（BE-026）**：数据目录不存在时（例如按 RELIABILITY.md 的"测试干净环境管理"删除了 `backend/data/`）由数据库实现在建连接前创建 SQLite 文件的父目录。因此 `data/` 被清空后仍可直接启动，不需要人工先建目录；Milvus 数据不在此目录（由容器卷持久化）。
-- **切换 Provider**：仅改配置，业务代码零修改；glm 缺密钥时装配即报错（尽早失败）。
+- **思考模式开关**：qwen3.5 / glm-4.5 等推理模型默认先"思考"再回答，首字延迟曾达 30~40s；关闭时 Ollama 带 `think: false`、GLM 带 `thinking: {"type": "disabled"}`。
+- **敏感配置**：`GLM_API_KEY` 等密钥只经环境变量或本地 `.env` 注入，禁止提交仓库、禁止写入日志；glm 缺密钥时装配即报错（尽早失败）。
+- **路径锚定与自愈**：相对路径统一锚定 `backend/`；`backend/data/` 不存在时建连接前自动创建父目录（BE-026），清空后可直接启动。
+- **切换 Provider**：仅改配置，业务代码零修改。
 
 ## 7. API 契约
 
-所有端点异步；统一错误结构 `{"code": <int>, "message": <str>}`（40001 格式不支持 / 40002 参数非法 / 40401 会话不存在 / 40402 文档不存在 / 41301 超限 / 50000 兜底）。
+所有端点异步；统一错误结构 `{"code": <int>, "message": <str>}`（40001 格式不支持 / 40002 参数非法 / 40401 会话不存在 / 40402 文档不存在 / 41301 超限 / 50000 兜底）。OpenAPI：`http://127.0.0.1:8000/docs`；CORS 当前 `allow_origins=["*"]`（开发态，生产需收敛）。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /api/conversations | 创建对话（title 可选，默认"新对话"） |
-| GET | /api/conversations | 对话列表（创建时间正序，最早创建在上） |
-| GET | /api/conversations/{id}/messages | 会话消息 |
-| DELETE | /api/conversations/{id} | 删除会话（级联消息） |
+| POST / GET | /api/conversations | 创建对话（title 可选）/ 对话列表（创建时间正序） |
+| GET / DELETE | /api/conversations/{id}(/messages) | 会话消息 / 删除会话（级联消息） |
 | POST | /api/chat/stream | 提交问题，SSE 流式回答 |
-| POST | /api/documents | 上传 PDF/TXT/MD（multipart） |
-| GET | /api/documents | 文档列表 |
-| DELETE | /api/documents/{id} | 删除文档（级联向量） |
+| POST / GET / DELETE | /api/documents({id}) | 上传 PDF/TXT/MD（multipart）/ 列表 / 删除（级联向量） |
 | GET | /api/health | 健康检查 |
 
 Chat 流式协议（SSE，`data: {json}\n\n`）：
@@ -353,54 +267,41 @@ Chat 流式协议（SSE，`data: {json}\n\n`）：
 {"type": "done", "conversation_id": "..."}
 {"type": "error", "message": "..."}
 ```
-- 事件顺序（BE-030 统一规划闭环）：`plan`（每次规划一次，重规划时再次出现）→ `sources`（检索有命中时一次）→ `delta`（每轮生成一批）→（verify 打回时 `regenerating` 后重复 sources→delta）→ `done`/`error`。
-- `plan` 事件携带规划器产出的子查询列表（数组顺序即执行顺序），前端可在生成中展示问题拆解；旧前端未处理时静默忽略（向后兼容）。
-- `regenerating` 事件表示 verify 校验未通过、回答将重新生成，前端须清空已渲染的增量内容（否则会出现两版回答拼接）。
-- `sources` 事件在每轮检索后出现：重规划补检索时会再次出现，前端以最新一批为准；持久化的 sources 只记录最终生成所用的那批。
-- 参考来源随回答持久化（messages 表 `sources` JSON 列，旧库启动时自动 ALTER 迁移），`GET /api/conversations/{id}/messages` 原样返回，历史消息同样可展示参考文档。
-CORS 当前 `allow_origins=["*"]`（开发态，生产需收敛）。OpenAPI 文档：`http://127.0.0.1:8000/docs`。
+- 事件顺序（BE-030）：`plan`（每次规划推一次，重规划时再次出现）→ `sources`（每轮检索有命中时一次，重规划后以最新一批为准）→ `delta`（每轮生成一批）→（verify 打回时 `regenerating` 后重复 sources→delta）→ `done`/`error`。字段只增不改，向后兼容（旧前端静默忽略新事件）。
+- `regenerating`：前端须清空已渲染增量（否则两版回答拼接）；`done` 后回答与 sources 已持久化，`GET .../messages` 原样返回（旧库自动 ALTER 迁移），历史消息同样可展示参考文档。
 
 ## 8. 启动与验证
 
 ```bash
 cd backend
-docker compose up -d                               # 启动 Milvus standalone（etcd + minio + milvus，BE-029 前置条件）
+docker compose up -d                               # Milvus standalone（etcd + minio + milvus，BE-029 前置）
 uv sync                                            # 创建/同步 .venv（Python 3.11）
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-```bash
 uv run pytest                                      # 全量测试（含 DDD 边界守护）
 curl http://127.0.0.1:8000/api/health              # {"status":"ok"}
-```
-```bash
-cd frontend                                        # 前端（FE-001）
-npm install                                        # 安装依赖（Node 20+）
-npm run dev                                        # 开发服务器 http://localhost:5173（/api 代理到 8000）
-npm run build                                      # tsc 类型检查 + 生产构建（dist/）
-```
-- 启动时 lifespan 自动：SQLite connect + init_schema（幂等建表）、Milvus connect + 集合 load（集合不存在时等首次入库懒建）；关闭时释放。
-- **首次启动自愈（BE-026）**：`backend/data/` 不存在时无需人工创建——数据库实现在建连接前创建 SQLite 文件的父目录；Milvus 侧集合不存在时由首次入库懒建，均为幂等操作，重复启动安全。
-- 日志：单行 JSON（timestamp/level/service/request_id/message/data），同时输出 stdout 与 `backend/log/app.log`（按天轮转、默认保留 30 天），等级由 `LOG_LEVEL` 控制，默认 INFO；每个 HTTP 响应带 `x-request-id`；注意事项见 docs/RELIABILITY.md。
 
-## 9. 测试体系（四层，2026-09-12 BE-030 统一规划闭环后全量验证通过）
+cd frontend
+npm install && npm run dev                         # http://localhost:5173（/api 代理到 8000）
+npm run build                                      # tsc 类型检查 + 生产构建
+```
+- 启动时 lifespan 自动：SQLite connect + init_schema（幂等建表）、Milvus connect（集合不存在时首次入库懒建）；均为幂等操作，重复启动安全（BE-026 首次启动自愈）。
+- 日志：单行 JSON（timestamp/level/service/request_id/message/data），stdout + `backend/log/app.log`（按天轮转保留 30 天），每响应带 `x-request-id`；详见 docs/RELIABILITY.md。
+
+## 9. 测试体系（四层）
 
 | 层级 | 位置 | 数量 | 验证内容 |
 |------|------|------|---------|
-| 单元 | tests/unit/ | 62（~3s） | 纯逻辑与抽象层，无外部 IO：DI 容器、配置、DDD 边界守护（AST 扫描）、日志契约（落盘/轮转/脱敏/降级/幂等/request_id：BE-027）、**规划子查询/判分 verdict 解析容错（BE-030）**、回答策略、Database/VectorStore 混合检索契约（内存 Fake）/LLM 端口契约、文档 Pipeline、TXT/PDF 解析器、健康检查 |
-| 集成 | tests/integration/（除 API） | 68（~50s） | 真实 SQLite（SQLAlchemy ORM 实现的持久化/外键级联/事务提交与回滚/建表幂等/旧库补列迁移/来源往返）、首次启动自愈（数据目录不存在时自动建库、干净环境重置后可再次启动：BE-026）、ORM 契约（出口只返回领域实体、`expire_on_commit=False` 提交后可读、identity map 更新一致、批量删除无脏读、回滚撤销属性更新）、排序契约（乱序落库后由服务层按时间排序 + 同时间稳定性）、**真实 Milvus 混合检索（稠密+稀疏双通道/RRF 融合/min_score range 过滤/按文档删除/跨连接持久化；服务不可达时跳过：BE-029）**、LLM Provider 协议（MockTransport）、Embedding 入库、RAG 检索、**Agent 统一规划闭环（plan 透传/多子查询合并/grounding 打回 plan/contract 打回 generate/预算降级/事件顺序：BE-030）**、对话服务 |
-| 接口 | tests/integration/test_api.py | 9（~11s） | 完整应用（临时 SQLite + 内存 Fake 向量库 + Fake LLM，不启动真实服务）：会话 CRUD、统一错误结构、SSE 流式协议（**plan 先行**/delta/done + 持久化）、文档上传/删除/非法格式拒绝、x-request-id 生成与透传（BE-027） |
-| 端到端 | scripts/verify_real_e2e.py 等（手工运行） | 3 个脚本 | 真实 uvicorn + 真实 Ollama/Milvus/LLM：真实法律文档上传→向量化入库→流式 RAG 问答引用原文→消息持久化；reset_milvus.py 供干净环境重置 |
+| 单元 | tests/unit/ | 62 | DI 容器、配置、DDD 边界守护（AST）、日志契约（BE-027）、规划/判分解析容错（BE-030）、回答策略、端口契约（内存 Fake）、文档 Pipeline 与解析器 |
+| 集成 | tests/integration/（除 API） | 68 | 真实 SQLite（持久化/级联/事务/迁移/ORM 契约/排序契约）、首次启动自愈（BE-026）、真实 Milvus 混合检索（不可达时跳过，BE-029）、LLM/Embedding/RAG、Agent 统一规划闭环（BE-030） |
+| 接口 | tests/integration/test_api.py | 9 | 完整应用（临时 SQLite + Fake 向量库/LLM）：会话 CRUD、统一错误、SSE 协议（plan 先行）、文档上传删除、x-request-id |
+| 端到端 | scripts/（手工运行） | 3 脚本 | 真实 uvicorn + 真实 Milvus/LLM：上传→入库→流式 RAG 问答引用原文→持久化 |
 
-数据：tests/data_source/ 为 RAG 测试数据源（真实法律文档：专利法 TXT + MD）。
-
-- 自动化测试合计 139 个，`uv run pytest` 全量运行，无需任何外部服务（Fake/确定性实现遵循领域端口，与生产实现互换验证同一契约：InMemoryDatabase、InMemoryVectorStore、DeterministicEmbedding、ScriptedLLM）；**唯一例外**是 tests/integration/test_milvus_vector_store.py 需要真实 Milvus（docker compose up -d），服务不可达时自动跳过并在 reason 中注明。
-- 端到端脚本依赖真实外部服务（本机 Ollama 模型、GLM 密钥），不纳入 pytest 自动化，保持自动化测试的封闭性与可重复性；运行方式见脚本头部说明，验证结论记录于 feature_list.json 各功能 evidence。
+- 自动化合计 139 个，`uv run pytest` 全量运行无需外部服务（Fake 遵循领域端口，与生产实现互换验证同一契约）；唯一例外 test_milvus_vector_store.py 需真实 Milvus，不可达时自动跳过。
+- E2E 脚本依赖真实服务，不纳入 pytest（保持自动化封闭性）；结论记录于 feature_list.json 各功能 evidence。测试数据源：tests/data_source/（专利法 TXT + MD）。
 
 ## 10. 扩展点与预留
 
-- **MySQL 8.0**：表结构与 DML 已由 SQLAlchemy ORM 统一（`infrastructure/database/sqlalchemy/models.py` 声明式模型），接入只剩两步——安装异步驱动（`aiomysql`，纯 Python，Windows 无需编译）、在 `containers.py` 增加 `mysql+aiomysql://…` 的 URL 分支并启用 `DbProvider.MYSQL`；届时需补 MySQL 真实实例上的集成验证与迁移方案（Alembic autogenerate 可直接消费现有声明式模型）。
-- **Milvus**（BE-029 已实现）：`MilvusVectorStore` 实现完整 VectorStore 端口——单一集合同时持有稠密向量（COSINE）与稀疏 BM25 向量，`hybrid_search` 经 `RRFRanker(60)` 服务端融合；部署由 `backend/docker-compose.yml`（etcd + minio + standalone）承载，`MILVUS_URI` 默认指向 `http://127.0.0.1:19530`；容器内存上限 milvus 2GB / etcd 256MB / minio 256MB（合计 2.5GB，为 4GB WSL2 VM 的 ~62%，防止无界增长拖垮宿主机）。
-- **新文档格式**：实现 `DocumentParser` 策略并注册进 `DocumentParserFactory`。
-- **新 LLM Provider**：实现 `LLMProvider`（chat + stream + model_name），容器工厂加分支；密钥仅环境注入。
-- **新问答节点**：继承 `AgentNode`，在 `QaGraphBuilder.build()` 中接线。
-- **前端**（FE-001 基础框架完成；FE-002~010 待开发）：遵循第 7 节 API 契约与 SSE 协议；开发期统一请求相对路径 `/api/...`，由 Vite 代理转发，前端代码不感知后端地址。
+- **MySQL 8.0**：ORM 已统一表结构与 DML，接入只剩安装 `aiomysql` 驱动 + `containers.py` 加 `mysql+aiomysql://…` URL 分支并启用 `DbProvider.MYSQL`；需补真实实例集成验证与迁移方案（Alembic autogenerate 可直接消费现有声明式模型）。
+- **Milvus**：容器内存上限（backend/docker-compose.yml）milvus 2GB / etcd 256MB / minio 256MB（合计 2.5GB ≈ 4GB WSL2 的 62%，防无界增长拖垮宿主机）；`MILVUS_URI` 默认 http://127.0.0.1:19530。
+- **新文档格式**：实现 `DocumentParser` 策略并注册进工厂；**新 LLM Provider**：实现 `LLMProvider`（chat + stream + model_name）+ 容器加分支，密钥仅环境注入；**新问答节点**：继承 `AgentNode`，在 `QaGraphBuilder.build()` 接线。
+- **前端**：遵循 §7 API 契约与 SSE 协议；开发期统一请求相对路径 `/api/...` 由 Vite 代理，前端代码不感知后端地址。

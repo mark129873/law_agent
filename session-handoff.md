@@ -6,7 +6,10 @@
   - **测试体系**：后端自动化 139 个（2026-09-12 全绿）；其中 test_milvus_vector_store.py 5 例需要真实 Milvus（docker compose up -d），服务不可达时自动跳过，其余保持封闭性。
   - **Agent 已升级为统一 Plan-and-Execute 闭环（BE-030）**：plan（问题拆解子查询）→ retrieve（多子查询混合检索合并去重）→ generate → verify（规则档 + LLM judge groundedness）；verify 依据不足带建议回 plan、表达契约失败回 generate，预算 plan_runs≤2 / generate_runs≤2；SSE 协议新增 plan/regenerating 事件。
   - **图可视化（BE-031）**：`cd backend && uv run python scripts/export_qa_graph.py` 可随时导出问答图（桩依赖建图，零外部服务依赖），Mermaid 写入 docs/qa_graph.mmd 并内嵌 ARCHITECTURE.md §5；--png 可选导出 PNG。
-- 最近一轮实际跑过的验证（2026-09-12，Session 029，BE-031 图可视化 + 真实 E2E + 浏览器界面实操）：
+- 最近一轮实际跑过的验证（2026-09-12，Session 030，进度文档冷热分层重构）：
+  - 守恒校验通过：Session 30 = 热 10 + 冷 10 + 10（docs/archive/progress-archive-001-010.md、-011-020.md）；功能 44 = 热层 24（21 passing 压缩 evidence + 3 deprecated）+ archivedPassing.count 20（docs/archive/feature-archive-001-020.json 整条原样）
+  - JSON 语法校验通过（feature_list.json 与冷分卷）；AGENTS.md 新增"进度文档冷热分层规则"（Session > 15 沉 10 / passing > 40 沉 20、起止序号命名、"不在热层即 passing"不变量）；clean-state-checklist.md 增加沉降检查项
+- 上一轮实际跑过的验证（2026-09-12，Session 029，BE-031 图可视化 + 真实 E2E + 浏览器界面实操）：
   - `uv run python scripts/export_qa_graph.py` 成功：六节点 + 全部静态/条件边（replan/regenerate/end 标签）与 graph.py 路由语义一致，docs/qa_graph.mmd 写入成功
   - 全量 `uv run pytest tests -q` → 139 passed（提交后复跑）
   - 真实端到端（API 层，GLM + 真实 Milvus + 专利法）：上传 ready → 回答正确引用第四十二条"二十年" → sources 事件与持久化一致（verify_real_e2e.py）
