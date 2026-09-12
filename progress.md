@@ -24,6 +24,7 @@
   - 干净环境（删 backend/data + scripts/reset_milvus.py）uv run pytest → **119 passed**（含真实 Milvus 5 例；分层 unit 50 / integration 60 / api 9）
   - 真实端到端（uvicorn 8013，GLM glm-4.5-air + Ollama nomic-embed-text + 真实 Milvus）：上传专利法 TXT 201 ready（VectorStore connected 日志 collection_exists=false → 首次入库懒建）→ 流式提问"发明专利权的保护期限是多长时间？"→ sources 事件 4 条先于 delta、来源含第四十二条"二十年" → 回答正确引用"发明专利权的期限为二十年，自申请日起计算" → 消息持久化且 sources 回读一致 → 删除文档 204 后 Milvus 集合 count(*)=0；检索日志 hit_count=4/top_score≈0.032（双通道 RRF 叠加）
   - Ollama LLM 路径本机仍故障（llama-server 500，Session 025 已知问题），以 GLM Provider 等价验证
+  - 补充端到端复测（2026-09-12，Session 027 收尾后追加）：标准脚本 verify_real_e2e.py 全部断言通过（干净环境 + GLM——专利法 TXT 与要点笔记 MD 均 201 ready，31 chunk 入 Milvus 集合；回答正确引用第四十二条"二十年"；sources 契约与持久化一致）；新增词面精确查询专项（"专利法第五十五条具体规定了什么内容？"→ 回答精确引用第五十五条强制许可条款，验证 BM25 通道对法条编号词面匹配的价值）；删除两份文档后集合 count(*)=0（级联清理）；测试会话已清理，验证后环境重置
   - 验证后进程清理、端口释放、backend/data 与 law_chunks 集合重置
 - 已记录证据：feature_list.json BE-029（passing）、BE-007/008/028（deprecated，历史证据指向 git 历史）
 - 已知风险或未解决问题：
