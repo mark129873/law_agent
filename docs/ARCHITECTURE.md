@@ -40,7 +40,7 @@
       └─────────────────────────────┘
 ```
 
-技术栈：Python 3.11 + FastAPI（全异步）+ uv 环境管理 + LangGraph + SQLAlchemy 2.0 async ORM（声明式模型 + AsyncSession，当前挂 aiosqlite 驱动）+ Chroma + httpx。
+技术栈：Python 3.11 + FastAPI（全异步）+ uv 环境管理 + LangGraph + SQLAlchemy 2.0 async ORM（声明式模型 + AsyncSession，当前挂 aiosqlite 驱动）+ Chroma + jieba/rank_bm25（混合检索关键词通道）+ httpx。
 前端技术栈：React 19 + TypeScript（严格模式）+ Vite 8 + Tailwind CSS v4 + React Router 7 + 原生 Fetch（无 axios）。
 
 ## 2. 目录结构
@@ -60,17 +60,18 @@ backend/
 │   │       ├── conversation_service.py  # 会话生命周期与消息持久化
 │   │       ├── document_pipeline.py     # 解析→清洗→段落感知切分（解析器工厂）
 │   │       ├── document_service.py      # 文档元数据状态机 + 入库/删除
-│   │       ├── knowledge_service.py     # Pipeline→Embedding→VectorStore 入库
-│   │       └── rag_service.py           # 检索与上下文构建
+│   │       ├── knowledge_service.py     # Pipeline→Embedding→向量库+关键词索引 双写入库
+│   │       └── rag_service.py           # 混合检索（向量 + BM25，RRF 融合）与上下文构建
 │   │
 │   ├── domain/                 # Domain 层：实体 + 端口（零技术依赖）
 │   │   ├── entities/           # conversation / message / document / chunk / llm
-│   │   ├── repositories/       # Database / Conversation / Message / Document / VectorStore / LLMProvider 端口
+│   │   ├── repositories/       # Database / Conversation / Message / Document / VectorStore / KeywordIndex / LLMProvider 端口
 │   │   └── services/           # document_parser / embedding / qa_workflow 端口
 │   │
 │   ├── infrastructure/         # 基础设施实现（实现领域端口）
 │   │   ├── database/sqlalchemy/ # SQLAlchemyDatabase（models.py 声明式 ORM 模型 / mappers.py 实体↔模型映射 / types.py 时区无损时间列 / database.py 端口实现）；方言无关，MySQL 预留靠 URL 切换
 │   │   ├── vector_store/       # ChromaVectorStore；milvus.py 骨架预留
+│   │   ├── keyword_index/      # Bm25KeywordIndex（jieba 分词 + rank_bm25，语料快照 JSON 持久化）
 │   │   ├── llm/                # OllamaProvider / GLMProvider
 │   │   ├── document_parser/    # PdfParser（pypdf）/ TextParser（txt/md，多编码回退）
 │   │   └── embedding/          # OllamaEmbeddingService（/api/embed 批量）
@@ -148,6 +149,7 @@ Agent（工作流实现，独立模块）──▶ Domain 端口 + Application �
 | `Database` / `TransactionContext` | domain/repositories/database.py | SQLAlchemyDatabase（infrastructure/database/sqlalchemy/） |
 | `ConversationRepository` / `MessageRepository` / `DocumentRepository` | domain/repositories/ | SQLAlchemyDatabase 内置仓库（ORM Session + Data Mapper，方言无关） |
 | `VectorStore` | domain/repositories/vector_store.py | ChromaVectorStore（Milvus 骨架预留） |
+| `KeywordIndex` | domain/repositories/keyword_index.py | Bm25KeywordIndex（jieba + rank_bm25，BE-028） |
 | `LLMProvider` | domain/repositories/llm_provider.py | OllamaProvider / GLMProvider |
 | `DocumentParser` | domain/services/document_parser.py | TextParser / PdfParser |
 | `EmbeddingService` | domain/services/embedding.py | OllamaEmbeddingService |
@@ -201,7 +203,23 @@ POST /api/documents (multipart)
 DELETE /api/documents/{id}：向量按 document_id 删除 + 元数据删除（必须同时清理）
 ```
 - 切分策略（段落感知）：`chunk_size` 默认 500 字符、`chunk_overlap` 默认 50。优先按换行段落打包保证一条法规完整入同一个 chunk，单段超限才退化为定长滑动窗口——定长切分曾把《专利法》第四十二条截断到两个 chunk，导致检索命中也答不全。
-- RAG 检索（RagService）：`embed_query → VectorStore.search`，支持 `min_score` 相似度阈值过滤弱命中；`build_context` 产出带【来源：文件名】标注的上下文，无命中返回空串，衔接"信息不足"策略。
+- **双写**：入库时 chunk 同时写入向量库（embedding 检索用）与关键词索引（BM25 词面检索用），删除时两处必须同时清理；关键词索引是向量库之外的独立存储，二者的最终一致由 KnowledgeIngestionService / DocumentService 这唯一一处编排保证。
+
+### RAG 混合检索（BE-028）
+```text
+query ──┬─▶ 向量通道：embed_query → VectorStore.search → min_score 过滤弱命中
+        └─▶ 关键词通道：jieba 分词 → Bm25KeywordIndex.search（BM25Okapi 词面打分）
+                     ▼
+        RRF 融合（Reciprocal Rank Fusion，k=60）：score = Σ 1/(k + rank)
+                     ▼
+        按 RRF 得分降序取 top_k（同一 chunk 在两路同时命中会叠加得分，天然去重）
+```
+- **为什么混合**：向量检索擅长语义相似（问法不同、含义相近），但法条编号、专有名词等精确词面匹配是弱项；BM25 恰好补足词面精确召回。两路各自独立可用——关键词索引缺失或为空时向量通道照常工作（优雅降级）。
+- **融合用 RRF 而非加权分数**：BM25 分数与余弦相似度量纲不同、不可直接加权；RRF 只用排名，无需调权，且对两路分数分布不敏感（业界标准做法，k=60 为论文推荐值）。
+- `min_score` 语义保持不变：仍只作用于向量通道的相似度过滤（默认 0.0 不过滤），在融合之前执行；融合后得分是 RRF 分数（量纲约 1/k 级别），不参与 min_score 过滤。
+- `build_context` / `format_context` 行为不变：仍产出带【来源：文件名】标注的上下文，无命中返回空串，衔接"信息不足"策略；参考来源事件（sources）与 Prompt 上下文依然同源。
+- **关键词索引存储**：Bm25KeywordIndex 的语料快照持久化为 `backend/data/bm25_index.json`（原子写：临时文件 + replace），进程内为内存倒排索引（BM25Okapi 每次变更全量重建，当前知识库规模下代价可忽略）；快照与 Chroma 数据同目录，干净环境重置（删除 `backend/data/`）时一并清除。
+- `HYBRID_SEARCH_ENABLED=false` 时装配层不注入关键词索引，RagService 退化为纯向量检索（回退开关）。
 
 ## 5. Agent 工作流（LangGraph）
 
@@ -251,6 +269,8 @@ RAG 工作流：
 | `VECTOR_STORE_PROVIDER` | chroma / milvus | chroma |
 | `LLM_PROVIDER` | ollama / glm | ollama |
 | `LLM_ENABLE_THINKING` | true / false | false（关闭思考模式） |
+| `HYBRID_SEARCH_ENABLED` | true / false | true（BM25+向量混合检索，BE-028） |
+| `BM25_INDEX_PATH` | — | data/bm25_index.json（锚定 backend/） |
 | `HOST` / `PORT` / `LOG_LEVEL` | — | 0.0.0.0 / 8000 / INFO |
 
 
@@ -311,18 +331,18 @@ npm run build                                      # tsc 类型检查 + 生产�
 - **首次启动自愈（BE-026）**：`backend/data/` 不存在时无需人工创建——数据库实现在建连接前创建 SQLite 文件的父目录，Chroma 自行创建持久化目录；两者都是幂等操作，重复启动安全。
 - 日志：单行 JSON（timestamp/level/service/request_id/message/data），同时输出 stdout 与 `backend/log/app.log`（按天轮转、默认保留 30 天），等级由 `LOG_LEVEL` 控制，默认 INFO；每个 HTTP 响应带 `x-request-id`；注意事项见 docs/RELIABILITY.md。
 
-## 9. 测试体系（四层，2026-09-10 BE-027 日志落盘后全量验证通过）
+## 9. 测试体系（四层，2026-09-12 BE-028 混合检索后全量验证通过）
 
 | 层级 | 位置 | 数量 | 验证内容 |
 |------|------|------|---------|
-| 单元 | tests/unit/ | 48（~2s） | 纯逻辑与抽象层，无外部 IO：DI 容器、配置、DDD 边界守护（AST 扫描）、**日志契约（落盘/轮转/脱敏/降级/幂等/request_id：BE-027）**、回答策略、Database/VectorStore/LLM 端口契约、文档 Pipeline、TXT/PDF 解析器、健康检查 |
-| 集成 | tests/integration/（除 API） | 60（~28s） | 真实 SQLite（SQLAlchemy ORM 实现的持久化/外键级联/事务提交与回滚/建表幂等/旧库补列迁移/来源往返）、**首次启动自愈（数据目录不存在时自动建库、干净环境重置后可再次启动：BE-026）**、**ORM 契约（出口只返回领域实体、`expire_on_commit=False` 提交后可读、identity map 更新一致、批量删除无脏读、回滚撤销属性更新）**、**排序契约（乱序落库后由服务层按时间排序 + 同时间稳定性）**、真实 Chroma（写入/检索/删除/持久化）、LLM Provider 协议（MockTransport）、Embedding 入库、RAG 检索、Agent 图（含流式走图）、对话服务 |
-| 接口 | tests/integration/test_api.py | 9（~11s） | 完整应用（临时 SQLite/Chroma + Fake LLM，不启动真实服务）：会话 CRUD、统一错误结构、SSE 流式协议（delta/done + 持久化）、文档上传/删除/非法格式拒绝、**x-request-id 生成与透传（BE-027）** |
+| 单元 | tests/unit/ | 61（~5s） | 纯逻辑与抽象层，无外部 IO：DI 容器、配置、DDD 边界守护（AST 扫描）、日志契约（落盘/轮转/脱敏/降级/幂等/request_id：BE-027）、回答策略、Database/VectorStore/**KeywordIndex（BE-028）**/LLM 端口契约、**RRF 融合纯函数（BE-028）**、文档 Pipeline、TXT/PDF 解析器、健康检查 |
+| 集成 | tests/integration/（除 API） | 64（~30s） | 真实 SQLite（SQLAlchemy ORM 实现的持久化/外键级联/事务提交与回滚/建表幂等/旧库补列迁移/来源往返）、首次启动自愈（数据目录不存在时自动建库、干净环境重置后可再次启动：BE-026）、ORM 契约（出口只返回领域实体、`expire_on_commit=False` 提交后可读、identity map 更新一致、批量删除无脏读、回滚撤销属性更新）、排序契约（乱序落库后由服务层按时间排序 + 同时间稳定性）、真实 Chroma（写入/检索/删除/持久化）、**混合检索（双写双清/融合去重排序/纯向量回退：BE-028）**、LLM Provider 协议（MockTransport）、Embedding 入库、RAG 检索、Agent 图（含流式走图）、对话服务 |
+| 接口 | tests/integration/test_api.py | 9（~11s） | 完整应用（临时 SQLite/Chroma/BM25 + Fake LLM，不启动真实服务）：会话 CRUD、统一错误结构、SSE 流式协议（delta/done + 持久化）、文档上传/删除/非法格式拒绝、x-request-id 生成与透传（BE-027） |
 | 端到端 | scripts/verify_real_e2e.py 等（手工运行） | 3 个脚本 | 真实 uvicorn + 真实 Ollama/embedding/Chroma：真实法律文档上传→向量化入库→流式 RAG 问答引用原文→消息持久化 |
 
 数据：tests/data_source/ 为 RAG 测试数据源（真实法律文档：专利法 TXT + MD）。
 
-- 自动化测试合计 117 个，`uv run pytest` 全量运行，无需任何外部服务（Fake/确定性实现遵循领域端口，与生产实现互换验证同一契约：InMemoryDatabase、DeterministicEmbedding、ScriptedLLM）。
+- 自动化测试合计 134 个，`uv run pytest` 全量运行，无需任何外部服务（Fake/确定性实现遵循领域端口，与生产实现互换验证同一契约：InMemoryDatabase、DeterministicEmbedding、ScriptedLLM）。
 - 端到端脚本依赖真实外部服务（本机 Ollama 模型、GLM 密钥），不纳入 pytest 自动化，保持自动化测试的封闭性与可重复性；运行方式见脚本头部说明，验证结论记录于 feature_list.json 各功能 evidence。
 
 ## 10. 扩展点与预留

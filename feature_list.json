@@ -1,6 +1,6 @@
 {
   "project": "legal-knowledge-agent",
-  "description": "法律知识库与助手 Agent：基于 LangGraph 构建法律问答 Agent，支持 Ollama 本地模型和 GLM API，支持用户上传 PDF、TXT 等文档构建法律知识库，通过向量检索增强生成法律问题回答；支持多会话、历史消息、流式回答和对话删除。后端采用 Python 3.11.15 + FastAPI + SQLAlchemy 2.0 async（当前 SQLite）+ Chroma，并通过抽象接口为未来切换 MySQL 8.0、Milvus 和其他 LLM Provider 做好架构准备；前端采用 React + TypeScript + Vite + Tailwind CSS + Fetch + React Router，整体交互和视觉风格参考 Codex Web。",
+  "description": "法律知识库与助手 Agent：基于 LangGraph 构建法律问答 Agent，支持 Ollama 本地模型和 GLM API，支持用户上传 PDF、TXT 等文档构建法律知识库，通过向量 + BM25 关键词的混合检索（RRF 融合）增强生成法律问题回答；支持多会话、历史消息、流式回答和对话删除。后端采用 Python 3.11.15 + FastAPI + SQLAlchemy 2.0 async（当前 SQLite）+ Chroma，并通过抽象接口为未来切换 MySQL 8.0、Milvus 和其他 LLM Provider 做好架构准备；前端采用 React + TypeScript + Vite + Tailwind CSS + Fetch + React Router，整体交互和视觉风格参考 Codex Web。",
   "rules": {
     "single_active_feature": true,
     "passing_requires_evidence": true,
@@ -325,6 +325,14 @@
       "status": "passing",
       "evidence": "2026-09-10：改造 backend/app/common/logging.py（stdout + TimedRotatingFileHandler(when=midnight, utc=True, backupCount 可配, encoding=utf-8, delay=True) 双 sink + 日志目录幂等自愈 + OSError 静默降级 + 幂等关闭旧 handler + UTC 毫秒 Z 时间戳 + WARNING→WARN + 敏感键黑名单脱敏 + RequestContextFilter/ContextVar request_id）；新增 backend/app/api/middleware.py（纯 ASGI RequestIdMiddleware：读/生成 x-request-id 并回写响应头，刻意不用 BaseHTTPMiddleware 以免缓冲破坏 SSE 流）；settings.py 新增 log_dir/log_file_name/log_backup_count + resolved_log_dir，log_level 默认改 INFO；main.py 在 create_app 首行 setup_logging(settings) 并注册中间件；新增 backend/tests/conftest.py 把测试日志隔离到系统临时目录；.env.example 与 .gitignore（backend/log/）同步。验证：uv run pytest → 117 passed（基线 106；新增 tests/unit/test_logging.py 9 例：单行 JSON 必需字段/UTC 毫秒 Z/WARNING 归一/service 不重复进 data/敏感键脱敏/request_id 注入与还原/落盘 UTF-8 中文/轮转参数(midnight+backupCount=7+utf-8)/非法日志目录降级为仅 stdout 不抛异常/幂等不叠加 handler；test_settings 新增日志默认值与 resolved_log_dir 锚定；test_api 新增 x-request-id 生成与透传）。真实启动实测（干净环境）：删除 backend/log → uv run uvicorn app.main:app（端口 8011）→ 自动创建 backend/log/app.log，内容为标准单行 JSON（timestamp 形如 2026-09-10T09:37:50.369Z）；带 X-Request-ID: verify-001 请求 /api/health 后，'Health check requested' 与 'uvicorn.access' 两条日志均带 request_id=verify-001；验证后进程已清理、8011 端口已释放。",
       "testedAt": "2026-09-10"
+    },
+    {
+      "id": "BE-028",
+      "name": "RAG 混合检索（BM25 关键词 + 向量，RRF 融合）",
+      "description": "把 RAG 检索从单一向量检索升级为混合检索：新增 KeywordIndex 领域端口与 Bm25KeywordIndex 基础设施实现（jieba 中文分词 + rank_bm25，语料快照 JSON 持久化于 backend/data/）；文档入库时向量库与关键词索引双写、删除时双清；RagService 同时走向量通道与关键词通道，用 Reciprocal Rank Fusion（RRF，k=60）融合两路排序输出最终 top_k；min_score 相似度阈值语义保持不变（仅过滤向量通道弱命中）；HYBRID_SEARCH_ENABLED=false 时可整体回退纯向量检索。",
+      "status": "passing",
+      "evidence": "2026-09-12：domain/repositories/keyword_index.py 定义 KeywordIndex 端口（add_chunks/search/delete_by_document/生命周期）；infrastructure/keyword_index/bm25.py 实现 Bm25KeywordIndex（jieba 分词 + BM25Okapi 打分，词面不相交的 chunk 被排除、小语料 IDF 归零时按命中词数兜底排序，语料快照原子写 backend/data/bm25_index.json，阻塞操作经 asyncio.to_thread + 锁保护）；rag_service.py 新增模块级纯函数 reciprocal_rank_fusion（RRF k=60，多路命中叠加得分天然去重，单路保序）；KnowledgeIngestionService 入库双写（在向量库写入之后复用其生成的 chunk_id）、DocumentService 删除双清（日志新增 keyword_removed_chunks）；containers/main lifespan/settings（HYBRID_SEARCH_ENABLED 默认 true、BM25_INDEX_PATH 锚定 backend/）接线，DDD 边界守护名单加入 jieba/rank_bm25。验证：uv run pytest → 134 passed（基线 117，新增 17：test_keyword_index 7 例、test_rag_fusion 6 例、test_hybrid_retrieval 4 例——双写两路 chunk_id 一致/融合去重降序/双清后两路皆空/无关键词索引时优雅回退）。真实端到端（干净环境 + 真实 uvicorn 8013 + Ollama qwen3.5:4b/nomic-embed-text）：上传专利法 TXT（29 chunk 双写入库，bm25_index.json 可查）→ 流式提问『发明专利权的保护期限是多长时间？』→ sources 事件 4 条先于 delta、回答正确引用『二十年』（第四十二条）→ 消息持久化且 sources 回读一致 → 删除文档后 bm25 快照归零（双清）；检索日志 RAG hybrid retrieval completed 显示 vector_hits=4/keyword_hits=4/top_score≈1/61+1/62（双通道叠加生效）。回退开关实测：HYBRID_SEARCH_ENABLED=false 启动（8014）→ 日志 hybrid_search_enabled=false、无 KeywordIndex initialized、流式问答走纯向量正常。同问题对照观察（单次抽样，非严格对照）：混合模式回答引用『二十年』、纯向量回退模式未引用，BM25 通道对法条词面召回的价值得到真实体现。运维备注：双 uvicorn 实例并存时第二个实例可能因 OpenBLAS 内存分配失败启动崩溃（环境问题，与本功能无关，单实例正常）。",
+      "testedAt": "2026-09-12"
     }
   ]
 }

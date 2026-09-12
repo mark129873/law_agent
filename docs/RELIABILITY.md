@@ -40,6 +40,7 @@
 | `api` | API 层业务异常与未预期异常处理 |
 | `database` | 数据库连接与建表 |
 | `vector_store` | 向量库初始化与读写 |
+| `keyword_index` | BM25 关键词索引初始化、双写与删除（BE-028） |
 | `document` | 文档元数据状态机、上传与删除 |
 | `document_pipeline` | 解析 → 清洗 → 段落切分 Pipeline |
 | `knowledge` | 向量化与入库编排 |

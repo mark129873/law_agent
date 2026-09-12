@@ -87,6 +87,12 @@ class Settings(BaseSettings):
     chroma_persist_dir: str = "data/chroma"
     milvus_uri: str = ""  # 仅 vector_store_provider=milvus 时使用
 
+    # ---- 混合检索（BE-028：BM25 关键词 + 向量，RRF 融合）----
+    # 回退开关：false 时装配层不注入关键词索引，RagService 退化为纯向量检索
+    hybrid_search_enabled: bool = True
+    # BM25 语料快照落点：与 Chroma 同在 data/ 下，干净环境重置时一并清除
+    bm25_index_path: str = "data/bm25_index.json"
+
     # ---- 大模型 Provider ----
     llm_provider: LlmProvider = LlmProvider.OLLAMA
     ollama_base_url: str = "http://127.0.0.1:11434"
@@ -110,6 +116,11 @@ class Settings(BaseSettings):
     def resolved_chroma_persist_dir(self) -> str:
         """Chroma 持久化目录的实际路径（相对路径锚定到 backend/）。"""
         return _anchor_path(self.chroma_persist_dir)
+
+    @property
+    def resolved_bm25_index_path(self) -> str:
+        """BM25 语料快照文件的实际路径（相对路径锚定到 backend/）。"""
+        return _anchor_path(self.bm25_index_path)
 
     @property
     def resolved_log_dir(self) -> str:

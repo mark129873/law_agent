@@ -3,9 +3,36 @@
 ## 当前已验证状态
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
 - 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 117 个自动化测试）；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：无——BE-001~027 与 FE-001~012 全部 passing
+- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 134 个自动化测试）；启动后 `curl http://127.0.0.1:8000/api/health`
+- 当前最高优先级未完成功能：无——BE-001~028 与 FE-001~012 全部 passing
 - 当前 blocker：无
+
+### Session 026（BE-028 RAG 混合检索：BM25 关键词 + 向量，RRF 融合）
+- 日期：2026-09-12
+- 本轮目标：用户要求"将原先的 RAG 检索更改为使用 BM25 的混合检索"
+- 技术决策：
+  - **架构形态**：新增并列检索通道而非改造向量库——KeywordIndex 领域端口（domain/repositories/keyword_index.py，与 VectorStore 端口同构 add/search/delete_by_document）+ Bm25KeywordIndex 基础设施实现（infrastructure/keyword_index/bm25.py，jieba 分词 + rank_bm25 的 BM25Okapi）；RagService 双通道检索后用 RRF（Reciprocal Rank Fusion，k=60）融合
+  - **为什么 RRF 而非加权分数**：BM25 分数与余弦相似度量纲不同不可直接加权；RRF 只用排名，无需调权，对分数分布不敏感；同一 chunk 两路同时命中得分叠加，天然去重且排前（结果 score 改写为 RRF 得分，保持"越大越相关"契约）
+  - **语料持久化**：BM25 语料快照 JSON（backend/data/bm25_index.json，临时文件 + os.replace 原子写），与 Chroma 同目录随干净环境重置一并清除；写入失败降级为 WARN 日志不上抛（向量库已写成功，不能因快照盘写失败把文档打成 failed）；进程内全量重建 BM25（当前规模代价可忽略，换来"模型与语料一致"的结构保证）
+  - **一致性编排**：入库双写（KnowledgeIngestionService，在向量库写入之后——复用 Chroma 生成的 chunk_id，RRF 去重依赖两路 id 一致）、删除双清（DocumentService，日志新增 keyword_removed_chunks）；一致性由这两处唯一编排保证，调用方无感
+  - **小语料 IDF 归零兜底**：BM25Okapi 在语料仅 2 条时所有 IDF 为 0、得分全 0（实测发现）；命中判定改为按词面相交（词面不相交直接排除），排序按 (BM25 分数, 命中词数) 双键兜底，写入顺序稳定
+  - **回退开关**：HYBRID_SEARCH_ENABLED（默认 true）在装配点判断，false 时不注入关键词索引，RagService 优雅降级为纯向量；开关属装配决策，不进业务服务
+  - min_score 语义保持不变：仍只过滤向量通道（融合之前）；DDD 边界守护名单加入 jieba/rank_bm25（关键词检索技术栈锁定在 infrastructure）
+  - 用户可见行为不变（PRODUCT.md 无改动）：sources 事件契约、【来源：文件名】标注、"信息不足"策略全部保持
+- 运行过的验证：
+  - 基线：干净环境（删 backend/data）uv run pytest → 117 passed
+  - `uv run pytest tests -q` → **134 passed**（新增 17：test_keyword_index 7 + test_rag_fusion 6 + test_hybrid_retrieval 4）；分层 unit 61 / integration 64 / api 9
+  - 真实端到端（干净环境，8013 端口，Ollama qwen3.5:4b + nomic-embed-text）：上传专利法 TXT → 29 chunk 双写入库（bm25_index.json 可查、UTF-8 文件名正常）→ 流式提问"发明专利权的保护期限是多长时间？"→ sources 事件 4 条先于 delta → 回答正确引用"二十年"（第四十二条）→ 消息持久化且 sources 回读一致 → DELETE 文档 204 后 bm25 快照归零（双清）；检索日志 `RAG hybrid retrieval completed` 显示 vector_hits=4 / keyword_hits=4 / top_score≈1/61+1/62（双通道叠加生效）
+  - 回退开关实测：HYBRID_SEARCH_ENABLED=false 启动（8014）→ 日志 hybrid_search_enabled=false、无 KeywordIndex initialized → 流式问答纯向量路径正常
+  - 对照观察（单次抽样，非严格对照）：同一问题混合模式回答引用"二十年"、纯向量回退未引用——BM25 对法条词面召回的价值得到真实体现
+  - 验证后进程已清理、端口已释放、backend/data 已重置
+- 已记录证据：feature_list.json BE-028（passing，含完整 evidence）；ARCHITECTURE §1/§2/§3/§4/§6/§9、RELIABILITY service 清单（新增 keyword_index）、.env.example 同步
+- 已知风险或未解决问题：
+  - BM25 语料快照与 Chroma 是两份独立存储：仅靠"同目录、同编排"保持一致，若绕过 API 手工删其一，另一路会残留（文档已注明；单路残留时检索仍优雅降级）
+  - BM25Okapi 每次增删全量重建：当前规模（数百 chunk）无感，知识库到万级 chunk 时需评估增量结构
+  - 双 uvicorn 实例并存时第二个实例可能因 OpenBLAS 内存分配失败启动崩溃（环境问题，与本功能无关，单实例正常）
+  - 既有遗留项不变：MySQL 未启用、无连接池、min_score 默认 0.0
+- 下一步最佳动作：可选产品增强（会话重命名 / 停止按钮 / 深色主题开关 / CORS 收敛 / OllamaProvider 重试）或 MySQL 8.0 接入
 
 ### Session 025（删除非流式问答死代码 send_message + ARCHITECTURE §5 图拓扑图形化）
 - 日期：2026-09-11
