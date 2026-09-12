@@ -18,6 +18,11 @@
 - 运行过的验证：
   - `cd backend && uv run python scripts/export_qa_graph.py` 成功：输出含 __start__/plan/retrieve/generate/verify/__end__ 六节点与全部边（plan→retrieve、generate→verify、retrieve -.replan.-> plan、retrieve -.-> generate 默认分支、verify -.replan/regenerate/end.->），条件边标签与 graph.py 路由语义一致；docs/qa_graph.mmd 写入成功
   - feature_list.json JSON 语法校验通过（uv run python json.load）
+  - 全量测试 `uv run pytest tests -q` → 139 passed（提交后复跑确认）
+  - **真实端到端（API 层）**：干净环境（删 data + reset_milvus）+ LLM_PROVIDER=glm + 真实 Milvus → verify_real_e2e.py 通过：上传专利法 TXT/要点笔记 MD 均 201 ready → 流式提问"发明专利权的保护期限"回答正确引用第四十二条"二十年"并注明来源 → sources 事件推送且持久化 assistant 消息 sources 一致
+  - **浏览器界面实操（IAB，1280x720）**：①侧栏历史会话加载，消息/参考文档展开（5 条来源含文件名与条文）渲染正确；②新对话实时提问：plan 事件渲染"问题拆解（1 个子问题）"折叠列表 → delta 流式出答案 → done 后"参考文档 N"徽标出现，回答正确（十五年/十年）；③复杂问题触发"问题拆解（2 个子问题）"（适用条件/补偿上限各一），回答含结构化列表且引用第四十二条，参考文档 6 条；④知识库页：2 个文档"可检索"、删除文档走页面内二次确认，提示"文档已删除，相关向量数据已同步清理"（BE-029 Milvus 双清生效）；⑤删除会话：二次确认后侧栏移除、回到新对话空态；⑥整页截图检查布局/Markdown 列表/来源徽标渲染正常；⑦前端 npm run build（tsc + vite）通过
+  - 界面测试观察项（低优先级）：输入框 fill() 后立即 Enter 一次未触发发送（疑似 React 受控更新竞态），点击发送按钮始终正常；上传控件依赖文件选择器，IAB 自动化不支持，上传路径由 API E2E 覆盖
+  - 验证后已清理：law_chunks 集合 drop、backend/data 删除、前后端进程停止
 - 已记录证据：feature_list.json BE-031（passing）
 - 已知风险或未解决问题：无（本轮为工具脚本 + 文档，不动业务代码与测试）
 - 下一步最佳动作：OllamaProvider 加重试/降级（Session 028 遗留的最值得做的独立功能）

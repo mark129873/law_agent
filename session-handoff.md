@@ -6,8 +6,11 @@
   - **测试体系**：后端自动化 139 个（2026-09-12 全绿）；其中 test_milvus_vector_store.py 5 例需要真实 Milvus（docker compose up -d），服务不可达时自动跳过，其余保持封闭性。
   - **Agent 已升级为统一 Plan-and-Execute 闭环（BE-030）**：plan（问题拆解子查询）→ retrieve（多子查询混合检索合并去重）→ generate → verify（规则档 + LLM judge groundedness）；verify 依据不足带建议回 plan、表达契约失败回 generate，预算 plan_runs≤2 / generate_runs≤2；SSE 协议新增 plan/regenerating 事件。
   - **图可视化（BE-031）**：`cd backend && uv run python scripts/export_qa_graph.py` 可随时导出问答图（桩依赖建图，零外部服务依赖），Mermaid 写入 docs/qa_graph.mmd 并内嵌 ARCHITECTURE.md §5；--png 可选导出 PNG。
-- 最近一轮实际跑过的验证（2026-09-12，Session 029，BE-031 图可视化导出）：
+- 最近一轮实际跑过的验证（2026-09-12，Session 029，BE-031 图可视化 + 真实 E2E + 浏览器界面实操）：
   - `uv run python scripts/export_qa_graph.py` 成功：六节点 + 全部静态/条件边（replan/regenerate/end 标签）与 graph.py 路由语义一致，docs/qa_graph.mmd 写入成功
+  - 全量 `uv run pytest tests -q` → 139 passed（提交后复跑）
+  - 真实端到端（API 层，GLM + 真实 Milvus + 专利法）：上传 ready → 回答正确引用第四十二条"二十年" → sources 事件与持久化一致（verify_real_e2e.py）
+  - 浏览器界面实操（IAB）：历史会话/参考文档展开、新对话流式问答（plan"问题拆解 1/2 个子问题"→ delta → done 后"参考文档 N"）、知识库删除文档（二次确认 + 向量同步清理提示）、删除会话、整页截图布局检查——全部通过；观察项：fill 后立即 Enter 偶发不触发发送（点发送正常）、IAB 不支持文件选择器故上传路径由 API E2E 覆盖；验证后 law_chunks/data/前后端进程已清理
 - 上一轮实际跑过的验证（2026-09-12，Session 028，BE-030/FE-013 统一规划闭环）：
   - 干净环境（删 backend/data + reset_milvus.py）`uv run pytest tests -q` → **139 passed**（unit 62 / integration 68 / api 9）
   - 前端 `npm run build` 通过
@@ -36,7 +39,7 @@
 - 未验证路径：
   - MySQL 8.0 真实接入（驱动、URL 分支、真实实例集成测试）——只做到"方言无关 + 容器显式拒绝"
   - 连接池化（每请求一会话/连接）——当前仍是单会话
-  - 浏览器 GUI E2E 本轮未截图验证（build 类型检查 + SSE 事件消费 + API 层 E2E 已验证）
+  - 浏览器 GUI E2E 已于 Session 029 补验（真实浏览器实操：历史/流式问答/plan 拆解/sources/删除文档与会话/截图布局检查均通过）；仅"上传控件经文件选择器"的自动化路径未覆盖（IAB 限制，上传由 API E2E 覆盖）
   - Ollama LLM 路径的真实模型 E2E（Ollama 已恢复可用，但本轮 E2E 走 GLM 配置；图闭环行为由集成测试锁定）
   - 本地小模型作 judge 的判分质量未做专项评估（解析失败安全放行，不阻塞问答）
 - 下一轮会话需要注意的风险：
