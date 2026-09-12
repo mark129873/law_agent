@@ -59,6 +59,43 @@ class RagService:
         )
         return results
 
+    async def retrieve_queries(
+        self, queries: list[str], top_k_per_query: int = 4, max_chunks: int = 6
+    ) -> list[RetrievedChunk]:
+        """多子查询检索：逐条检索后按 chunk 合并去重（BE-030）。
+
+        为什么在 Service 层合并而不是向量库层：子查询拆解是规划器
+        的产物，"多路检索 + 去重"是业务编排，存储端口保持单查询
+        契约不变；同一 chunk 被多个子查询命中说明相关度高，
+        保留最高分（RRF 分数跨查询可比性有限，取 max 是保守策略）。
+        合并后按分数排序截断到 max_chunks，控制 Prompt 上下文长度。
+        """
+        per_query: list[list[RetrievedChunk]] = []
+        for query in queries:
+            per_query.append(await self.retrieve(query, top_k=top_k_per_query))
+        merged: dict[tuple, RetrievedChunk] = {}
+        for results in per_query:
+            for result in results:
+                # 合并键：优先存储生成的 chunk_id；兜底 (document_id, chunk_index)
+                # （两者组合在单文档内唯一，不依赖存储实现回填 chunk_id）
+                key = (
+                    result.chunk.chunk_id
+                    or f"{result.chunk.document_id}:{result.chunk.chunk_index}"
+                )
+                existing = merged.get(key)
+                if existing is None or result.score > existing.score:
+                    merged[key] = result
+        ordered = sorted(merged.values(), key=lambda r: r.score, reverse=True)[:max_chunks]
+        logger.info(
+            "RAG multi-query retrieval completed",
+            extra={
+                "service": "rag",
+                "query_count": len(queries),
+                "merged_hit_count": len(ordered),
+            },
+        )
+        return ordered
+
     async def build_context(self, query: str, top_k: int = 4) -> str:
         """检索并格式化为 LLM 上下文文本；知识库无相关内容时返回空串。
 

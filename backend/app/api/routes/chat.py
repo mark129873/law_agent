@@ -61,15 +61,21 @@ async def chat_stream(payload: ChatStreamRequest, request: Request) -> Streaming
 
     async def event_stream():
         # 领域事件 → SSE 帧的映射只存在这一份：
-        # - sources：RAG 检索有命中时先于 delta 出现一次（参考文档数据源）
+        # - plan：规划器产出的子查询列表（BE-030，重规划时再次出现）
+        # - sources：RAG 检索有命中时出现（参考文档数据源，重规划后以最新一批为准）
         # - delta：逐段增量文本
+        # - regenerating：verify 打回重生成（BE-030，前端据此清空已渲染增量）
         # - 正常结束追加 done 事件（带会话 id，前端可据此刷新会话列表）
         # - 任何异常（模型超时/服务内部错误）都转为 error 事件后正常
         #   结束流——已经推给前端的内容仍然有效，剩余部分以错误提示收尾
         try:
             async for event in chat_service.stream_answer(payload.conversation_id, payload.question):
-                if event.type == "sources":
+                if event.type == "plan":
+                    yield _sse_event({"type": "plan", "sub_queries": list(event.sub_queries)})
+                elif event.type == "sources":
                     yield _sse_event({"type": "sources", "sources": list(event.sources)})
+                elif event.type == "regenerating":
+                    yield _sse_event({"type": "regenerating"})
                 else:
                     yield _sse_event({"type": "delta", "content": event.content})
             yield _sse_event({"type": "done", "conversation_id": payload.conversation_id})

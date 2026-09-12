@@ -225,33 +225,47 @@ query ──┬─▶ embed_query ──────────────┐
 ## 5. Agent 工作流（LangGraph）
 
 ### 面向对象结构
-- `AgentNode`（抽象基类）+ `RetrieveNode` / `GenerateNode`（命令模式）：`__call__` 使节点实例可直接注册进图，新增节点继承基类即可（多态）。
-- `QaGraphBuilder`（建造者模式）：按是否有 RAG 装配不同拓扑，装配规则集中一处。
+- `AgentNode`（抽象基类）+ `PlanNode` / `RetrieveNode` / `GenerateNode` / `VerifyNode`（命令模式）：`__call__` 使节点实例可直接注册进图，新增节点继承基类即可（多态）。
+- `QaGraphBuilder`（建造者模式）：统一装配 Plan-and-Execute 闭环（`rag=None` 时跳过 retrieve 节点），装配与条件边规则集中一处。
 - `LangGraphQaWorkflow`（适配器模式）：显式继承并实现 `QaWorkflow` 领域端口，langgraph 引擎封在适配器之内。
-- `create_qa_workflow(llm, rag=None)`：模块对外唯一入口（工厂），rag 为 None 时为基础工作流。
+- `create_qa_workflow(llm, rag=None, planner=None)`：模块对外唯一入口（工厂）；planner 缺省时用主 LLM 规划。
 
-### 图拓扑（LangGraph 图的图形化表示）
+### 图拓扑（LangGraph 图的图形化表示，BE-030）
 
-由 `QaGraphBuilder.build()` 装配；`rag=None` 时为基础工作流（`START` 直连 `generate`）：
+所有问题统一走规划闭环，不区分简单/复杂（简单问题 = 规划器输出单子查询透传原问题的退化情形）：
 
 ```text
-RAG 工作流：
+              START
+                │
+                ▼
+          ┌───────────┐  输出子查询列表；推 plan 事件
+          │   plan    │  （重规划时也推，前端据此清空重画）
+          └─────┬─────┘
+                ▼
+          ┌───────────┐  逐子查询混合检索 → 按 chunk id 合并去重
+          │ retrieve  │  → 推 sources 事件（契约不变：一次、先于全部 delta）
+          └─────┬─────┘
+                │  空命中且 plan 预算未用尽 → 回 plan（带"改写子查询"反馈）
+                ▼
+          ┌───────────┐  组装 Prompt → LLM 流式生成；逐 token 推 delta
+          │ generate  │  verify_feedback 非空时附带修正指令
+          └─────┬─────┘
+                ▼
+          ┌───────────┐  规则档：引用来源存在性 / BE-017 信息不足声明 / 退化检查
+          │  verify   │  judge 档：LLM groundedness 判分 → {verdict, feedback, unsupported}
+          └─────┬─────┘
+                │  依据不足(grounding) 且预算未用尽 → 回 plan（带无依据结论建议）
+                │  表达契约失败(contract) 且预算未用尽 → 回 generate（推 regenerating 事件）
+              pass
+                ▼
+               END
 
-        START
-          │
-          ▼
-    ┌───────────┐
-    │ retrieve  │   RagService 检索 → 写状态 {context}；命中时推 sources 事件
-    └─────┬─────┘
-          ▼
-    ┌───────────┐
-    │ generate  │   组装 Prompt → LLM 流式生成 → 写状态 {answer, history}；逐 token 推 delta 事件
-    └─────┬─────┘
-          ▼
-         END
-
-基础工作流：START → generate → END
+预算：plan_runs ≤ 2、generate_runs ≤ 2；超限输出当前答案并记 WARN 日志（防死循环）
+基础工作流（rag=None）：START → plan → generate → verify → END（无 retrieve 节点与 sources 事件）
 ```
+
+- 为什么 verify 打回分两路：依据不足是"检索缺口"，重规划补检索比重写答案有效；表达契约失败（如未按格式声明信息不足）是"生成缺口"，直接带反馈重生成更便宜。
+- judge 判分解析失败视为 pass（记 WARN 日志，不阻塞主流程）——判分是增强而非闸门，判分器自身不可靠时不得阻断问答。
 
 ### 法律问答策略（agent/prompts.py，BE-017）
 1. 优先依据知识库上下文回答，并注明来源文件；
@@ -269,6 +283,8 @@ RAG 工作流：
 | `DB_PROVIDER` | sqlite / mysql | sqlite |
 | `VECTOR_STORE_PROVIDER` | milvus（当前唯一已启用 Provider） | milvus |
 | `LLM_PROVIDER` | ollama / glm | ollama |
+| `PLANNER_PROVIDER` | follow / ollama / glm | follow（跟随 LLM_PROVIDER，BE-030） |
+| `PLANNER_MODEL` | 模型名 | 空（用所选 Provider 的默认模型，BE-030） |
 | `LLM_ENABLE_THINKING` | true / false | false（关闭思考模式） |
 | `MILVUS_URI` | — | http://127.0.0.1:19530 |
 | `HOST` / `PORT` / `LOG_LEVEL` | — | 0.0.0.0 / 8000 / INFO |
@@ -301,12 +317,17 @@ RAG 工作流：
 
 Chat 流式协议（SSE，`data: {json}\n\n`）：
 ```json
+{"type": "plan", "sub_queries": ["子问题1", "子问题2"]}
 {"type": "sources", "sources": [{"source": "文件名", "content": "命中内容"}]}
 {"type": "delta", "content": "增量文本"}
+{"type": "regenerating"}
 {"type": "done", "conversation_id": "..."}
 {"type": "error", "message": "..."}
 ```
-- `sources` 事件最多出现一次且先于全部 delta：仅当 RAG 检索有命中时由 retrieve 节点发出（数组顺序即展示序号）；基础工作流或检索无命中时不出现，前端据此决定是否渲染「参考文档」按钮。
+- 事件顺序（BE-030 统一规划闭环）：`plan`（每次规划一次，重规划时再次出现）→ `sources`（检索有命中时一次）→ `delta`（每轮生成一批）→（verify 打回时 `regenerating` 后重复 sources→delta）→ `done`/`error`。
+- `plan` 事件携带规划器产出的子查询列表（数组顺序即执行顺序），前端可在生成中展示问题拆解；旧前端未处理时静默忽略（向后兼容）。
+- `regenerating` 事件表示 verify 校验未通过、回答将重新生成，前端须清空已渲染的增量内容（否则会出现两版回答拼接）。
+- `sources` 事件在每轮检索后出现：重规划补检索时会再次出现，前端以最新一批为准；持久化的 sources 只记录最终生成所用的那批。
 - 参考来源随回答持久化（messages 表 `sources` JSON 列，旧库启动时自动 ALTER 迁移），`GET /api/conversations/{id}/messages` 原样返回，历史消息同样可展示参考文档。
 CORS 当前 `allow_origins=["*"]`（开发态，生产需收敛）。OpenAPI 文档：`http://127.0.0.1:8000/docs`。
 
@@ -332,18 +353,18 @@ npm run build                                      # tsc 类型检查 + 生产�
 - **首次启动自愈（BE-026）**：`backend/data/` 不存在时无需人工创建——数据库实现在建连接前创建 SQLite 文件的父目录；Milvus 侧集合不存在时由首次入库懒建，均为幂等操作，重复启动安全。
 - 日志：单行 JSON（timestamp/level/service/request_id/message/data），同时输出 stdout 与 `backend/log/app.log`（按天轮转、默认保留 30 天），等级由 `LOG_LEVEL` 控制，默认 INFO；每个 HTTP 响应带 `x-request-id`；注意事项见 docs/RELIABILITY.md。
 
-## 9. 测试体系（四层，2026-09-12 BE-029 Milvus 迁移后全量验证通过）
+## 9. 测试体系（四层，2026-09-12 BE-030 统一规划闭环后全量验证通过）
 
 | 层级 | 位置 | 数量 | 验证内容 |
 |------|------|------|---------|
-| 单元 | tests/unit/ | 50（~4s） | 纯逻辑与抽象层，无外部 IO：DI 容器、配置、DDD 边界守护（AST 扫描）、日志契约（落盘/轮转/脱敏/降级/幂等/request_id：BE-027）、回答策略、Database/VectorStore 混合检索契约（内存 Fake）/LLM 端口契约、文档 Pipeline、TXT/PDF 解析器、健康检查 |
-| 集成 | tests/integration/（除 API） | 60（~35s） | 真实 SQLite（SQLAlchemy ORM 实现的持久化/外键级联/事务提交与回滚/建表幂等/旧库补列迁移/来源往返）、首次启动自愈（数据目录不存在时自动建库、干净环境重置后可再次启动：BE-026）、ORM 契约（出口只返回领域实体、`expire_on_commit=False` 提交后可读、identity map 更新一致、批量删除无脏读、回滚撤销属性更新）、排序契约（乱序落库后由服务层按时间排序 + 同时间稳定性）、**真实 Milvus 混合检索（稠密+稀疏双通道/RRF 融合/min_score range 过滤/按文档删除/跨连接持久化；服务不可达时跳过：BE-029）**、LLM Provider 协议（MockTransport）、Embedding 入库、RAG 检索、Agent 图（含流式走图）、对话服务 |
-| 接口 | tests/integration/test_api.py | 9（~11s） | 完整应用（临时 SQLite + 内存 Fake 向量库 + Fake LLM，不启动真实服务）：会话 CRUD、统一错误结构、SSE 流式协议（delta/done + 持久化）、文档上传/删除/非法格式拒绝、x-request-id 生成与透传（BE-027） |
+| 单元 | tests/unit/ | 62（~3s） | 纯逻辑与抽象层，无外部 IO：DI 容器、配置、DDD 边界守护（AST 扫描）、日志契约（落盘/轮转/脱敏/降级/幂等/request_id：BE-027）、**规划子查询/判分 verdict 解析容错（BE-030）**、回答策略、Database/VectorStore 混合检索契约（内存 Fake）/LLM 端口契约、文档 Pipeline、TXT/PDF 解析器、健康检查 |
+| 集成 | tests/integration/（除 API） | 68（~50s） | 真实 SQLite（SQLAlchemy ORM 实现的持久化/外键级联/事务提交与回滚/建表幂等/旧库补列迁移/来源往返）、首次启动自愈（数据目录不存在时自动建库、干净环境重置后可再次启动：BE-026）、ORM 契约（出口只返回领域实体、`expire_on_commit=False` 提交后可读、identity map 更新一致、批量删除无脏读、回滚撤销属性更新）、排序契约（乱序落库后由服务层按时间排序 + 同时间稳定性）、**真实 Milvus 混合检索（稠密+稀疏双通道/RRF 融合/min_score range 过滤/按文档删除/跨连接持久化；服务不可达时跳过：BE-029）**、LLM Provider 协议（MockTransport）、Embedding 入库、RAG 检索、**Agent 统一规划闭环（plan 透传/多子查询合并/grounding 打回 plan/contract 打回 generate/预算降级/事件顺序：BE-030）**、对话服务 |
+| 接口 | tests/integration/test_api.py | 9（~11s） | 完整应用（临时 SQLite + 内存 Fake 向量库 + Fake LLM，不启动真实服务）：会话 CRUD、统一错误结构、SSE 流式协议（**plan 先行**/delta/done + 持久化）、文档上传/删除/非法格式拒绝、x-request-id 生成与透传（BE-027） |
 | 端到端 | scripts/verify_real_e2e.py 等（手工运行） | 3 个脚本 | 真实 uvicorn + 真实 Ollama/Milvus/LLM：真实法律文档上传→向量化入库→流式 RAG 问答引用原文→消息持久化；reset_milvus.py 供干净环境重置 |
 
 数据：tests/data_source/ 为 RAG 测试数据源（真实法律文档：专利法 TXT + MD）。
 
-- 自动化测试合计 119 个，`uv run pytest` 全量运行，无需任何外部服务（Fake/确定性实现遵循领域端口，与生产实现互换验证同一契约：InMemoryDatabase、InMemoryVectorStore、DeterministicEmbedding、ScriptedLLM）；**唯一例外**是 tests/integration/test_milvus_vector_store.py 需要真实 Milvus（docker compose up -d），服务不可达时自动跳过并在 reason 中注明。
+- 自动化测试合计 139 个，`uv run pytest` 全量运行，无需任何外部服务（Fake/确定性实现遵循领域端口，与生产实现互换验证同一契约：InMemoryDatabase、InMemoryVectorStore、DeterministicEmbedding、ScriptedLLM）；**唯一例外**是 tests/integration/test_milvus_vector_store.py 需要真实 Milvus（docker compose up -d），服务不可达时自动跳过并在 reason 中注明。
 - 端到端脚本依赖真实外部服务（本机 Ollama 模型、GLM 密钥），不纳入 pytest 自动化，保持自动化测试的封闭性与可重复性；运行方式见脚本头部说明，验证结论记录于 feature_list.json 各功能 evidence。
 
 ## 10. 扩展点与预留

@@ -22,6 +22,9 @@ def test_default_settings_use_current_generation_providers(monkeypatch: pytest.M
     """默认配置应指向当前 Provider 代际：sqlite + milvus + ollama。"""
     # 测试进程可能由 conftest 注入 LOG_DIR（隔离测试产物），此处清除以断言真实默认值
     monkeypatch.delenv("LOG_DIR", raising=False)
+    # pymilvus 导入时会 load_dotenv 把 backend/.env 写进进程环境（BE-029 引入），
+    # .env 的 LLM_PROVIDER 会污染 _env_file=None 的默认值断言，一并清除
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     assert settings.db_provider is DbProvider.SQLITE
     assert settings.vector_store_provider is VectorStoreProvider.MILVUS

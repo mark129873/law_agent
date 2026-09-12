@@ -35,6 +35,8 @@ interface AppContextValue {
   isStreaming: boolean
   /** 流式/提问过程的错误信息；null 表示无错误 */
   streamError: string | null
+  /** 规划器产出的问题拆解（BE-030）；null 表示当前没有可展示的拆解 */
+  subQueries: string[] | null
 
   // —— 会话动作 ——
   refreshConversations: () => Promise<void>
@@ -137,6 +139,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamError, setStreamError] = useState<string | null>(null)
+  // 问题拆解（BE-030）：plan 事件携带，仅在生成过程中展示，结束后清空
+  const [subQueries, setSubQueries] = useState<string[] | null>(null)
 
   const clearStreamError = useCallback(() => setStreamError(null), [])
 
@@ -148,6 +152,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       streamingRef.current = true
       setIsStreaming(true)
       setStreamError(null)
+      setSubQueries(null)
 
       // 本地乐观消息的临时 id 声明在 try 外：catch 里才能清理它们
       const tempUserId = `local-user-${Date.now()}`
@@ -184,14 +189,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
             onSources: (received) => {
               sources = received
             },
+            onPlan: (received) => {
+              // 规划器的问题拆解：生成中展示，重新规划时会更新
+              setSubQueries(received)
+            },
+            onRegenerating: () => {
+              // 校验未通过、回答重写（BE-030）：清空已渲染的增量内容，
+              // 避免两版回答拼接；后续 delta 从头开始追加
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, content: '' } : m)),
+              )
+            },
             onDone: () => {
               // 换掉临时 id（移除流式光标标记），本地内容与后端持久化内容一致，无需重新拉取
               setMessages((prev) =>
                 prev.map((m) => (m.id === assistantId ? { ...m, id: `assistant-${Date.now()}`, sources } : m)),
               )
+              setSubQueries(null) // 拆解只在生成过程中展示
             },
             onError: (message) => {
               setStreamError(message)
+              setSubQueries(null)
               // 出错时移除空的助手占位；已有部分内容的保留展示。
               // 后端"异常中断不落库"，所以刷新后看到的与本地一致。
               setMessages((prev) => prev.filter((m) => m.id !== assistantId || m.content !== ''))
@@ -281,6 +299,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       isStreaming,
       streamError,
       clearStreamError,
+      subQueries,
       documents,
       refreshDocuments,
       uploadDocument,
@@ -302,6 +321,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       isStreaming,
       streamError,
       clearStreamError,
+      subQueries,
       documents,
       refreshDocuments,
       uploadDocument,

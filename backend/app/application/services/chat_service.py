@@ -66,9 +66,21 @@ class ChatService:
             async for event in self._graph.astream(
                 {"question": question, "history": history}, stream_mode="custom"
             ):
-                if event.type == "sources":
-                    # 参考来源：记录供持久化，并原样向下游转发（先于全部 delta）
+                if event.type == "plan":
+                    # 规划拆解：仅向下游转发（前端展示子问题），不参与聚合
+                    yield event
+                elif event.type == "sources":
+                    # 参考来源：重规划补检索时会再次出现，保留最新一批
+                    # （持久化的 sources 只记录最终生成所用的那批）
                     sources = [dict(item) for item in event.sources]
+                    yield event
+                elif event.type == "regenerating":
+                    # verify 打回重生成：重置增量聚合，避免两版回答拼接
+                    logger.info(
+                        "Chat answer regenerating",
+                        extra={"service": "chat", "conversation_id": conversation_id},
+                    )
+                    collected = []
                     yield event
                 else:
                     collected.append(event.content)

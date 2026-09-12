@@ -23,9 +23,15 @@ from app.main import create_app
 
 
 class ScriptedLLM(LLMProvider):
-    """脚本化 Fake LLM：chat 返回固定答案，stream 按词产出。"""
+    """脚本化 Fake LLM：按系统提示分流（规划/判分走 chat，生成走 stream）。
 
-    def __init__(self, answer: str = "依据知识库：试用期最长不超过六个月。") -> None:
+    生成答案可经 answer 属性按用例替换；规划默认输出空串
+    （节点侧解析失败 → 透传原问题），判分默认输出 pass。
+    """
+
+    _JUDGE_PASS = '{"verdict": "pass", "feedback": "", "unsupported": []}'
+
+    def __init__(self, answer: str = "知识库中暂无相关依据，建议咨询专业律师。") -> None:
         self._answer = answer
         self.received_messages: list[list[ChatMessage]] = []
 
@@ -35,7 +41,12 @@ class ScriptedLLM(LLMProvider):
 
     async def chat(self, messages: list[ChatMessage], params: LlmParams | None = None) -> str:
         self.received_messages.append(messages)
-        return self._answer
+        system = messages[0].content
+        from app.agent.prompts import PLANNER_SYSTEM_PROMPT
+
+        if system == PLANNER_SYSTEM_PROMPT:
+            return ""  # 解析失败 → 规划节点透传原问题
+        return self._JUDGE_PASS  # 判分（verify 节点）：默认通过
 
     async def stream(self, messages: list[ChatMessage], params: LlmParams | None = None) -> AsyncIterator[str]:
         self.received_messages.append(messages)
@@ -125,7 +136,7 @@ def test_messages_and_delete(client: TestClient) -> None:
 
 
 def test_chat_stream_sse_protocol(client: TestClient) -> None:
-    """SSE 协议：delta 事件增量到达，done 收尾，完整回答已持久化。
+    """SSE 协议：plan 先行、delta 事件增量到达，done 收尾，完整回答已持久化。
 
     知识库为空（未上传文档）：不应出现 sources 事件——这是
     "无检索命中 → 无参考文档"的协议契约。
@@ -144,24 +155,28 @@ def test_chat_stream_sse_protocol(client: TestClient) -> None:
 
     assert events[-1]["type"] == "done"
     assert all(e["type"] != "sources" for e in events)  # 空知识库无来源事件
+    assert events[0]["type"] == "plan"  # BE-030：规划事件先行
+    assert events[0]["sub_queries"] == ["试用期多长？"]
     deltas = [e["content"] for e in events if e["type"] == "delta"]
-    assert "".join(deltas) == "依据知识库：试用期最长不超过六个月。"
+    assert "".join(deltas) == "知识库中暂无相关依据，建议咨询专业律师。"
 
     # 流结束后回答必须已持久化；无检索命中 → 来源为 null
     messages = client.get(f"/api/conversations/{conversation_id}/messages").json()
     assert [m["role"] for m in messages] == ["user", "assistant"]
-    assert messages[1]["content"] == "依据知识库：试用期最长不超过六个月。"
+    assert messages[1]["content"] == "知识库中暂无相关依据，建议咨询专业律师。"
     assert messages[1]["sources"] is None
 
 
 def test_chat_stream_emits_sources_and_persists_them(client: TestClient) -> None:
-    """RAG 检索有命中：sources 事件先于 delta 出现，且随回答持久化可回读。"""
+    """RAG 检索有命中：plan→sources→delta 顺序出现，且随回答持久化可回读。"""
     # 上传文档入知识库（测试容器的 RagService 使用确定性 embedding，不触网）
     upload = client.post(
         "/api/documents",
         files={"file": ("劳动法.txt", "劳动合同违约金条款：违反服务期约定应支付违约金。".encode("utf-8"))},
     )
     assert upload.status_code == 201
+    # 有依据场景的生成答案须满足校验契约（注明来源），否则 verify 会打回重生成
+    client.llm._answer = "依据知识库：试用期最长不超过六个月。【来源：劳动法.txt】"  # type: ignore[attr-defined]
 
     conversation_id = client.post("/api/conversations", json={"title": "来源流"}).json()["id"]
     with client.stream(

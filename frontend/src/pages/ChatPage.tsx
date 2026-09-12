@@ -21,6 +21,7 @@ export default function ChatPage() {
     isStreaming,
     streamError,
     clearStreamError,
+    subQueries,
     sendQuestion,
   } = useAppStore()
 
@@ -93,7 +94,12 @@ export default function ChatPage() {
               <p className="text-center text-xs text-ink-faint">正在加载历史消息…</p>
             )}
             {messages.map((message) => (
-              <MessageBlock key={message.id} message={message} streaming={message.id.startsWith('streaming-')} />
+              <MessageBlock
+                key={message.id}
+                message={message}
+                streaming={message.id.startsWith('streaming-')}
+                subQueries={message.id.startsWith('streaming-') ? subQueries : null}
+              />
             ))}
           </div>
         )}

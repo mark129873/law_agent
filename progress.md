@@ -1,11 +1,33 @@
 # progress.md -- 会话进度日志
 
 ## 当前已验证状态
-- 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
-- 标准启动路径：`cd backend && docker compose up -d（Milvus）&& uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 119 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：无——BE-001~029 与 FE-001~012 全部 passing（BE-007/008/028 置 deprecated）
+- 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`（当前分支 feature/auto_coder）
+- 标准启动路径：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
+- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 139 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
+- 当前最高优先级未完成功能：无——BE-001~030 与 FE-001~013 全部 passing（BE-007/008/028 置 deprecated）
 - 当前 blocker：无
+
+### Session 028（BE-030/FE-013 统一 Plan-and-Execute 问答闭环：plan→retrieve→generate→verify + verify 反馈环）
+- 日期：2026-09-12
+- 本轮目标：应用户要求重构 Agent 图为统一规划闭环（不区分简单/复杂问题），verify 不合格可带建议打回 plan；一期到位（后端图 + SSE 协议 + 前端适配）
+- 技术决策：
+  - 统一拓扑：plan→retrieve→generate→verify；verify 三态判定（pass/grounding/contract）——依据不足带"无依据结论清单"回 plan 重规划，表达契约失败回 generate 重写，检索空命中回 plan（吸收 Self-RAG 改写逻辑）；预算 plan_runs≤2 / generate_runs≤2，超限放行 + WARN（防死循环）；简单问题 = planner 单子查询透传原问题的退化情形，无需问题分类路由
+  - verify 两档：规则档（引用来源存在性、BE-017 信息不足声明、空回答）零成本先行；judge 档（groundedness，chat() 输出 JSON {verdict,feedback,unsupported}）做语义校验；judge 解析失败视为 pass——判分是增强不是闸门
+  - PLANNER_PROVIDER 配置（follow/ollama/glm，默认 follow）+ PLANNER_MODEL：任务分解对模型能力最敏感，可强模型规划 + 快模型执行；containers._build_planner 工厂
+  - RetrieveNode 多子查询合并：RagService.retrieve_queries 逐子查询 hybrid_search，按 chunk_id（兜底 document_id:chunk_index）合并保留最高分，截断 top6；sources 事件契约保持（有命中才推、先于当轮 delta；重规划后以最新一批为准）
+  - SSE 协议扩展 plan/regenerating 事件（向后兼容，字段只增不改）；QaStreamEvent 值对象扩展 sub_queries 字段；chat_service 收到 regenerating 重置 delta 聚合；前端 subQueries 状态 + 生成中展示「问题拆解」
+  - 关键修复：①retrieve 同时挂静态边与条件边 → replan 时 generate 在同一超级步并发执行写 verify_feedback 抛 InvalidUpdateError（删静态边）；②_route_after_retrieve 未查规划预算，空知识库会无限重规划（补 plan_runs 检查）；③test_settings 默认值断言补 LLM_PROVIDER delenv（pymilvus load_dotenv 副作用 Session 027 已记录，.env 换 glm 后该测试也暴露）
+- 运行过的验证：
+  - 干净环境（删 backend/data + reset_milvus.py）`uv run pytest tests -q` → **139 passed**（unit 62 / integration 68 / api 9；新增 test_agent_parsing 13 例，test_agent_graph 重写 19 例：单子查询退化/多子查询合并去重/grounding 打回建议传递/contract 打回 generate/预算耗尽降级/plan→sources→delta 事件顺序/regenerating 后 delta 重置拼接/ainvoke 同路径，test_api 适配 plan 先行断言）
+  - 前端 `npm run build`（tsc 类型检查 + vite）通过
+  - 真实 E2E（当前 .env 配置 LLM_PROVIDER=glm + 真实 Milvus + 专利法上传）：plan 事件携带 2 个真实子查询（"发明专利权的保护期限"/"发明专利权保护期限的法律依据"）→ sources 6 条合并 → **规则档 contract 触发一次 regenerating（首轮回答未注明来源）** → 第二轮正确引用第四十二条"二十年" → user/assistant 持久化且 sources 一致；验证后进程与数据（data + law_chunks 集合）已清理
+- 已记录证据：feature_list.json BE-030 / FE-013（passing，含上述细节）；ARCHITECTURE §5（目标图与预算）/§6（PLANNER_* 配置）/§7（SSE 协议）/§9（139）同步；PRODUCT.md 第 3 节新增拆解展示与自动校验重生成行为
+- 已知风险或未解决问题：
+  - 每次问答 LLM 调用 3~4 次（plan 1 + generate 1~2 + judge 1）：本地 Ollama 部署延迟明显增加，建议 PLANNER_PROVIDER=glm；**OllamaProvider 仍无重试**，统一 plan 后调用次数变多，无重试风险放大——下一轮最值得做的独立功能
+  - Ollama LLM 路径的真实模型 E2E 未跑（本轮 E2E 走 GLM 配置；图的闭环行为已由集成测试锁定）
+  - judge 用主模型（跟随 LLM_PROVIDER），本地小模型判分质量未做专项评估（解析失败会安全放行）；verify 规则档依赖回答含"【来源："字面，与 Prompt 约定强耦合，模型换风格可能误判（judge 档兜底）
+  - 浏览器 GUI 层本轮未截图验证（build 类型检查 + SSE 事件消费已验证）
+- 下一步最佳动作：OllamaProvider 加重试/降级；或可选产品增强（会话重命名/停止按钮/CORS 收敛）或 MySQL 8.0 接入
 
 ### Session 027（BE-029 向量库全面迁移到 Milvus hybrid_search）
 - 日期：2026-09-12

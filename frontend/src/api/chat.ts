@@ -12,8 +12,12 @@ interface ChatStreamParams {
 /** 流式问答回调：每收到一段增量、来源、结束信号或错误就通知调用方 */
 interface ChatStreamHandlers {
   onDelta: (content: string) => void
-  /** RAG 检索有命中时收到一次参考来源（先于全部增量，顺序即展示序号） */
+  /** RAG 检索有命中时收到参考来源（先于当轮增量，顺序即展示序号；重规划后以最新一批为准） */
   onSources?: (sources: ReferenceSource[]) => void
+  /** 规划器产出的问题拆解（BE-030：生成开始前收到，重新规划时会再次收到） */
+  onPlan?: (subQueries: string[]) => void
+  /** 校验未通过、回答将重新生成（BE-030：调用方应清空已渲染的增量内容） */
+  onRegenerating?: () => void
   onDone: (conversationId: string) => void
   onError: (message: string) => void
 }
@@ -21,7 +25,8 @@ interface ChatStreamHandlers {
 /**
  * 提交问题并持续消费流式回答。
  * 协议（docs/ARCHITECTURE.md 第 7 节）：响应体由若干条 "data: {json}\n\n" 组成，
- * json 的 type 字段区分 sources（参考来源）/ delta（增量文本）/ done（结束）/ error（出错）。
+ * json 的 type 字段区分 plan（问题拆解）/ sources（参考来源）/ delta（增量文本）/
+ * regenerating（重生成）/ done（结束）/ error（出错）。
  */
 export async function streamChat(params: ChatStreamParams, handlers: ChatStreamHandlers): Promise<void> {
   const res = await fetch('/api/chat/stream', {
@@ -58,6 +63,8 @@ export async function streamChat(params: ChatStreamParams, handlers: ChatStreamH
         const event = JSON.parse(line.slice(5)) as ChatStreamEvent
         if (event.type === 'delta') handlers.onDelta(event.content)
         else if (event.type === 'sources') handlers.onSources?.(event.sources)
+        else if (event.type === 'plan') handlers.onPlan?.(event.sub_queries)
+        else if (event.type === 'regenerating') handlers.onRegenerating?.()
         else if (event.type === 'done') handlers.onDone(event.conversation_id)
         else if (event.type === 'error') handlers.onError(event.message)
       } catch {

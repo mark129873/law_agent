@@ -55,6 +55,19 @@ class LlmProvider(str, Enum):
     GLM = "glm"
 
 
+class PlannerProvider(str, Enum):
+    """规划器 Provider 枚举（BE-030）。
+
+    FOLLOW 表示跟随 LLM_PROVIDER 使用同一个模型实例；
+    任务分解对模型能力最敏感，本地小模型规划质量不稳，
+    可显式指定 glm 用强模型规划、本地模型执行。
+    """
+
+    FOLLOW = "follow"
+    OLLAMA = "ollama"
+    GLM = "glm"
+
+
 class Settings(BaseSettings):
     """应用运行配置。
 
@@ -102,6 +115,13 @@ class Settings(BaseSettings):
     # 思考模式开关：qwen3.5/glm-4.5 等推理模型默认会先"思考"再回答，
     # 显著拉长首字延迟（真实环境曾达 30~40s）；默认关闭以获得即时流式输出
     llm_enable_thinking: bool = False
+
+    # ---- 规划器 Provider（BE-030 统一规划工作流）----
+    # 规划节点把问题拆解为子查询，对模型能力最敏感；
+    # follow=复用主 LLM Provider 实例，ollama/glm=按主 Provider 的
+    # 连接配置构造独立实例（模型名可用 planner_model 单独覆盖）
+    planner_provider: PlannerProvider = PlannerProvider.FOLLOW
+    planner_model: str = ""  # 空串表示用所选 Provider 的默认对话模型
 
     @property
     def resolved_sqlite_db_path(self) -> str:

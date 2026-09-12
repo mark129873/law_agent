@@ -341,6 +341,22 @@
       "status": "passing",
       "evidence": "2026-09-12：MilvusVectorStore 完整实现（MilvusClient + asyncio.to_thread/Lock；VARCHAR 主键 chunk_id；consistency_level=Strong 保证入库即可检索——默认 Bounded 下新数据不可见且 hybrid_search 空结果触发 Milvus 已知缺陷 #50969 误报 unsupported ID type，实测确认；min_score 经稠密 AnnSearchRequest 的 range search(radius) 实现，min_score<=0 时不加 radius 因 COSINE range 为严格大于会误滤 0 分结果——均经真实服务实测确认）；VectorStore 端口 search 升级为 hybrid_search(query_text, query_embedding, top_k, min_score)；删除 chroma.py、KeywordIndex 端口、Bm25KeywordIndex、reciprocal_rank_fusion 与 chromadb/jieba/rank-bm25 依赖，uv add pymilvus 3.0.1；knowledge_service/document_service 双写双清编排消失；settings 移除 CHROMA 枚举/chroma_persist_dir/bm25_index_path/HYBRID_SEARCH_ENABLED（默认 milvus），新增回归断言 vector_store_provider=chroma 被拒绝；tests/fakes.py 共享内存 Fake（余弦+子串词面+RRF 近似）支撑封闭性测试；新增真实 Milvus 集成测试 test_milvus_vector_store.py 5 例（双通道命中/RRF 降序/min_score 过滤/按文档删除/跨连接持久化，服务不可达时 skip，独立集合名测后清理）；scripts/reset_milvus.py 干净环境重置。docker-compose.yml 无需更新（etcd+minio+milvusdb/milvus:v3.0.0 standalone 已就绪）。验证：干净环境（删 backend/data + reset_milvus）uv run pytest → 119 passed（含真实 Milvus 5 例）；真实端到端（uvicorn 8013 + GLM glm-4.5-air + Ollama nomic-embed-text + 真实 Milvus）：上传专利法 TXT 201 ready → 流式提问『发明专利权的保护期限是多长时间？』→ sources 事件 4 条先于 delta 且来源含第四十二条『二十年』→ 回答正确引用『发明专利权的期限为二十年，自申请日起计算』→ 消息持久化且 sources 回读一致 → 删除文档 204 后 Milvus 集合 count(*)=0；检索日志 RAG hybrid retrieval completed hit_count=4/top_score≈0.032（双通道 RRF 叠加）。运维备注：Ollama 0.32.0 llama-server 崩溃问题依旧（上传后提问 500），LLM 侧以 GLM Provider 等价验证，与本迁移无关。",
       "testedAt": "2026-09-12"
+    },
+    {
+      "id": "BE-030",
+      "name": "统一 Plan-and-Execute 问答工作流（Plan→Retrieve→Generate→Verify 闭环）",
+      "description": "LangGraph 图重构为统一规划闭环：plan 节点（PlannerProvider 可独立配置，默认跟随 LLM_PROVIDER）把问题拆解为子查询（单一明确问题退化为单子查询透传）；retrieve 节点逐子查询混合检索后按 chunk id 合并去重；generate 生成回答；verify 节点两档校验——规则档（引用来源存在性、BE-017 信息不足声明、退化检查）+ LLM judge 档（groundedness，列出无依据结论作为建议）。反馈环：依据不足带建议回 plan 重规划、表达契约失败回 generate 重生成、检索空命中回 plan；plan_runs≤2、generate_runs≤2 预算防死循环，超限输出当前答案并 WARN。SSE 新增 plan/regenerating 事件（向后兼容）。",
+      "status": "passing",
+      "evidence": "2026-09-12：统一 Plan-and-Execute 闭环落地——agent/nodes.py 新增 PlanNode（planner.chat + JSON 解析容错，失败透传原问题）与 VerifyNode（规则档：引用来源存在性/BE-017 信息不足声明/退化检查 + LLM judge 档 groundedness，三态 verdict pass/grounding/contract，解析失败视为 pass，打回前推 regenerating 事件），RetrieveNode 改为逐子查询检索合并去重（RagService.retrieve_queries，按 chunk_id/(document_id,chunk_index) 合并保留最高分，截断 top6），graph.py 条件边路由（retrieve 空命中→plan 受预算约束，verify grounding→plan / contract→generate），预算 plan_runs≤2 / generate_runs≤2 超限放行并 WARN；PLANNER_PROVIDER/PLANNER_MODEL 配置（containers._build_planner，follow 复用主 LLM）；QaStreamEvent 扩展 plan/regenerating 事件；chat_service 重置聚合与透传，chat 路由 SSE 转发。关键修复：①retrieve 同时挂静态边与条件边导致并发写 verify_feedback 抛 InvalidUpdateError（删静态边）；②空命中重规划未查预算会死循环（条件边补 plan_runs 检查）；③pymilvus 导入 load_dotenv 污染进程环境暴露 test_settings 默认值断言（delenv 窄修复）。验证：干净环境 uv run pytest → 139 passed（unit 62 / integration 68 / api 9，新增 test_agent_parsing 13 例，test_agent_graph 重写为 19 例：单子查询退化/多子查询合并去重/grounding 打回 plan 建议传递/contract 打回 generate/预算耗尽降级放行/plan→sources→delta 事件顺序/regenerating 后 delta 重置拼接/ainvoke 同路径）；前端 npm run build 通过；真实 E2E（GLM 配置 + Milvus + 专利法上传）：plan 事件携带 2 个真实子查询 → sources 6 条合并 → 规则档 contract 触发一次 regenerating（首轮未注明来源）→ 第二轮正确引用第四十二条二十年 → user/assistant 持久化且 sources 一致。",
+      "testedAt": "2026-09-12"
+    },
+    {
+      "id": "FE-013",
+      "name": "前端规划过程与重生成适配",
+      "description": "ChatStreamEvent 类型扩展 plan（携带子查询列表）与 regenerating；api/chat.ts 分发新增 onPlan/onRegenerating 可选回调；AppContext 生成中展示问题拆解列表；regenerating 到达时清空当前 assistant 增量内容避免两版回答拼接。",
+      "status": "passing",
+      "evidence": "2026-09-12：types/index.ts ChatStreamEvent 扩展 plan/regenerating；api/chat.ts 分发新增 onPlan/onRegenerating 可选回调（旧事件处理不变）；AppContext 新增 subQueries 状态（plan 更新、done/error/新提问清空），onRegenerating 清空流式助手消息内容避免两版拼接；ChatPage 向流式 MessageBlock 传 subQueries，MessageBlock 生成中渲染「问题拆解（N 个子问题）」折叠列表。验证：npm run build（tsc 类型检查 + vite）通过；真实 E2E 中 SSE 事件序列 plan→sources→delta→regenerating→sources→delta→done 全部正确消费。",
+      "testedAt": "2026-09-12"
     }
   ]
 }

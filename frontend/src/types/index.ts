@@ -54,6 +54,8 @@ export interface ApiErrorBody {
 /** 流式问答接口的 SSE 事件（即每条 data: {...} 里的 JSON） */
 export type ChatStreamEvent =
   | { type: 'delta'; content: string } // 一小段增量回答文本
-  | { type: 'sources'; sources: ReferenceSource[] } // RAG 检索命中：参考文档来源（先于 delta 出现一次）
+  | { type: 'sources'; sources: ReferenceSource[] } // RAG 检索命中：参考文档来源（先于当轮 delta）
+  | { type: 'plan'; sub_queries: string[] } // 规划器产出的问题拆解（BE-030，重规划时再次出现）
+  | { type: 'regenerating' } // 校验未通过，回答将清空重写（BE-030）
   | { type: 'done'; conversation_id: string } // 回答正常结束
   | { type: 'error'; message: string } // 服务端处理出错

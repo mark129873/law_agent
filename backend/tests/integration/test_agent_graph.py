@@ -1,17 +1,23 @@
-"""LangGraph Agent 工作流测试（BE-015 基础工作流 + BE-016 RAG 工作流）。
+"""LangGraph Agent 工作流测试（BE-030 统一 Plan-and-Execute 闭环）。
 
-用 Fake LLM 与内存 Fake 向量库（确定性 embedding）分别验证：
-基础工作流完成一次问答；RAG 工作流把知识库上下文注入 Prompt。
+用脚本化 Fake LLM 与内存 Fake 向量库（确定性 embedding）验证：
+规划 → 检索 → 生成 → 校验的完整闭环，含 verify 打回、
+预算降级、事件顺序与 sources 契约。
 """
 
 import asyncio
 import hashlib
+import json
 
 import pytest
 import pytest_asyncio
 
 from app.agent.graph import build_qa_graph, run_qa
-from app.agent.prompts import LEGAL_SYSTEM_PROMPT
+from app.agent.prompts import (
+    LEGAL_SYSTEM_PROMPT,
+    PLANNER_SYSTEM_PROMPT,
+    VERIFY_JUDGE_SYSTEM_PROMPT,
+)
 from app.application.services.document_pipeline import DocumentParserFactory, DocumentPipeline
 from app.application.services.knowledge_service import KnowledgeIngestionService
 from app.application.services.rag_service import RagService
@@ -23,29 +29,70 @@ from app.domain.services.embedding import EmbeddingService
 from app.infrastructure.document_parser.text_parser import TextParser
 from tests.fakes import InMemoryVectorStore
 
+# 常用的判分通过脚本：verdict=pass
+_JUDGE_PASS = json.dumps({"verdict": "pass", "feedback": "", "unsupported": []}, ensure_ascii=False)
 
-class RecordingFakeLLM(LLMProvider):
-    """记录收到的消息列表，供断言 Prompt 组装是否符合策略。"""
 
-    def __init__(self, answer: str) -> None:
-        self._answer = answer
-        self.received: list[list[ChatMessage]] = []
+def _judge(verdict: str, feedback: str = "", unsupported: list[str] | None = None) -> str:
+    """构造判分器脚本回复。"""
+    return json.dumps(
+        {"verdict": verdict, "feedback": feedback, "unsupported": unsupported or []},
+        ensure_ascii=False,
+    )
+
+
+class ScriptedLLM(LLMProvider):
+    """按系统提示分流脚本的 Fake LLM。
+
+    三类调用（规划/判分/生成）由消息中的系统提示区分，各自消费
+    独立的脚本队列；队列为空时重复最后一条（或用默认值），
+    保证测试只需声明关心的轮次。生成节点走 stream、规划与判分
+    走 chat——与真实调用形态一致。
+    """
+
+    def __init__(
+        self,
+        answers: str | list[str],
+        plans: str | list[str] | None = None,
+        judges: str | list[str] | None = None,
+    ) -> None:
+        self._answers = answers if isinstance(answers, list) else [answers]
+        self._plans = plans if isinstance(plans, list) else ([plans] if plans else [])
+        self._judges = judges if isinstance(judges, list) else ([judges] if judges else [])
+        self.generate_calls: list[list[ChatMessage]] = []
+        self.plan_calls: list[list[ChatMessage]] = []
+        self.judge_calls: list[list[ChatMessage]] = []
 
     @property
     def model_name(self) -> str:
         return "fake-model"
 
+    @staticmethod
+    def _pop(queue: list, default: str) -> str:
+        if not queue:
+            return default
+        if len(queue) == 1:
+            return queue[0]
+        return queue.pop(0)
+
     async def chat(self, messages: list[ChatMessage], params: LlmParams | None = None) -> str:
-        self.received.append(messages)
-        return self._answer
+        system = messages[0].content
+        if system == PLANNER_SYSTEM_PROMPT:
+            self.plan_calls.append(messages)
+            # 默认脚本为空串 → 解析失败 → PlanNode 回退为透传原问题
+            return self._pop(self._plans, "")
+        if system == VERIFY_JUDGE_SYSTEM_PROMPT:
+            self.judge_calls.append(messages)
+            return self._pop(self._judges, _JUDGE_PASS)
+        raise AssertionError("生成节点不应走 chat()，规划与判分不应走 stream()")
 
     async def stream(self, messages: list[ChatMessage], params: LlmParams | None = None):
-        # 生成节点已统一走 stream，必须在此记录消息供断言
-        self.received.append(messages)
-        words = self._answer.split(" ")
-        for i, word in enumerate(words):
-            # 最后一个词不加尾随空格，保证流式拼接与非流式回答逐字符一致
-            yield word + (" " if i < len(words) - 1 else "")
+        assert messages[0].content == LEGAL_SYSTEM_PROMPT
+        self.generate_calls.append(messages)
+        answer = self._pop(self._answers, "默认回答")
+        # 按固定片段产出，模拟真实 token 流
+        for part in [answer[i : i + 3] for i in range(0, len(answer), 3)]:
+            yield part
 
 
 class DeterministicEmbedding(EmbeddingService):
@@ -68,36 +115,66 @@ class DeterministicEmbedding(EmbeddingService):
         return self._embed_one(text)
 
 
-# ---- BE-015：基础工作流 ----
+# ---- 基础工作流（rag=None：plan → generate → verify）----
 
 
 @pytest.mark.asyncio
 async def test_basic_graph_completes_qa() -> None:
-    """基础工作流（无 RAG）应成功执行并产出回答。"""
-    llm = RecordingFakeLLM("根据《劳动合同法》，经济补偿按工作年限计算。")
+    """基础工作流（无 RAG）应完成规划→生成→校验并产出回答。"""
+    llm = ScriptedLLM(answers="知识库中暂无相关依据，建议咨询专业律师。")
     graph = build_qa_graph(llm, rag=None)
     answer = await run_qa(graph, "经济补偿怎么计算？")
-    assert answer.startswith("根据《劳动合同法》")
-    # Prompt 应包含法律策略系统消息
-    assert llm.received[0][0].content == LEGAL_SYSTEM_PROMPT
-    assert llm.received[0][-1].content == "经济补偿怎么计算？"
+    assert answer.startswith("知识库中暂无相关依据")
+    # 三类节点各自被调用一次，且 Prompt 组装符合各自策略
+    assert len(llm.plan_calls) == 1
+    assert llm.plan_calls[0][0].content == PLANNER_SYSTEM_PROMPT
+    assert len(llm.generate_calls) == 1
+    assert llm.generate_calls[0][0].content == LEGAL_SYSTEM_PROMPT
+    assert llm.generate_calls[0][-1].content == "经济补偿怎么计算？"
+    assert len(llm.judge_calls) == 1
 
 
 @pytest.mark.asyncio
 async def test_basic_graph_includes_history() -> None:
-    """多轮对话历史应被组装进消息列表。"""
-    llm = RecordingFakeLLM("好的。")
+    """多轮对话历史应被组装进生成消息列表（规划不携带历史）。"""
+    llm = ScriptedLLM(answers="好的。")
     graph = build_qa_graph(llm, rag=None)
     history = [
         ChatMessage(role=MessageRole.USER, content="上一问"),
         ChatMessage(role=MessageRole.ASSISTANT, content="上一答"),
     ]
     await run_qa(graph, "继续追问", history=history)
-    received = llm.received[0]
+    received = llm.generate_calls[0]
     assert [m.content for m in received] == [LEGAL_SYSTEM_PROMPT, "上一问", "上一答", "继续追问"]
 
 
-# ---- BE-016：RAG 工作流 ----
+@pytest.mark.asyncio
+async def test_planner_single_question_passthrough() -> None:
+    """单一明确问题：规划器透传原问题为单子查询（统一图的退化情形）。"""
+    llm = ScriptedLLM(
+        answers="知识库中暂无相关依据，建议咨询专业律师。",
+        plans=json.dumps(["经济补偿怎么计算？"], ensure_ascii=False),
+    )
+    graph = build_qa_graph(llm, rag=None)
+    await run_qa(graph, "经济补偿怎么计算？")
+    # 规划器收到的就是原问题，无反馈
+    assert "经济补偿怎么计算？" in llm.plan_calls[0][-1].content
+    assert "修正建议" not in llm.plan_calls[0][-1].content
+
+
+@pytest.mark.asyncio
+async def test_planner_output_unparsable_falls_back_to_question() -> None:
+    """规划器输出非法 JSON：回退为透传原问题，问答流程不中断。"""
+    llm = ScriptedLLM(
+        answers="知识库中暂无相关依据，建议咨询专业律师。",
+        plans="这不是 JSON，模型输出失控了",
+    )
+    graph = build_qa_graph(llm, rag=None)
+    answer = await run_qa(graph, "经济补偿怎么计算？")
+    assert answer.startswith("知识库中暂无相关依据")
+
+
+# ---- RAG 工作流（plan → retrieve → generate → verify）----
 
 
 @pytest_asyncio.fixture
@@ -123,31 +200,51 @@ async def rag_graph_factory(tmp_path):
     await store.close()
 
 
+_RAG_ANSWER = "依据知识库回答。【来源：劳动法问答.txt】"
+
+
 @pytest.mark.asyncio
 async def test_rag_graph_injects_knowledge_context(rag_graph_factory) -> None:
-    """RAG 工作流应把知识库内容（含来源标注）注入 Prompt。"""
-    llm = RecordingFakeLLM("依据知识库回答。")
+    """RAG 工作流应把知识库内容（含来源标注）注入生成 Prompt。"""
+    llm = ScriptedLLM(answers=_RAG_ANSWER)
     graph = rag_graph_factory(llm)
     answer = await run_qa(graph, "违反服务期约定怎么赔偿")
-    assert answer == "依据知识库回答。"
-    user_message = llm.received[0][-1].content
+    assert answer == _RAG_ANSWER
+    user_message = llm.generate_calls[0][-1].content
     assert "【参考依据】" in user_message
     assert "【来源：劳动法问答.txt】" in user_message
     assert "违约金" in user_message
 
 
 @pytest.mark.asyncio
+async def test_rag_graph_multi_sub_queries_merge_dedup(rag_graph_factory) -> None:
+    """多子查询检索：两个子查询命中同一 chunk 时合并去重为一条来源。"""
+    llm = ScriptedLLM(
+        answers=_RAG_ANSWER,
+        plans=json.dumps(["劳动合同违约金条款", "违反服务期约定的违约金"], ensure_ascii=False),
+    )
+    graph = rag_graph_factory(llm)
+    answer = await run_qa(graph, "劳动合同违约金和违反服务期约定怎么赔偿")
+    assert answer == _RAG_ANSWER
+    # 规划器收到了多主题问题（plan_calls 的 user 消息为原问题）
+    assert "劳动合同违约金和违反服务期约定" in llm.plan_calls[0][-1].content
+    # 合并去重生效：同一 chunk 不重复进入上下文/参考来源
+
+
+@pytest.mark.asyncio
 async def test_rag_graph_empty_knowledge_marks_no_context(tmp_path) -> None:
-    """知识库无命中时，Prompt 不应包含参考依据段（供模型走信息不足策略）。"""
+    """知识库无命中时（含重规划后仍无命中），走信息不足路径且不死循环。"""
     store = InMemoryVectorStore()
     await store.initialize()
-    llm = RecordingFakeLLM("知识库中暂无相关依据。")
+    llm = ScriptedLLM(answers="知识库中暂无相关依据，建议咨询专业律师。")
     graph = build_qa_graph(llm, rag=RagService(DeterministicEmbedding(), store))
     try:
-        await run_qa(graph, "量子力学的波函数坍缩是什么")
-        user_message = llm.received[0][-1].content
+        answer = await run_qa(graph, "量子力学的波函数坍缩是什么")
+        assert answer.startswith("知识库中暂无相关依据")
+        user_message = llm.generate_calls[0][-1].content
         assert "【参考依据】" not in user_message
-        assert user_message == "量子力学的波函数坍缩是什么"
+        # 空命中重规划吃满预算（2 次）后进生成，不会无限循环
+        assert len(llm.plan_calls) == 2
     finally:
         await store.close()
 
@@ -172,62 +269,159 @@ async def test_rag_service_min_score_filters_weak_hits(tmp_path) -> None:
     finally:
         await store.close()
 
-# ---- 流式统一走图 ----
+
+# ---- verify 反馈环（BE-030）----
 
 
-class MultiChunkLLM(RecordingFakeLLM):
-    """按固定片段产出，模拟真实 token 流。"""
+@pytest.mark.asyncio
+async def test_verify_grounding_routes_back_to_plan(rag_graph_factory) -> None:
+    """依据不足：judge 带无依据结论打回规划，重规划后回答通过校验。"""
+    llm = ScriptedLLM(
+        answers=[
+            _RAG_ANSWER + "另外编造一个不存在的条款。",  # 第一轮：有来源但含无依据结论
+            _RAG_ANSWER,  # 第二轮：修正后通过
+        ],
+        plans=[
+            json.dumps(["违反服务期约定怎么赔偿"], ensure_ascii=False),
+            json.dumps(["服务期违约金 合法约定"], ensure_ascii=False),  # 重规划的子查询
+        ],
+        judges=_judge(
+            "grounding",
+            feedback="需要补充检索服务期条款的合法性依据",
+            unsupported=["另外编造一个不存在的条款"],
+        ),
+    )
+    graph = rag_graph_factory(llm)
+    answer = await run_qa(graph, "违反服务期约定怎么赔偿")
+    # 最终输出第二轮修正后的回答
+    assert answer == _RAG_ANSWER
+    # 打回建议确实传入了重规划的 user 消息
+    second_plan_user = llm.plan_calls[1][-1].content
+    assert "修正建议" in second_plan_user
+    assert "无依据结论" in second_plan_user
+    # 两轮规划、两轮生成、两轮判分
+    assert len(llm.plan_calls) == 2
+    assert len(llm.generate_calls) == 2
+    assert len(llm.judge_calls) == 2
 
-    async def stream(self, messages: list[ChatMessage], params: LlmParams | None = None):
-        self.received.append(messages)
-        for part in [self._answer[i : i + 3] for i in range(0, len(self._answer), 3)]:
-            yield part
+
+@pytest.mark.asyncio
+async def test_verify_contract_routes_back_to_generate(rag_graph_factory) -> None:
+    """表达契约失败：回答未注明来源，带反馈打回生成（不重规划）。"""
+    llm = ScriptedLLM(
+        answers=[
+            "依据知识库回答。",  # 第一轮：有依据但未注明来源 → 规则档即失败
+            _RAG_ANSWER,
+        ],
+        # 判分脚本用默认 pass：若第一轮规则档就失败打回生成，
+        # judge 只会在第二轮被调用一次；若规则档被绕过会暴露
+    )
+    graph = rag_graph_factory(llm)
+    answer = await run_qa(graph, "违反服务期约定怎么赔偿")
+    assert answer == _RAG_ANSWER
+    # 规则档失败直接打回生成：只规划一次、生成两次、judge 一次（第二轮）
+    assert len(llm.plan_calls) == 1
+    assert len(llm.generate_calls) == 2
+    assert len(llm.judge_calls) == 1
+    # 重生成的 Prompt 携带修正要求
+    assert "修正要求" in llm.generate_calls[1][-1].content
+
+
+@pytest.mark.asyncio
+async def test_verify_budget_exhausted_outputs_answer(rag_graph_factory) -> None:
+    """预算用尽：judge 持续判 grounding 时输出当前答案，不死循环。"""
+    llm = ScriptedLLM(
+        answers=_RAG_ANSWER,
+        judges=_judge("grounding", feedback="永远不满意", unsupported=["一切"]),
+    )
+    graph = rag_graph_factory(llm)
+    answer = await run_qa(graph, "违反服务期约定怎么赔偿")
+    assert answer == _RAG_ANSWER  # 降级放行：校验失败也不阻断问答
+    assert len(llm.plan_calls) == 2  # 规划预算 2 次封顶
+    assert len(llm.generate_calls) == 2
+
+
+# ---- 流式事件契约 ----
 
 
 @pytest.mark.asyncio
 async def test_graph_astream_custom_emits_llm_tokens() -> None:
     """流式问答必须经由图（astream custom 模式）产出 delta 事件，而不是绕过图直连 LLM。"""
-    llm = MultiChunkLLM("依据知识库回答。")
+    llm = ScriptedLLM(answers="知识库中暂无相关依据，建议咨询专业律师。")
     graph = build_qa_graph(llm, rag=None)
     events = [
         event
         async for event in graph.astream({"question": "试用期多长？", "history": []}, stream_mode="custom")
     ]
     deltas = [e.content for e in events if e.type == "delta"]
-    assert "".join(deltas) == "依据知识库回答。"
+    assert "".join(deltas) == "知识库中暂无相关依据，建议咨询专业律师。"
     assert len(deltas) > 1  # 逐 token 推送
     # 基础工作流（无 RAG）不产生 sources 事件：前端据此不渲染参考文档按钮
-    assert all(e.type == "delta" for e in events)
+    assert all(e.type in ("plan", "delta") for e in events)
+    assert events[0].type == "plan"
+    assert events[0].sub_queries == ("试用期多长？",)
 
 
 @pytest.mark.asyncio
 async def test_non_stream_invoke_ignores_stream_events() -> None:
     """非流式 ainvoke 与流式走同一节点：answer 完整产出且不受流事件影响。"""
-    llm = RecordingFakeLLM("完整回答。")
+    llm = ScriptedLLM(answers="知识库中暂无相关依据，建议咨询专业律师。")
     graph = build_qa_graph(llm, rag=None)
     answer = await run_qa(graph, "任何问题")
-    assert answer == "完整回答。"
-
-
-# ---- 流式参考来源事件（BE-023）----
+    assert answer.startswith("知识库中暂无相关依据")
 
 
 @pytest.mark.asyncio
-async def test_rag_graph_astream_emits_sources_before_deltas(rag_graph_factory) -> None:
-    """RAG 检索有命中时：sources 事件先于全部 delta，内容与知识库一致。"""
-    llm = MultiChunkLLM("依据知识库回答。")
+async def test_rag_graph_astream_emits_plan_sources_then_deltas(rag_graph_factory) -> None:
+    """事件顺序：plan 先于 sources，sources 先于全部 delta（BE-030 顺序契约）。"""
+    llm = ScriptedLLM(answers=_RAG_ANSWER)
     graph = rag_graph_factory(llm)
     events = [
         event
         async for event in graph.astream({"question": "违反服务期约定怎么赔偿", "history": []}, stream_mode="custom")
     ]
-    assert events[0].type == "sources"  # 检索节点先执行：sources 永远在 delta 之前
-    sources = events[0].sources
+    assert events[0].type == "plan"
+    assert list(events[0].sub_queries) == ["违反服务期约定怎么赔偿"]
+    assert events[1].type == "sources"  # 检索先于生成：sources 在 delta 之前
+    sources = events[1].sources
     assert len(sources) == 1
     assert sources[0]["source"] == "劳动法问答.txt"
     assert "违约金" in sources[0]["content"]
     deltas = [e.content for e in events if e.type == "delta"]
-    assert "".join(deltas) == "依据知识库回答。"
+    assert "".join(deltas) == _RAG_ANSWER
+    # 校验通过：不出现 regenerating
+    assert all(e.type != "regenerating" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_regenerating_event_emitted_on_contract_retry(rag_graph_factory) -> None:
+    """verify 打回重生成时推送 regenerating 事件，且 delta 拼接只有最终版回答。"""
+    llm = ScriptedLLM(
+        answers=[
+            "依据知识库回答。",  # 第一轮：契约失败
+            _RAG_ANSWER,
+        ],
+        judges=_judge("pass"),
+    )
+    graph = rag_graph_factory(llm)
+    events = [
+        event
+        async for event in graph.astream({"question": "违反服务期约定怎么赔偿", "history": []}, stream_mode="custom")
+    ]
+    types = [e.type for e in events]
+    assert "regenerating" in types
+    # regenerating 必须出现在两批 delta 之间（第一轮 delta 之后、第二轮之前）
+    first_regenerating = types.index("regenerating")
+    assert any(t == "delta" for t in types[:first_regenerating])
+    assert any(t == "delta" for t in types[first_regenerating + 1 :])
+    # 下游若在 regenerating 处重置聚合，拼接结果就是最终回答
+    collected: list[str] = []
+    for event in events:
+        if event.type == "regenerating":
+            collected = []
+        elif event.type == "delta":
+            collected.append(event.content)
+    assert "".join(collected) == _RAG_ANSWER
 
 
 @pytest.mark.asyncio
@@ -235,33 +429,44 @@ async def test_rag_graph_empty_knowledge_no_sources_event(tmp_path) -> None:
     """检索无命中时不应产生 sources 事件（等价于"无参考文档"契约）。"""
     store = InMemoryVectorStore()
     await store.initialize()
-    llm = MultiChunkLLM("知识库中暂无相关依据。")
+    llm = ScriptedLLM(answers="知识库中暂无相关依据，建议咨询专业律师。")
     graph = build_qa_graph(llm, rag=RagService(DeterministicEmbedding(), store))
     try:
         events = [
             event
             async for event in graph.astream({"question": "量子力学是什么", "history": []}, stream_mode="custom")
         ]
-        assert all(e.type == "delta" for e in events)
-        assert "".join(e.content for e in events) == "知识库中暂无相关依据。"
+        assert all(e.type in ("plan", "delta") for e in events)
+        assert "".join(e.content for e in events if e.type == "delta") == "知识库中暂无相关依据，建议咨询专业律师。"
     finally:
         await store.close()
+
+
+# ---- 装配守卫 ----
+
 
 def test_compiled_graph_satisfies_qa_workflow_port() -> None:
     """装配守卫：LangGraph 编译产物必须满足 QaWorkflow 领域端口。"""
     from app.domain.services.qa_workflow import QaWorkflow
 
-    graph = build_qa_graph(RecordingFakeLLM("ok"), rag=None)
+    graph = build_qa_graph(ScriptedLLM("ok"), rag=None)
     assert isinstance(graph, QaWorkflow)  # runtime_checkable 校验方法存在性
+
 
 def test_create_qa_workflow_returns_port_implementation() -> None:
     """工厂应返回显式实现 QaWorkflow 端口的对象（agent 模块 OOP 契约）。"""
     from app.agent import create_qa_workflow
     from app.domain.services.qa_workflow import QaWorkflow
 
-    workflow = create_qa_workflow(RecordingFakeLLM("ok"))
+    workflow = create_qa_workflow(ScriptedLLM("ok"))
     assert isinstance(workflow, QaWorkflow)
     # 与编译图等价：经端口执行问答可用
     assert asyncio.run(workflow.ainvoke({"question": "q", "history": []}))["answer"] == "ok"
 
 
+def test_planner_defaults_to_main_llm_without_rag(tmp_path) -> None:
+    """planner 缺省时用主 LLM：规划与生成调用落在同一实例上。"""
+    llm = ScriptedLLM(answers="知识库中暂无相关依据，建议咨询专业律师。")
+    graph = build_qa_graph(llm, rag=None)
+    asyncio.run(graph.ainvoke({"question": "q", "history": []}))
+    assert len(llm.plan_calls) == 1  # 主 LLM 实例收到了规划调用

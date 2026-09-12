@@ -13,10 +13,12 @@ from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.services.qa_workflow import QaWorkflow
 
 
-def create_qa_workflow(llm: LLMProvider, rag=None) -> QaWorkflow:
-    """构建问答工作流（rag 为 None 时为基础工作流，无知识库检索）。
+def create_qa_workflow(llm: LLMProvider, rag=None, planner: LLMProvider | None = None) -> QaWorkflow:
+    """构建问答工作流（BE-030 统一规划闭环）。
 
     为什么返回类型标注为端口：调用方（装配点）只需知道拿到的是
     QaWorkflow 实现，LangGraph 与建造细节被封禁在本模块内部。
+    planner 为 None 时用主 LLM 规划；rag 为 None 时为基础工作流
+    （无知识库检索环节）。
     """
-    return LangGraphQaWorkflow(QaGraphBuilder(llm, rag).build())
+    return LangGraphQaWorkflow(QaGraphBuilder(llm, rag, planner).build())

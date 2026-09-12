@@ -10,6 +10,8 @@ interface MessageBlockProps {
   message: Message
   /** 该消息是否正在流式生成中（末尾显示闪烁光标） */
   streaming?: boolean
+  /** 规划器的问题拆解（BE-030）：仅生成中的助手消息展示 */
+  subQueries?: string[] | null
 }
 
 /**
@@ -71,7 +73,7 @@ function ReferencePanel({ sources }: { sources: ReferenceSource[] }) {
   )
 }
 
-export default function MessageBlock({ message, streaming = false }: MessageBlockProps) {
+export default function MessageBlock({ message, streaming = false, subQueries = null }: MessageBlockProps) {
   // 用户消息：右侧气泡，限制最大宽度防止长问题占满整行；保持纯文本（whitespace-pre-wrap）
   if (message.role === 'user') {
     return (
@@ -90,6 +92,22 @@ export default function MessageBlock({ message, streaming = false }: MessageBloc
   // 助手消息：左侧平铺 + Markdown 渲染；流式光标放在内容之后
   return (
     <div className="text-sm leading-relaxed text-ink">
+      {/* 问题拆解（BE-030）：仅生成中且规划器已产出时展示，
+          让用户了解回答正在依据哪些子问题组织；回答完成后消失 */}
+      {streaming && subQueries && subQueries.length > 0 && (
+        <div className="mb-2 rounded-xl border border-line bg-elevated px-3 py-2">
+          <p className="text-[11px] font-medium text-ink-faint">
+            问题拆解（{subQueries.length} 个子问题）
+          </p>
+          <ol className="mt-1 list-decimal space-y-0.5 pl-4">
+            {subQueries.map((query, index) => (
+              <li key={index} className="text-xs leading-relaxed text-ink-soft">
+                {query}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
       <Markdown
         components={{
           // 给常见元素补充与整体风格一致的间距（Markdown 默认渲染无样式）
