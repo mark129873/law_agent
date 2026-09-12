@@ -21,7 +21,7 @@ class AgentState(TypedDict, total=False):
 
     question: str
     history: list[ChatMessage]
-    context: str  # RAG 检索上下文；基础工作流中为空串
+    context: str  # RAG 检索上下文；知识库空命中时为空串（走信息不足策略）
     answer: str
     # ---- BE-030 Plan-and-Execute 闭环 ----
     sub_queries: list[str]  # 规划器产出的子查询（简单问题为 [原问题]）

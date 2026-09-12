@@ -226,9 +226,9 @@ query ──┬─▶ embed_query ──────────────┐
 
 ### 面向对象结构
 - `AgentNode`（抽象基类）+ `PlanNode` / `RetrieveNode` / `GenerateNode` / `VerifyNode`（命令模式）：`__call__` 使节点实例可直接注册进图，新增节点继承基类即可（多态）。
-- `QaGraphBuilder`（建造者模式）：统一装配 Plan-and-Execute 闭环（`rag=None` 时跳过 retrieve 节点），装配与条件边规则集中一处。
+- `QaGraphBuilder`（建造者模式）：统一装配 Plan-and-Execute 闭环（rag 为必选依赖，检索节点永远在图中），装配与条件边规则集中一处。
 - `LangGraphQaWorkflow`（适配器模式）：显式继承并实现 `QaWorkflow` 领域端口，langgraph 引擎封在适配器之内。
-- `create_qa_workflow(llm, rag=None, planner=None)`：模块对外唯一入口（工厂）；planner 缺省时用主 LLM 规划。
+- `create_qa_workflow(llm, rag, planner=None)`：模块对外唯一入口（工厂）；rag 必选（知识库检索是问答的固有环节），planner 缺省时用主 LLM 规划。
 
 ### 图拓扑（LangGraph 图的图形化表示，BE-030）
 
@@ -261,7 +261,6 @@ query ──┬─▶ embed_query ──────────────┐
                END
 
 预算：plan_runs ≤ 2、generate_runs ≤ 2；超限输出当前答案并记 WARN 日志（防死循环）
-基础工作流（rag=None）：START → plan → generate → verify → END（无 retrieve 节点与 sources 事件）
 ```
 
 - 为什么 verify 打回分两路：依据不足是"检索缺口"，重规划补检索比重写答案有效；表达契约失败（如未按格式声明信息不足）是"生成缺口"，直接带反馈重生成更便宜。

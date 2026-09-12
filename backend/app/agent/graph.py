@@ -5,7 +5,7 @@
 - `LangGraphQaWorkflow`（适配器模式）显式实现 QaWorkflow 领域端口，
   把 langgraph 引擎封在适配器之内——引擎可替换而端口不变。
 
-BE-030：统一 Plan-and-Execute 闭环，plan → retrieve? → generate → verify，
+BE-030：统一 Plan-and-Execute 闭环，plan → retrieve → generate → verify，
 verify 据判定与预算条件回跳 plan / generate（见 ARCHITECTURE.md §5）。
 """
 
@@ -41,14 +41,14 @@ class QaGraphBuilder:
     （透传原问法），与复杂问题共用同一拓扑——省去问题分类路由，
     也不存在"分类错误把复杂问题送进简单路径"的失效模式。
 
-    rag 为 None 时（基础工作流）跳过 retrieve：规划仍然执行
-    （对问答无害且保持单一拓扑心智模型），但没有任何 sources 事件。
+    rag 是必选依赖：知识库检索是问答的固有环节，不提供
+    "无知识库"的退化拓扑（知识库为空由 retrieve 空命中路径承接）。
     """
 
     def __init__(
         self,
         llm: LLMProvider,
-        rag: RagService | None = None,
+        rag: RagService,
         planner: LLMProvider | None = None,
     ) -> None:
         self._llm = llm
@@ -59,39 +59,28 @@ class QaGraphBuilder:
     def build(self) -> CompiledStateGraph:
         builder = StateGraph(AgentState)
         builder.add_node("plan", PlanNode(self._planner))
+        builder.add_node("retrieve", RetrieveNode(self._rag))
+        builder.add_node("generate", GenerateNode(self._llm))
+        builder.add_node("verify", VerifyNode(self._llm))
         builder.add_edge(START, "plan")
-        if self._rag is not None:
-            builder.add_node("retrieve", RetrieveNode(self._rag))
-            builder.add_node("generate", GenerateNode(self._llm))
-            builder.add_node("verify", VerifyNode(self._llm))
-            builder.add_edge("plan", "retrieve")
-            builder.add_edge("generate", "verify")
-            # 注意：retrieve 的出边只保留条件边——若同时保留静态边
-            # retrieve→generate，条件边选 replan 时 generate 会在同一
-            # 超级步并发执行，两个节点都写 verify_feedback 触发
-            # InvalidUpdateError（并发写冲突）
-            # 检索空命中（知识库无相关内容）→ 回规划改写子查询再试一轮；
-            # 预算用尽时带空 context 进 generate，走 BE-017"信息不足"路径
-            builder.add_conditional_edges(
-                "retrieve",
-                self._route_after_retrieve,
-                {"replan": "plan", "generate": "generate"},
-            )
-            builder.add_conditional_edges(
-                "verify",
-                self._route_after_verify,
-                {"replan": "plan", "regenerate": "generate", "end": END},
-            )
-        else:
-            builder.add_node("generate", GenerateNode(self._llm))
-            builder.add_node("verify", VerifyNode(self._llm))
-            builder.add_edge("plan", "generate")
-            builder.add_edge("generate", "verify")
-            builder.add_conditional_edges(
-                "verify",
-                self._route_after_verify,
-                {"replan": "plan", "regenerate": "generate", "end": END},
-            )
+        builder.add_edge("plan", "retrieve")
+        builder.add_edge("generate", "verify")
+        # 注意：retrieve 的出边只保留条件边——若同时保留静态边
+        # retrieve→generate，条件边选 replan 时 generate 会在同一
+        # 超级步并发执行，两个节点都写 verify_feedback 触发
+        # InvalidUpdateError（并发写冲突）
+        # 检索空命中（知识库无相关内容）→ 回规划改写子查询再试一轮；
+        # 预算用尽时带空 context 进 generate，走 BE-017"信息不足"路径
+        builder.add_conditional_edges(
+            "retrieve",
+            self._route_after_retrieve,
+            {"replan": "plan", "generate": "generate"},
+        )
+        builder.add_conditional_edges(
+            "verify",
+            self._route_after_verify,
+            {"replan": "plan", "regenerate": "generate", "end": END},
+        )
         return builder.compile()
 
     @staticmethod
@@ -144,7 +133,7 @@ class LangGraphQaWorkflow(QaWorkflow):
 
 def build_qa_graph(
     llm: LLMProvider,
-    rag: RagService | None = None,
+    rag: RagService,
     planner: LLMProvider | None = None,
 ) -> CompiledStateGraph:
     """兼容入口：等价于 QaGraphBuilder(llm, rag, planner).build()（测试与脚本使用）。"""

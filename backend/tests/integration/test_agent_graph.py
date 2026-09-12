@@ -5,7 +5,6 @@
 预算降级、事件顺序与 sources 契约。
 """
 
-import asyncio
 import hashlib
 import json
 
@@ -115,18 +114,44 @@ class DeterministicEmbedding(EmbeddingService):
         return self._embed_one(text)
 
 
-# ---- 基础工作流（rag=None：plan → generate → verify）----
+# ---- 统一闭环：空知识库场景（plan → retrieve 空命中 → replan → generate → verify）----
+#
+# rag 为必选依赖后，"无知识库"不再有独立拓扑：由空命中重规划路径承接，
+# 预算用尽后带空 context 进 generate，走 BE-017"信息不足"契约。
+
+
+@pytest_asyncio.fixture
+async def rag_factory():
+    """构建 RagService（内存 Fake 知识库）；content 为 None 时为空知识库。"""
+    stores: list[InMemoryVectorStore] = []
+
+    async def make(content: str | None = None, filename: str = "劳动法问答.txt") -> RagService:
+        store = InMemoryVectorStore()
+        await store.initialize()
+        stores.append(store)
+        embedding = DeterministicEmbedding()
+        rag = RagService(embedding, store)
+        if content is not None:
+            ingestion = KnowledgeIngestionService(
+                DocumentPipeline(parser_factory=DocumentParserFactory([TextParser()])), embedding, store
+            )
+            await ingestion.ingest_document("doc-1", filename, content.encode("utf-8"))
+        return rag
+
+    yield make
+    for store in stores:
+        await store.close()
 
 
 @pytest.mark.asyncio
-async def test_basic_graph_completes_qa() -> None:
-    """基础工作流（无 RAG）应完成规划→生成→校验并产出回答。"""
+async def test_empty_knowledge_completes_qa(rag_factory) -> None:
+    """空知识库：空命中重规划吃满预算后走信息不足策略，闭环正常收尾。"""
     llm = ScriptedLLM(answers="知识库中暂无相关依据，建议咨询专业律师。")
-    graph = build_qa_graph(llm, rag=None)
+    graph = build_qa_graph(llm, rag=await rag_factory())
     answer = await run_qa(graph, "经济补偿怎么计算？")
     assert answer.startswith("知识库中暂无相关依据")
-    # 三类节点各自被调用一次，且 Prompt 组装符合各自策略
-    assert len(llm.plan_calls) == 1
+    # 空命中触发一次重规划（预算 2 次封顶），生成与判分各一次
+    assert len(llm.plan_calls) == 2
     assert llm.plan_calls[0][0].content == PLANNER_SYSTEM_PROMPT
     assert len(llm.generate_calls) == 1
     assert llm.generate_calls[0][0].content == LEGAL_SYSTEM_PROMPT
@@ -135,10 +160,10 @@ async def test_basic_graph_completes_qa() -> None:
 
 
 @pytest.mark.asyncio
-async def test_basic_graph_includes_history() -> None:
+async def test_generate_includes_history(rag_factory) -> None:
     """多轮对话历史应被组装进生成消息列表（规划不携带历史）。"""
-    llm = ScriptedLLM(answers="好的。")
-    graph = build_qa_graph(llm, rag=None)
+    llm = ScriptedLLM(answers="知识库中暂无相关依据，建议咨询专业律师。")
+    graph = build_qa_graph(llm, rag=await rag_factory())
     history = [
         ChatMessage(role=MessageRole.USER, content="上一问"),
         ChatMessage(role=MessageRole.ASSISTANT, content="上一答"),
@@ -149,13 +174,13 @@ async def test_basic_graph_includes_history() -> None:
 
 
 @pytest.mark.asyncio
-async def test_planner_single_question_passthrough() -> None:
+async def test_planner_single_question_passthrough(rag_factory) -> None:
     """单一明确问题：规划器透传原问题为单子查询（统一图的退化情形）。"""
     llm = ScriptedLLM(
         answers="知识库中暂无相关依据，建议咨询专业律师。",
         plans=json.dumps(["经济补偿怎么计算？"], ensure_ascii=False),
     )
-    graph = build_qa_graph(llm, rag=None)
+    graph = build_qa_graph(llm, rag=await rag_factory())
     await run_qa(graph, "经济补偿怎么计算？")
     # 规划器收到的就是原问题，无反馈
     assert "经济补偿怎么计算？" in llm.plan_calls[0][-1].content
@@ -163,51 +188,40 @@ async def test_planner_single_question_passthrough() -> None:
 
 
 @pytest.mark.asyncio
-async def test_planner_output_unparsable_falls_back_to_question() -> None:
+async def test_planner_output_unparsable_falls_back_to_question(rag_factory) -> None:
     """规划器输出非法 JSON：回退为透传原问题，问答流程不中断。"""
     llm = ScriptedLLM(
         answers="知识库中暂无相关依据，建议咨询专业律师。",
         plans="这不是 JSON，模型输出失控了",
     )
-    graph = build_qa_graph(llm, rag=None)
+    graph = build_qa_graph(llm, rag=await rag_factory())
     answer = await run_qa(graph, "经济补偿怎么计算？")
     assert answer.startswith("知识库中暂无相关依据")
 
 
-# ---- RAG 工作流（plan → retrieve → generate → verify）----
+# ---- RAG 工作流（知识库有命中：plan → retrieve → generate → verify）----
+
+
+_LAW_CONTENT = "劳动合同违约金条款：劳动者违反服务期约定的，应当按照约定向用人单位支付违约金。"
+_RAG_ANSWER = "依据知识库回答。【来源：劳动法问答.txt】"
 
 
 @pytest_asyncio.fixture
-async def rag_graph_factory(tmp_path):
-    """构建接入内存 Fake 知识库的 RAG 工作流。"""
-    store = InMemoryVectorStore()
-    await store.initialize()
-    embedding = DeterministicEmbedding()
-    ingestion = KnowledgeIngestionService(
-        DocumentPipeline(parser_factory=DocumentParserFactory([TextParser()])), embedding, store
-    )
-    await ingestion.ingest_document(
-        "doc-1",
-        "劳动法问答.txt",
-        "劳动合同违约金条款：劳动者违反服务期约定的，应当按照约定向用人单位支付违约金。".encode("utf-8"),
-    )
-    rag = RagService(embedding, store)
+async def rag_graph_factory(rag_factory):
+    """构建接入已入库劳动法文档的 RAG 工作流工厂。"""
 
-    def factory(llm: LLMProvider):
+    async def factory(llm: LLMProvider):
+        rag = await rag_factory(content=_LAW_CONTENT)
         return build_qa_graph(llm, rag=rag)
 
     yield factory
-    await store.close()
-
-
-_RAG_ANSWER = "依据知识库回答。【来源：劳动法问答.txt】"
 
 
 @pytest.mark.asyncio
 async def test_rag_graph_injects_knowledge_context(rag_graph_factory) -> None:
     """RAG 工作流应把知识库内容（含来源标注）注入生成 Prompt。"""
     llm = ScriptedLLM(answers=_RAG_ANSWER)
-    graph = rag_graph_factory(llm)
+    graph = await rag_graph_factory(llm)
     answer = await run_qa(graph, "违反服务期约定怎么赔偿")
     assert answer == _RAG_ANSWER
     user_message = llm.generate_calls[0][-1].content
@@ -223,7 +237,7 @@ async def test_rag_graph_multi_sub_queries_merge_dedup(rag_graph_factory) -> Non
         answers=_RAG_ANSWER,
         plans=json.dumps(["劳动合同违约金条款", "违反服务期约定的违约金"], ensure_ascii=False),
     )
-    graph = rag_graph_factory(llm)
+    graph = await rag_graph_factory(llm)
     answer = await run_qa(graph, "劳动合同违约金和违反服务期约定怎么赔偿")
     assert answer == _RAG_ANSWER
     # 规划器收到了多主题问题（plan_calls 的 user 消息为原问题）
@@ -291,7 +305,7 @@ async def test_verify_grounding_routes_back_to_plan(rag_graph_factory) -> None:
             unsupported=["另外编造一个不存在的条款"],
         ),
     )
-    graph = rag_graph_factory(llm)
+    graph = await rag_graph_factory(llm)
     answer = await run_qa(graph, "违反服务期约定怎么赔偿")
     # 最终输出第二轮修正后的回答
     assert answer == _RAG_ANSWER
@@ -316,7 +330,7 @@ async def test_verify_contract_routes_back_to_generate(rag_graph_factory) -> Non
         # 判分脚本用默认 pass：若第一轮规则档就失败打回生成，
         # judge 只会在第二轮被调用一次；若规则档被绕过会暴露
     )
-    graph = rag_graph_factory(llm)
+    graph = await rag_graph_factory(llm)
     answer = await run_qa(graph, "违反服务期约定怎么赔偿")
     assert answer == _RAG_ANSWER
     # 规则档失败直接打回生成：只规划一次、生成两次、judge 一次（第二轮）
@@ -334,7 +348,7 @@ async def test_verify_budget_exhausted_outputs_answer(rag_graph_factory) -> None
         answers=_RAG_ANSWER,
         judges=_judge("grounding", feedback="永远不满意", unsupported=["一切"]),
     )
-    graph = rag_graph_factory(llm)
+    graph = await rag_graph_factory(llm)
     answer = await run_qa(graph, "违反服务期约定怎么赔偿")
     assert answer == _RAG_ANSWER  # 降级放行：校验失败也不阻断问答
     assert len(llm.plan_calls) == 2  # 规划预算 2 次封顶
@@ -345,10 +359,10 @@ async def test_verify_budget_exhausted_outputs_answer(rag_graph_factory) -> None
 
 
 @pytest.mark.asyncio
-async def test_graph_astream_custom_emits_llm_tokens() -> None:
+async def test_graph_astream_custom_emits_llm_tokens(rag_factory) -> None:
     """流式问答必须经由图（astream custom 模式）产出 delta 事件，而不是绕过图直连 LLM。"""
     llm = ScriptedLLM(answers="知识库中暂无相关依据，建议咨询专业律师。")
-    graph = build_qa_graph(llm, rag=None)
+    graph = build_qa_graph(llm, rag=await rag_factory())
     events = [
         event
         async for event in graph.astream({"question": "试用期多长？", "history": []}, stream_mode="custom")
@@ -356,17 +370,17 @@ async def test_graph_astream_custom_emits_llm_tokens() -> None:
     deltas = [e.content for e in events if e.type == "delta"]
     assert "".join(deltas) == "知识库中暂无相关依据，建议咨询专业律师。"
     assert len(deltas) > 1  # 逐 token 推送
-    # 基础工作流（无 RAG）不产生 sources 事件：前端据此不渲染参考文档按钮
+    # 空知识库不产生 sources 事件：前端据此不渲染参考文档按钮
     assert all(e.type in ("plan", "delta") for e in events)
     assert events[0].type == "plan"
     assert events[0].sub_queries == ("试用期多长？",)
 
 
 @pytest.mark.asyncio
-async def test_non_stream_invoke_ignores_stream_events() -> None:
+async def test_non_stream_invoke_ignores_stream_events(rag_factory) -> None:
     """非流式 ainvoke 与流式走同一节点：answer 完整产出且不受流事件影响。"""
     llm = ScriptedLLM(answers="知识库中暂无相关依据，建议咨询专业律师。")
-    graph = build_qa_graph(llm, rag=None)
+    graph = build_qa_graph(llm, rag=await rag_factory())
     answer = await run_qa(graph, "任何问题")
     assert answer.startswith("知识库中暂无相关依据")
 
@@ -375,7 +389,7 @@ async def test_non_stream_invoke_ignores_stream_events() -> None:
 async def test_rag_graph_astream_emits_plan_sources_then_deltas(rag_graph_factory) -> None:
     """事件顺序：plan 先于 sources，sources 先于全部 delta（BE-030 顺序契约）。"""
     llm = ScriptedLLM(answers=_RAG_ANSWER)
-    graph = rag_graph_factory(llm)
+    graph = await rag_graph_factory(llm)
     events = [
         event
         async for event in graph.astream({"question": "违反服务期约定怎么赔偿", "history": []}, stream_mode="custom")
@@ -403,7 +417,7 @@ async def test_regenerating_event_emitted_on_contract_retry(rag_graph_factory) -
         ],
         judges=_judge("pass"),
     )
-    graph = rag_graph_factory(llm)
+    graph = await rag_graph_factory(llm)
     events = [
         event
         async for event in graph.astream({"question": "违反服务期约定怎么赔偿", "history": []}, stream_mode="custom")
@@ -446,27 +460,34 @@ async def test_rag_graph_empty_knowledge_no_sources_event(tmp_path) -> None:
 
 
 def test_compiled_graph_satisfies_qa_workflow_port() -> None:
-    """装配守卫：LangGraph 编译产物必须满足 QaWorkflow 领域端口。"""
+    """装配守卫：LangGraph 编译产物必须满足 QaWorkflow 领域端口。
+
+    仅装配不执行：向量库无需 initialize（图不运行就不会触达检索）。
+    """
     from app.domain.services.qa_workflow import QaWorkflow
 
-    graph = build_qa_graph(ScriptedLLM("ok"), rag=None)
+    rag = RagService(DeterministicEmbedding(), InMemoryVectorStore())
+    graph = build_qa_graph(ScriptedLLM("ok"), rag=rag)
     assert isinstance(graph, QaWorkflow)  # runtime_checkable 校验方法存在性
 
 
-def test_create_qa_workflow_returns_port_implementation() -> None:
+@pytest.mark.asyncio
+async def test_create_qa_workflow_returns_port_implementation(rag_factory) -> None:
     """工厂应返回显式实现 QaWorkflow 端口的对象（agent 模块 OOP 契约）。"""
     from app.agent import create_qa_workflow
     from app.domain.services.qa_workflow import QaWorkflow
 
-    workflow = create_qa_workflow(ScriptedLLM("ok"))
+    workflow = create_qa_workflow(ScriptedLLM("知识库中暂无相关依据，建议咨询专业律师。"), rag=await rag_factory())
     assert isinstance(workflow, QaWorkflow)
     # 与编译图等价：经端口执行问答可用
-    assert asyncio.run(workflow.ainvoke({"question": "q", "history": []}))["answer"] == "ok"
+    answer = (await workflow.ainvoke({"question": "q", "history": []}))["answer"]
+    assert answer.startswith("知识库中暂无相关依据")
 
 
-def test_planner_defaults_to_main_llm_without_rag(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_planner_defaults_to_main_llm(rag_factory) -> None:
     """planner 缺省时用主 LLM：规划与生成调用落在同一实例上。"""
     llm = ScriptedLLM(answers="知识库中暂无相关依据，建议咨询专业律师。")
-    graph = build_qa_graph(llm, rag=None)
-    asyncio.run(graph.ainvoke({"question": "q", "history": []}))
-    assert len(llm.plan_calls) == 1  # 主 LLM 实例收到了规划调用
+    graph = build_qa_graph(llm, rag=await rag_factory())
+    await graph.ainvoke({"question": "q", "history": []})
+    assert len(llm.plan_calls) == 2  # 主 LLM 实例收到了规划调用（含空命中重规划）

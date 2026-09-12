@@ -29,6 +29,20 @@
   - 浏览器 GUI 层本轮未截图验证（build 类型检查 + SSE 事件消费已验证）
 - 下一步最佳动作：OllamaProvider 加重试/降级；或可选产品增强（会话重命名/停止按钮/CORS 收敛）或 MySQL 8.0 接入
 
+### Session 029（移除 rag=None 兼容：rag 成为问答工作流必选依赖）
+- 日期：2026-09-12
+- 本轮目标：用户确认 create_qa_workflow 不会出现 rag 为 None 的情况，删除全部 rag=None 基础工作流兼容代码
+- 改动内容：
+  - `agent/graph.py`：QaGraphBuilder/build_qa_graph 的 rag 参数改为必选（`RagService`，去掉 `| None`），build() 删除 rag is None 分支——图拓扑唯一：plan→retrieve→generate→verify；"无知识库"场景由空命中重规划路径承接（预算用尽后空 context 进 generate 走 BE-017 信息不足策略）
+  - `agent/__init__.py`：create_qa_workflow(llm, rag: RagService, planner=None)，rag 必选
+  - `agent/state.py`：context 注释更新（空串 = 知识库空命中）
+  - `scripts/verify_ollama_stream.py`：改为构造 RagService 传入（空库走信息不足策略）
+  - 测试：test_agent_graph.py 重构为 rag_factory 夹具（content=None 即空知识库），原"基础工作流"用例全部改为空知识库场景（空命中重规划吃满预算后走信息不足，plan_calls==2 成为新断言）；装配守卫用例同步适配
+  - 文档：ARCHITECTURE §5 删除"基础工作流"拓扑与 rag=None 表述，rag 标注为必选依赖
+- 运行过的验证：干净环境（删 backend/data + reset_milvus.py）`uv run pytest tests -q` → **139 passed**（数量不变，用例改写不增减）
+- 已知风险或未解决问题：无新增；测试容器（test_api.py）不受影响（始终注册真实 RagService）
+- 下一步最佳动作：同 Session 028（OllamaProvider 重试优先）
+
 ### Session 027（BE-029 向量库全面迁移到 Milvus hybrid_search）
 - 日期：2026-09-12
 - 本轮目标：用户要求"全面改为 Milvus 进行 hybrid_search 来解决（BE-028 自研 BM25 全量重建）问题，chroma 相关代码全部删掉"

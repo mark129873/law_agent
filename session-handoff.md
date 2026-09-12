@@ -10,7 +10,7 @@
   - 前端 `npm run build` 通过
   - 真实 E2E（GLM + 真实 Milvus + 专利法）：plan 事件 2 个真实子查询 → sources 6 条 → 规则档 contract 触发一次 regenerating → 第二轮正确引用第四十二条"二十年" → 持久化与 sources 一致
 
-## 本轮改动（Session 028：BE-030 统一规划闭环 + FE-013 前端适配）
+## 本轮改动（Session 028：BE-030 统一规划闭环 + FE-013 前端适配；Session 029 补充：rag 必选化）
 - **agent/nodes.py**：新增 PlanNode（planner.chat 输出 JSON 子查询，parse_sub_queries 纯函数容错，失败透传原问题；推 plan 事件）与 VerifyNode（规则档先行 + LLM judge 三态 verdict；parse_judge_verdict 纯函数；解析失败视为 pass；打回前推 regenerating 事件）；RetrieveNode 改为逐子查询检索合并；GenerateNode 支持 verify_feedback 修正指令
 - **agent/graph.py**：QaGraphBuilder 统一闭环装配——retrieve 出边只保留条件边（空命中且预算未用尽 → replan），verify 条件边（grounding→plan / contract→generate / pass→END）；rag=None 时 plan→generate→verify
 - **agent/state.py**：AgentState 新增 sub_queries/verify_verdict/verify_feedback/plan_runs/generate_runs
@@ -22,6 +22,7 @@
 - **配置**：settings 新增 PlannerProvider 枚举（follow/ollama/glm）与 planner_model；containers._build_planner 工厂
 - **测试**：新增 test_agent_parsing 13 例；test_agent_graph 重写 19 例（ScriptedLLM 按系统提示分流规划/判分/生成脚本）；test_api 适配 plan 事件；test_settings 补 LLM_PROVIDER delenv（pymilvus load_dotenv 副作用）
 - **文档**：ARCHITECTURE §5 目标图（含回边与预算）/§6 配置/§7 协议/§9 计数 139；PRODUCT.md 第 3 节新增拆解展示与自动校验重生成行为；RELIABILITY service 清单补 agent；feature_list BE-030/FE-013 passing
+- **Session 029 补充（rag 必选化）**：create_qa_workflow/build_qa_graph/QaGraphBuilder 的 rag 参数改为必选 `RagService`，删除全部 rag=None 基础工作流分支——图拓扑唯一（plan→retrieve→generate→verify），"无知识库"由空命中重规划路径承接；scripts/verify_ollama_stream.py 与测试同步改造（rag_factory 夹具，空知识库用例断言 plan_calls==2）
 
 ## 仍损坏或未验证
 - 已知缺陷：无
