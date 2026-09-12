@@ -357,6 +357,14 @@
       "status": "passing",
       "evidence": "2026-09-12：types/index.ts ChatStreamEvent 扩展 plan/regenerating；api/chat.ts 分发新增 onPlan/onRegenerating 可选回调（旧事件处理不变）；AppContext 新增 subQueries 状态（plan 更新、done/error/新提问清空），onRegenerating 清空流式助手消息内容避免两版拼接；ChatPage 向流式 MessageBlock 传 subQueries，MessageBlock 生成中渲染「问题拆解（N 个子问题）」折叠列表。验证：npm run build（tsc 类型检查 + vite）通过；真实 E2E 中 SSE 事件序列 plan→sources→delta→regenerating→sources→delta→done 全部正确消费。",
       "testedAt": "2026-09-12"
+    },
+    {
+      "id": "BE-031",
+      "name": "LangGraph 问答图可视化导出脚本",
+      "description": "新增 backend/scripts/export_qa_graph.py：用桩 LLMProvider/RagService 依赖构建 QaGraphBuilder 问答图（build 只装配不执行，桩即可），调用 langgraph 内置 draw_mermaid() 导出 Mermaid 文本——默认打印并写入 docs/qa_graph.mmd；--png 可选导出 PNG（draw_mermaid_png 需联网访问 mermaid.ink，失败时提示改用 mermaid.live 离线渲染）。docs/ARCHITECTURE.md §5 内嵌同源 Mermaid 图并注明重生成命令。",
+      "status": "passing",
+      "evidence": "2026-09-12：cd backend && uv run python scripts/export_qa_graph.py 运行成功，docs/qa_graph.mmd 生成且输出含 __start__/plan/retrieve/generate/verify/__end__ 六节点与全部边：plan-->retrieve、generate-->verify、retrieve -.replan.-> plan、retrieve -.-> generate（默认分支）、verify -.replan/regenerate/end.-> 各目标，条件边标签与 graph.py 路由语义一致；ARCHITECTURE.md §5 嵌入同款 mermaid 代码块（GitHub/mermaid.live 可渲染）并补充条件边分支语义说明与重导出命令。",
+      "testedAt": "2026-09-12"
     }
   ]
 }

@@ -263,6 +263,36 @@ query ──┬─▶ embed_query ──────────────┐
 预算：plan_runs ≤ 2、generate_runs ≤ 2；超限输出当前答案并记 WARN 日志（防死循环）
 ```
 
+上面的 ASCII 图是人工注解版；下面是可交互渲染版（Mermaid，由 `backend/scripts/export_qa_graph.py` 自动生成，图拓扑变更后运行 `cd backend && uv run python scripts/export_qa_graph.py` 重新导出，虚线为条件边）：
+
+```mermaid
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	plan(plan)
+	retrieve(retrieve)
+	generate(generate)
+	verify(verify)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> plan;
+	generate --> verify;
+	plan --> retrieve;
+	retrieve -.-> generate;
+	retrieve -. &nbsp;replan&nbsp; .-> plan;
+	verify -. &nbsp;end&nbsp; .-> __end__;
+	verify -. &nbsp;regenerate&nbsp; .-> generate;
+	verify -. &nbsp;replan&nbsp; .-> plan;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
+```
+
+条件边分支语义：`retrieve` 空命中且 `plan_runs` 未用尽 → `replan`（回 plan），否则默认进 `generate`；`verify` 按 `verify_verdict` 三态路由——`grounding` → `replan`、`contract` → `regenerate`、`pass`（或预算用尽降级放行）→ `end`。
+
 - 为什么 verify 打回分两路：依据不足是"检索缺口"，重规划补检索比重写答案有效；表达契约失败（如未按格式声明信息不足）是"生成缺口"，直接带反馈重生成更便宜。
 - judge 判分解析失败视为 pass（记 WARN 日志，不阻塞主流程）——判分是增强而非闸门，判分器自身不可靠时不得阻断问答。
 

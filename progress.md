@@ -4,8 +4,23 @@
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`（当前分支 feature/auto_coder）
 - 标准启动路径：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 标准验证路径：`cd backend && uv run pytest tests -q`（全量 139 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：无——BE-001~030 与 FE-001~013 全部 passing（BE-007/008/028 置 deprecated）
+- 当前最高优先级未完成功能：无——BE-001~031 与 FE-001~013 全部 passing（BE-007/008/028 置 deprecated）
 - 当前 blocker：无
+
+### Session 029（BE-031 LangGraph 问答图可视化导出脚本）
+- 日期：2026-09-12
+- 本轮目标：给 BE-030 的 LangGraph 问答图增加可复现的可视化出口，并把图固化进文档（应用户"有什么办法可视化看到图"的问题）
+- 技术决策：
+  - 桩依赖建图：build() 只装配节点不执行，_StubLLM/_StubRag 进构造函数即可——脚本零外部服务依赖（不需要 Milvus/Ollama/GLM），随时可跑，也是 DIP 可测试性的直接收益
+  - 导出格式选 Mermaid 文本为默认（langgraph 内置 draw_mermaid()，GitHub 原生渲染、mermaid.live/VS Code 可交互查看），PNG 为 --png 可选项（draw_mermaid_png 依赖联网访问 mermaid.ink，失败时提示离线替代方案）
+  - 图的可交互渲染版内嵌 ARCHITECTURE.md §5（紧随人工注解的 ASCII 图之后），并注明重生成命令——文档图与代码拓扑同源，不靠手维护
+- 已完成：backend/scripts/export_qa_graph.py；docs/ARCHITECTURE.md §5 内嵌 Mermaid 图 + 条件边语义说明；docs/qa_graph.mmd 生成物
+- 运行过的验证：
+  - `cd backend && uv run python scripts/export_qa_graph.py` 成功：输出含 __start__/plan/retrieve/generate/verify/__end__ 六节点与全部边（plan→retrieve、generate→verify、retrieve -.replan.-> plan、retrieve -.-> generate 默认分支、verify -.replan/regenerate/end.->），条件边标签与 graph.py 路由语义一致；docs/qa_graph.mmd 写入成功
+  - feature_list.json JSON 语法校验通过（uv run python json.load）
+- 已记录证据：feature_list.json BE-031（passing）
+- 已知风险或未解决问题：无（本轮为工具脚本 + 文档，不动业务代码与测试）
+- 下一步最佳动作：OllamaProvider 加重试/降级（Session 028 遗留的最值得做的独立功能）
 
 ### Session 028（BE-030/FE-013 统一 Plan-and-Execute 问答闭环：plan→retrieve→generate→verify + verify 反馈环）
 - 日期：2026-09-12

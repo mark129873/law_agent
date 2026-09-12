@@ -2,15 +2,22 @@
 
 ## 当前已验证
 - 现在明确可用的部分：
-  - **后端 BE-001~030 全部 passing**（BE-007 Chroma / BE-008 Milvus 骨架 / BE-028 自研 BM25 混合检索已置 deprecated）；**前端 FE-001~013 全部 passing**。
+  - **后端 BE-001~031 全部 passing**（BE-007 Chroma / BE-008 Milvus 骨架 / BE-028 自研 BM25 混合检索已置 deprecated）；**前端 FE-001~013 全部 passing**。
   - **测试体系**：后端自动化 139 个（2026-09-12 全绿）；其中 test_milvus_vector_store.py 5 例需要真实 Milvus（docker compose up -d），服务不可达时自动跳过，其余保持封闭性。
   - **Agent 已升级为统一 Plan-and-Execute 闭环（BE-030）**：plan（问题拆解子查询）→ retrieve（多子查询混合检索合并去重）→ generate → verify（规则档 + LLM judge groundedness）；verify 依据不足带建议回 plan、表达契约失败回 generate，预算 plan_runs≤2 / generate_runs≤2；SSE 协议新增 plan/regenerating 事件。
-- 最近一轮实际跑过的验证（2026-09-12，Session 028，BE-030/FE-013 统一规划闭环）：
+  - **图可视化（BE-031）**：`cd backend && uv run python scripts/export_qa_graph.py` 可随时导出问答图（桩依赖建图，零外部服务依赖），Mermaid 写入 docs/qa_graph.mmd 并内嵌 ARCHITECTURE.md §5；--png 可选导出 PNG。
+- 最近一轮实际跑过的验证（2026-09-12，Session 029，BE-031 图可视化导出）：
+  - `uv run python scripts/export_qa_graph.py` 成功：六节点 + 全部静态/条件边（replan/regenerate/end 标签）与 graph.py 路由语义一致，docs/qa_graph.mmd 写入成功
+- 上一轮实际跑过的验证（2026-09-12，Session 028，BE-030/FE-013 统一规划闭环）：
   - 干净环境（删 backend/data + reset_milvus.py）`uv run pytest tests -q` → **139 passed**（unit 62 / integration 68 / api 9）
   - 前端 `npm run build` 通过
   - 真实 E2E（GLM + 真实 Milvus + 专利法）：plan 事件 2 个真实子查询 → sources 6 条 → 规则档 contract 触发一次 regenerating → 第二轮正确引用第四十二条"二十年" → 持久化与 sources 一致
 
-## 本轮改动（Session 028：BE-030 统一规划闭环 + FE-013 前端适配；Session 029 补充：rag 必选化）
+## 本轮改动（Session 029：BE-031 图可视化导出脚本）
+- **backend/scripts/export_qa_graph.py（新增）**：_StubLLM/_StubRag 桩依赖（build 只装配不执行，无需真实 Milvus/LLM）→ QaGraphBuilder.build() → get_graph().draw_mermaid() 输出并写 docs/qa_graph.mmd；--png 走 draw_mermaid_png（需联网 mermaid.ink，失败提示 mermaid.live 离线替代）；路径锚定约定与 reset_milvus.py 一致
+- **docs/ARCHITECTURE.md §5**：内嵌脚本生成的 Mermaid 图（GitHub/mermaid.live 可渲染），保留人工注解 ASCII 图，补充条件边分支语义与重导出命令
+- **注意**：本轮应用户要求未做 git 提交；工作区含未提交改动（ARCHITECTURE.md 在本轮之前已有未提交修改）
+- 上轮改动（Session 028：BE-030 统一规划闭环 + FE-013 前端适配；Session 029 补充：rag 必选化）
 - **agent/nodes.py**：新增 PlanNode（planner.chat 输出 JSON 子查询，parse_sub_queries 纯函数容错，失败透传原问题；推 plan 事件）与 VerifyNode（规则档先行 + LLM judge 三态 verdict；parse_judge_verdict 纯函数；解析失败视为 pass；打回前推 regenerating 事件）；RetrieveNode 改为逐子查询检索合并；GenerateNode 支持 verify_feedback 修正指令
 - **agent/graph.py**：QaGraphBuilder 统一闭环装配——retrieve 出边只保留条件边（空命中且预算未用尽 → replan），verify 条件边（grounding→plan / contract→generate / pass→END）；rag=None 时 plan→generate→verify
 - **agent/state.py**：AgentState 新增 sub_queries/verify_verdict/verify_feedback/plan_runs/generate_runs
