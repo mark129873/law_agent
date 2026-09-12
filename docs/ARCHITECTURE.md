@@ -65,7 +65,7 @@ backend/
 │   │
 │   ├── domain/                 # Domain 层：实体 + 端口（零技术依赖）
 │   │   ├── entities/           # conversation / message / document / chunk / llm
-│   │   ├── repositories/       # Database / Conversation / Message / Document / VectorStore / KeywordIndex / LLMProvider 端口
+│   │   ├── repositories/       # Database / Conversation / Message / Document / VectorStore / LLMProvider 端口
 │   │   └── services/           # document_parser / embedding / qa_workflow 端口
 │   │
 │   ├── infrastructure/         # 基础设施实现（实现领域端口）
@@ -314,6 +314,7 @@ CORS 当前 `allow_origins=["*"]`（开发态，生产需收敛）。OpenAPI 文
 
 ```bash
 cd backend
+docker compose up -d                               # 启动 Milvus standalone（etcd + minio + milvus，BE-029 前置条件）
 uv sync                                            # 创建/同步 .venv（Python 3.11）
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```

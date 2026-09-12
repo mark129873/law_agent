@@ -116,7 +116,7 @@ class DocumentPipeline:
                 document_id="",
                 content=piece,
                 chunk_index=index,
-                # 注意：chunk metadata 的键名是存储契约（Chroma/前端均依赖），
+                # 注意：chunk metadata 的键名是存储契约（向量库检索回填/前端展示均依赖），
                 # 与日志 extra 的保留字段限制无关，保持 "filename" 不变
                 metadata={"filename": filename},
             )

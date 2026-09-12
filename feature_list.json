@@ -1,6 +1,6 @@
 {
   "project": "legal-knowledge-agent",
-  "description": "法律知识库与助手 Agent：基于 LangGraph 构建法律问答 Agent，支持 Ollama 本地模型和 GLM API，支持用户上传 PDF、TXT 等文档构建法律知识库，通过向量 + BM25 关键词的混合检索（RRF 融合）增强生成法律问题回答；支持多会话、历史消息、流式回答和对话删除。后端采用 Python 3.11.15 + FastAPI + SQLAlchemy 2.0 async（当前 SQLite）+ Chroma，并通过抽象接口为未来切换 MySQL 8.0、Milvus 和其他 LLM Provider 做好架构准备；前端采用 React + TypeScript + Vite + Tailwind CSS + Fetch + React Router，整体交互和视觉风格参考 Codex Web。",
+  "description": "法律知识库与助手 Agent：基于 LangGraph 构建法律问答 Agent，支持 Ollama 本地模型和 GLM API，支持用户上传 PDF、TXT 等文档构建法律知识库，通过 Milvus 服务端混合检索（稠密向量 + 稀疏 BM25，RRF 融合）增强生成法律问题回答；支持多会话、历史消息、流式回答和对话删除。后端采用 Python 3.11.15 + FastAPI + SQLAlchemy 2.0 async（当前 SQLite）+ Milvus（backend/docker-compose.yml standalone 部署），并通过抽象接口为未来切换 MySQL 8.0 和其他 LLM Provider 做好架构准备；前端采用 React + TypeScript + Vite + Tailwind CSS + Fetch + React Router，整体交互和视觉风格参考 Codex Web。",
   "rules": {
     "single_active_feature": true,
     "passing_requires_evidence": true,
