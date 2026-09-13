@@ -68,14 +68,15 @@ backend/
 │   ├── domain/                 # Domain 层：实体 + 端口（零技术依赖）
 │   │   ├── entities/           # conversation / message / document / chunk / llm
 │   │   ├── repositories/       # Database / Conversation / Message / Document / VectorStore / LLMProvider 端口
-│   │   └── services/           # document_parser / embedding / qa_workflow 端口
+│   │   └── services/           # document_parser / embedding / qa_workflow / trace_sink 端口
 │   │
 │   ├── infrastructure/         # 基础设施实现（实现领域端口）
 │   │   ├── database/sqlalchemy/ # SQLAlchemyDatabase（models.py 声明式 ORM 模型 / mappers.py 实体↔模型映射 / types.py 时区无损时间列 / database.py 端口实现）；方言无关，MySQL 预留靠 URL 切换
 │   │   ├── vector_store/       # MilvusVectorStore（dense+sparse 单集合，服务端 hybrid_search）
 │   │   ├── llm/                # OllamaProvider / GLMProvider
 │   │   ├── document_parser/    # PdfParser（pypdf）/ TextParser（txt/md，多编码回退）
-│   │   └── embedding/          # OllamaEmbeddingService（/api/embed 批量）
+│   │   ├── embedding/          # OllamaEmbeddingService（/api/embed 批量）
+│   │   └── trace/              # LangfuseTraceSink（BE-043/ADR-0010：trace→节点 span→LLM generation 三级上报；开关降级）
 │   │
 │   ├── agent/                  # LangGraph Agent（※ 全项目唯一允许导入 langgraph 与重型推理库的业务模块）
 │   │   ├── __init__.py         # 对外唯一入口：create_qa_workflow 工厂（端口组合注入）
@@ -85,6 +86,7 @@ backend/
 │   │   ├── state.py            # AgentState（主图状态；trace 追加归约器）
 │   │   ├── config.py           # AgentConfig（max_global_steps 等，由装配点从 Settings 构造）
 │   │   ├── events.py           # ContextVar 注入式事件发射器（跨子图事件贯通，ADR-0008）
+│   │   ├── trace_context.py    # 当前节点 span 的 ContextVar（BE-043：LLM generation 挂靠父 span）
 │   │   ├── node_status.py      # with_node_status 全节点包装（起止 status 事件 + 结构化日志）
 │   │   ├── nodes/              # 主图 9 节点（_agent=LLM 节点 / _node=确定性节点，设计 §2.1）
 │   │   ├── prompts/            # 主图 6 Prompt（意图路由/编排/直接回答/回答生成/校验/兜底）
@@ -302,6 +304,9 @@ retrieval_planner_agent（检索计划，四类策略多选）
 | `RERANKER_MODEL_PATH` | HF 模型 id 或本地快照绝对路径 | Qwen/Qwen3-Reranker-0.6B |
 | `RERANKER_DEVICE` | cpu / cuda | cpu |
 | `MILVUS_URI` | — | http://127.0.0.1:19530 |
+| `LANGFUSE_ENABLED` | true / false | false（BE-043/ADR-0010：Langfuse 链路追踪开关，关闭零导入零开销） |
+| `LANGFUSE_HOST` | Langfuse 服务地址 | https://cloud.langfuse.com |
+| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Langfuse 项目密钥 | 空（开启但缺失 → WARN 降级关闭，不阻断业务） |
 | `HOST` / `PORT` / `LOG_LEVEL` | — | 0.0.0.0 / 8000 / INFO |
 
 - **思考模式开关**：qwen3.5 / glm-4.5 等推理模型默认先"思考"再回答，首字延迟曾达 30~40s；关闭时 Ollama 带 `think: false`、GLM 带 `thinking: {"type": "disabled"}`。

@@ -152,3 +152,26 @@
 - think 事件量增加（每问题约 10~15 条）：浅色小字+可收起语义下可接受；SSE 单帧 <300 字节。
 - LLM 原文含英文/JSON 碎片：JSON 决策一律拼句（D9）；非结构化输出（grounding 理由）接受原文截断。
 - 前端状态复杂化：思考行统一数组（status 合并 + think 追加）替代现有 nodeStatuses 双状态，FE-015 语义保留为其中 status 行。
+
+---
+
+# 三期增强：Langfuse 全链路 trace（BE-043）
+
+> 依据：2026-09-13 用户需求「项目中使用 langfuse 做 trace，并且开关作为配置放在 .env 中」。
+> 状态：文档先行（ADR-0010），代码未动。
+
+## 设计决策（ADR-0010 摘要）
+
+1. **可观测汇走领域端口**：`domain/services/trace_sink.py` 定义 `TraceSink`/`TraceSpan` 协议 + `trace_sink_var`（ContextVar，stdlib 零依赖）——与 ADR-0008 事件机制同构的"ContextVar 注入式汇"；langfuse SDK 锁在 `infrastructure/trace/`（DDD 守护名单加 langfuse）。
+2. **trace 生命周期归 ChatService**（应用层）：请求开始 `start_trace(session_id=conversation_id, input=question)`；plan/think/sources/regenerating 经 `record_event` 记为 trace 事件；正常结束 `end_trace(output=完整回答)`，异常 `end_trace(error=...)` 后原样上抛。
+3. **节点 span 归 with_node_status 包装器**（agent 层，DRY 与 status 同一机制）：节点执行前 `start_span(node, parent=当前栈顶)` 压入 `trace_span_var`，结束 `span.end(duration_ms, error)` 弹出——异常也 end；子图复合节点天然形成父子嵌套。
+4. **LLM generation 归 LLMService**（agent 层，模型调用唯一入口）：invoke/structured_invoke（含重试轮次）/stream 三条路径都经当前 span 记 generation（model + messages + output + 耗时 + attempt）。
+5. **开关与装配**：Settings 新增 `langfuse_enabled`（默认 false）/`langfuse_host`/`langfuse_public_key`/`langfuse_secret_key`（密钥只走 .env，不进仓库不进日志）；containers 按开关注入工厂——关闭时 ChatService/LLMService 拿到 None，零开销零 langfuse import；开启但缺密钥 → WARN 降级为 None（可观测故障不阻断业务）。
+6. **失败降级**：LangfuseTraceSink 全部方法内部 try/except + WARN 日志——上报失败绝不影响问答。
+
+## 验证口径
+
+- 单测：Settings 默认值（enabled=false/密钥空）；LangfuseTraceSink 用假 langfuse 客户端锁 trace/span/generation 调用序与降级（client 抛错不外泄）；ChatService 假图 + 假汇锁 start_trace→events→end_trace 顺序；LLMService 三路径 generation 记录；with_node_status span 压栈/弹栈/异常路径。
+- DDD 守护：langfuse 进 domain/application 禁入名单。
+- Smoke：LANGFUSE_ENABLED=false 与 =true（缺密钥）两种配置真实启动均健康。
+- 真实 Langfuse 服务端验证待密钥/自托管环境（外部依赖），由用户配置后补验——契约已由假客户端测试锁定。

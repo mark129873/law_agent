@@ -60,3 +60,5 @@
 | trace | 节点执行记录（设计 §48）：node/status/duration_ms + 业务计数；主图 trace 通道为追加归约器 |
 | think 事件 | 节点内打印的思考内容行（BE-042/D9）：node + label + text（后端 `truncate_text(120)` 截断保证；JSON 决策拼句后打印）；与 status 互补——status 表节点起止，think 表过程内容（ADR-0009） |
 | 思考块（Thinking Panel） | 前端统一过程容器（FE-016/D6）：聚合 status 行 + plan 检索策略 + think 内容行；生成中默认展开，完成后自动收起为「已完成思考 · Ns」一行（D7），点击切换；仅内存快照，刷新不保留（D10），出错保留（D12） |
+| TraceSink | 可观测汇领域端口（BE-043/ADR-0010）：TraceSink/TraceSpan 协议 + trace_sink_var（ContextVar 注入，与 ADR-0008 同构）；ChatService 记 trace 生命周期与流程事件、with_node_status 压/弹节点 span、LLMService 记 generation——禁用时为 None 零开销 |
+| Langfuse trace | 三级层级（trace→节点 span→LLM generation）：session_id=conversation_id，input=问题，output=完整回答；plan/think/sources/regenerating 留为 trace 事件；langfuse SDK 锁在 infrastructure/trace/，开关 LANGFUSE_ENABLED（缺密钥 WARN 降级） |
