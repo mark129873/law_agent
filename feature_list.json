@@ -1,6 +1,6 @@
 {
   "project": "legal-knowledge-agent",
-  "description": "法律知识库与助手 Agent：基于 LangGraph 一期重写的问答 Agent（主图编排 + Local Legal RAG 独立子图 + Web/Plugin Stub 入口），支持四类检索查询变体（原始/改写/子问题/术语扩展）fan-out 并发生成、Milvus 服务端混合检索（稠密+稀疏 BM25，RRF 融合）多 Query 并发召回、统一重排（Qwen3-Reranker-0.6B，可降级 RRF）、证据评估与本地恢复循环、grounding 双规则校验与兜底回答；节点执行状态以 SSE status 事件流式展示（Codex 风格浅色过程行），检索策略全量展示；支持多会话、历史消息、流式回答、参考文档与对话删除。后端 Python 3.11.15 + FastAPI + SQLAlchemy 2.0 async（当前 SQLite）+ Milvus standalone + sentence-transformers；前端 React + TypeScript + Vite + Tailwind CSS，交互与视觉风格参考 Codex Web。架构决策见 docs/adr/0001~0008，术语表 docs/glossary.md。",
+  "description": "法律知识库与助手 Agent：基于 LangGraph 一期重写的问答 Agent（主图编排 + Local Legal RAG 独立子图 + Web/Plugin Stub 入口），支持四类检索查询变体（原始/改写/子问题/术语扩展）fan-out 并发生成、Milvus 服务端混合检索（稠密+稀疏 BM25，RRF 融合）多 Query 并发召回、统一重排（Qwen3-Reranker-0.6B，可降级 RRF）、证据评估与本地恢复循环、grounding 双规则校验与兜底回答；节点执行状态以 SSE status 事件流式展示（Codex 风格浅色过程行），检索策略全量展示；支持多会话、历史消息、流式回答、参考文档与对话删除。后端 Python 3.11.15 + FastAPI + SQLAlchemy 2.0 async（当前 SQLite）+ Milvus standalone + sentence-transformers；前端 React + TypeScript + Vite + Tailwind CSS，交互与视觉风格参考 Codex Web。架构决策见 docs/ARCHITECTURE.md。",
   "rules": {
     "single_active_feature": true,
     "passing_requires_evidence": true,
@@ -193,7 +193,7 @@
       "name": "统一 Plan-and-Execute 问答工作流（Plan→Retrieve→Generate→Verify 闭环）",
       "description": "LangGraph 图重构为统一规划闭环：plan 节点（PlannerProvider 可独立配置，默认跟随 LLM_PROVIDER）把问题拆解为子查询（单一明确问题退化为单子查询透传）；retrieve 节点逐子查询混合检索后按 chunk id 合并去重；generate 生成回答；verify 节点两档校验——规则档（引用来源存在性、BE-017 信息不足声明、退化检查）+ LLM judge 档（groundedness，列出无依据结论作为建议）。反馈环：依据不足带建议回 plan 重规划、表达契约失败回 generate 重生成、检索空命中回 plan；plan_runs≤2、generate_runs≤2 预算防死循环，超限输出当前答案并 WARN。SSE 新增 plan/regenerating 事件（向后兼容）。",
       "status": "deprecated",
-      "evidence": "2026-09-12：统一 Plan-and-Execute 闭环（PlanNode/VerifyNode 三态判定、多子查询合并、条件边打回受双预算约束、PLANNER_* 配置、SSE plan/regenerating；修复 InvalidUpdateError 与空命中死循环）。pytest 139 passed；真实 E2E 触发一次 contract 打回后正确引用第四十二条。；2026-09-13 被 BE-032~041 一期 Agent 重写整体替代（主图+RAG 子图架构，见 ADR-0001），BE-038 切换装配后本功能退役，历史证据指向 git 81248d3 前后提交。",
+      "evidence": "2026-09-12：统一 Plan-and-Execute 闭环（PlanNode/VerifyNode 三态判定、多子查询合并、条件边打回受双预算约束、PLANNER_* 配置、SSE plan/regenerating；修复 InvalidUpdateError 与空命中死循环）。pytest 139 passed；真实 E2E 触发一次 contract 打回后正确引用第四十二条。；2026-09-13 被 BE-032~041 一期 Agent 重写整体替代（主图+RAG 子图架构），BE-038 切换装配后本功能退役，历史证据指向 git 81248d3 前后提交。",
       "testedAt": "2026-09-12"
     },
     {
@@ -224,7 +224,7 @@
       "name": "Agent 服务层（LLM/Milvus/Reranker/Citation）",
       "description": "LLMService 适配 LLMProvider（structured_invoke=chat+JSON 容错+重试 1 次+安全默认）；MilvusService 适配 VectorStore 端口（不直连 SDK）；RerankerService 新增（Qwen3-Reranker-0.6B CrossEncoder、CPU、懒加载单例、失败降级 RRF 序 + reranker_degraded）；CitationService 引用构建。Settings 新增 RERANKER_* 字段 + .env.example 同步。",
       "status": "passing",
-      "evidence": "2026-09-13：LLMService（structured_invoke=chat+JSON 容错提取+重试 1 次附修正指令+安全默认，extract_json_block 括号配对扫描可处理代码块/前后噪声/嵌套括号）；MilvusService 适配 VectorStore 端口（不直连 SDK，ADR-0003）；RerankerService 依赖注入打分器 + CrossEncoderScorer 懒加载单例（asyncio.Lock 双重检查 + to_thread，失败降级 RRF 序 + degraded 标记，ADR-0004）；CitationService 引用构建；Settings 新增 RERANKER_MODEL_PATH/RERANKER_DEVICE + .env.example 同步 + 本机 .env 指向本地快照；DDD 边界新增 sentence_transformers/torch 等 agent 隔离测试。pytest 168 passed（新增 14 例，修复 pymilvus load_dotenv 污染默认值断言问题）。"
+      "evidence": "2026-09-13：LLMService（structured_invoke=chat+JSON 容错提取+重试 1 次附修正指令+安全默认，extract_json_block 括号配对扫描可处理代码块/前后噪声/嵌套括号）；MilvusService 适配 VectorStore 端口（不直连 SDK）；RerankerService 依赖注入打分器 + CrossEncoderScorer 懒加载单例（asyncio.Lock 双重检查 + to_thread，失败降级 RRF 序 + degraded 标记）；CitationService 引用构建；Settings 新增 RERANKER_MODEL_PATH/RERANKER_DEVICE + .env.example 同步 + 本机 .env 指向本地快照；DDD 边界新增 sentence_transformers/torch 等 agent 隔离测试。pytest 168 passed（新增 14 例，修复 pymilvus load_dotenv 污染默认值断言问题）。"
     },
     {
       "id": "BE-034",
@@ -245,7 +245,7 @@
       "name": "主图节点",
       "description": "query_router_agent、orchestrator_agent（max_global_steps 预算+超限强制 finish）、action_router_node、observation_node（CapabilityResult 统一合并）、direct_answer_agent、answer_generator_agent、grounding_checker_agent（RAG/direct 双规则）、fallback_generator_agent、final_answer_node；prompts 6 文件。direct 路径只校验不编造法条；web/plugin 未开通生成说明性回答。",
       "status": "passing",
-      "evidence": "2026-09-13：9 节点——query_router（安全默认 legal_question 走检索 + web_search_enabled 配置注入）、orchestrator（预算双保险第二道：step>=max 强制 finish 不调 LLM）、action_router（§46.1 映射表模块级导出）、observation（RAG 子图回写键→CapabilityResult 归一 + evidence latest-wins + 步数+1）、direct_answer（流式唯一出口+打回先推 regenerating+反馈注入）、answer_generator（四情形：direct 透传/未开通说明/RAG 生成/无命中信息不足声明；重生成前必推 regenerating）、grounding_checker（规则档先行：来源标注/信息不足声明双规则 + LLM judge + 未开通跳过；本节点递增 global_step_count 防 grounding 回路绕过预算）、fallback（预算耗尽谨慎回答）、final_answer（Citation 编号+端口键 answer）。prompts 6 文件；LLMService 补 stream。ADR-0006 直接回答双规则。pytest 211 passed（新增 16 例）。"
+      "evidence": "2026-09-13：9 节点——query_router（安全默认 legal_question 走检索 + web_search_enabled 配置注入）、orchestrator（预算双保险第二道：step>=max 强制 finish 不调 LLM）、action_router（§46.1 映射表模块级导出）、observation（RAG 子图回写键→CapabilityResult 归一 + evidence latest-wins + 步数+1）、direct_answer（流式唯一出口+打回先推 regenerating+反馈注入）、answer_generator（四情形：direct 透传/未开通说明/RAG 生成/无命中信息不足声明；重生成前必推 regenerating）、grounding_checker（规则档先行：来源标注/信息不足声明双规则 + LLM judge + 未开通跳过；本节点递增 global_step_count 防 grounding 回路绕过预算）、fallback（预算耗尽谨慎回答）、final_answer（Citation 编号+端口键 answer）。prompts 6 文件；LLMService 补 stream。直接回答路径双规则。pytest 211 passed（新增 16 例）。"
     },
     {
       "id": "BE-037",
@@ -292,9 +292,9 @@
     {
       "id": "BE-040",
       "name": "Agent 重写文档/可视化/真实 E2E 收尾",
-      "description": "ARCHITECTURE §2/§3/§5/§7/§9 重写（新目录/端口/图拓扑/协议/测试数）；PRODUCT.md 行为变更定稿（D1~D5 + 行为规则 1~7）；RELIABILITY service 清单与日志规则补充；docs/adr/0001~0008 + docs/glossary.md；scripts/export_qa_graph.py 适配新图重导出 docs/qa_graph.mmd；verify_real_e2e.py 适配 + 真实运行（GLM+真实 Milvus+rerank 模型：上传→流式问答引用条文→sources/检索策略契约→status 事件序列→闲聊直接回答）；progress/session-handoff/clean-state-checklist 收尾与冷热沉降对账。",
+      "description": "ARCHITECTURE §2/§3/§5/§7/§9 重写（新目录/端口/图拓扑/协议/测试数）；PRODUCT.md 行为变更定稿（D1~D5 + 行为规则 1~7）；RELIABILITY service 清单与日志规则补充；scripts/export_qa_graph.py 适配新图重导出 docs/qa_graph.mmd；verify_real_e2e.py 适配 + 真实运行（GLM+真实 Milvus+rerank 模型：上传→流式问答引用条文→sources/检索策略契约→status 事件序列→闲聊直接回答）；progress/session-handoff/clean-state-checklist 收尾与冷热沉降对账。",
       "status": "passing",
-      "evidence": "2026-09-13：ARCHITECTURE §0/§1/§2/§3/§4/§5（主图+子图拓扑与事件机制全重写）/§6/§7（status 事件）/§9（197）/§10 同步；docs/glossary.md 术语表 + docs/adr/0001~0008；RELIABILITY agent 日志埋点说明；docs/qa_graph.mmd 重导出（15 节点）；verify_real_e2e.py 增 plan/status 断言并真实运行通过（GLM+Milvus：plan 检索策略→15 节点 status→回答引用第四十二条【来源】→sources 持久化一致）；浏览器端到端三场景（RAG 成功引用第七十一条/证据不足走兜底/闲聊直接回答）全部通过。干净环境 197 passed。"
+      "evidence": "2026-09-13：ARCHITECTURE §0/§1/§2/§3/§4/§5（主图+子图拓扑与事件机制全重写）/§6/§7（status 事件）/§9（197）/§10 同步；RELIABILITY agent 日志埋点说明；docs/qa_graph.mmd 重导出（15 节点）；verify_real_e2e.py 增 plan/status 断言并真实运行通过（GLM+Milvus：plan 检索策略→15 节点 status→回答引用第四十二条【来源】→sources 持久化一致）；浏览器端到端三场景（RAG 成功引用第七十一条/证据不足走兜底/闲聊直接回答）全部通过。干净环境 197 passed。"
     },
     {
       "id": "BE-042",
@@ -313,9 +313,9 @@
     {
       "id": "BE-043",
       "name": "Langfuse 全链路 trace（.env 开关）",
-      "description": "domain/services/trace_sink.py 定义 TraceSink/TraceSpan 端口 + trace_sink_var ContextVar（ADR-0008 同构）；infrastructure/trace/langfuse_sink.py 实现（懒初始化客户端、全方法吞异常 WARN 降级、缺密钥降级关闭）；ChatService 记 trace 生命周期与 plan/think/sources/regenerating 事件；with_node_status 压/弹节点 span（子图嵌套、异常也 end）；LLMService 三路径记 generation（model/messages/output/耗时/attempt）；containers 按 LANGFUSE_ENABLED 注入工厂；Settings 增 LANGFUSE_ENABLED/HOST/PUBLIC_KEY/SECRET_KEY + .env.example；DDD 守护加 langfuse；假客户端单测锁契约 + 关闭/缺密钥 smoke。",
+      "description": "domain/services/trace_sink.py 定义 TraceSink/TraceSpan 端口 + trace_sink_var ContextVar；infrastructure/trace/langfuse_sink.py 实现（懒初始化客户端、全方法吞异常 WARN 降级、缺密钥降级关闭）；ChatService 记 trace 生命周期与 plan/think/sources/regenerating 事件；with_node_status 压/弹节点 span（子图嵌套、异常也 end）；LLMService 三路径记 generation（model/messages/output/耗时/attempt）；containers 按 LANGFUSE_ENABLED 注入工厂；Settings 增 LANGFUSE_ENABLED/HOST/PUBLIC_KEY/SECRET_KEY + .env.example；DDD 守护加 langfuse；假客户端单测锁契约 + 关闭/缺密钥 smoke。",
       "status": "passing",
-      "evidence": "2026-09-13：TraceSink/TraceSpan 端口 + trace_sink_var（ADR-0008 同构 ContextVar）；langfuse 4.15.2 锁 infrastructure/trace（DDD 守护入名单）；ChatService 记 trace 生命周期与 plan/think/sources/regenerating 事件；with_node_status 压/弹节点 span（子图嵌套、异常也 end）；LLMService 三路径记 generation（拼句后原文，attempt/schema/duration 入 metadata）。干净环境 225 passed（+22 例）；真实云端验证（jp.cloud.langfuse.com，用户 .env 预置密钥，LANGFUSE_ENABLED=true）：E2E trace 含 29 节点 span 嵌套/11 个 generation（model=glm-4.5-air+Prompt 消息+输出）/15 think+2 regenerating 事件；缺密钥降级与关闭态由单测与夹具锁定。"
+      "evidence": "2026-09-13：TraceSink/TraceSpan 端口 + trace_sink_var（ContextVar）；langfuse 4.15.2 锁 infrastructure/trace（DDD 守护入名单）；ChatService 记 trace 生命周期与 plan/think/sources/regenerating 事件；with_node_status 压/弹节点 span（子图嵌套、异常也 end）；LLMService 三路径记 generation（拼句后原文，attempt/schema/duration 入 metadata）。干净环境 225 passed（+22 例）；真实云端验证（jp.cloud.langfuse.com，用户 .env 预置密钥，LANGFUSE_ENABLED=true）：E2E trace 含 29 节点 span 嵌套/11 个 generation（model=glm-4.5-air+Prompt 消息+输出）/15 think+2 regenerating 事件；缺密钥降级与关闭态由单测与夹具锁定。"
     },
     {
       "id": "BE-044",

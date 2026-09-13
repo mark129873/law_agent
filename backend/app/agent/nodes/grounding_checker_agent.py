@@ -29,7 +29,7 @@ class GroundingCheckerAgent:
 
     为什么规则档先行：引用来源存在性、信息不足声明是确定性契约检查，
     零 LLM 成本且不会误判；judge 档处理需要语义理解的 groundedness。
-    为什么本节点递增 global_step_count（ADR-0007）：grounding 打回
+    为什么本节点递增 global_step_count：grounding 打回
     orchestrator 的回路不经过 observation_node——若此处不计数，
     "grounding→orchestrator→finish→answer→grounding" 回路没有
     预算消耗，会绕过步数上限死循环。
@@ -62,7 +62,7 @@ class GroundingCheckerAgent:
                 issues.append("回答引用了参考依据但未注明来源文件（缺少【来源：…】标注）")
         elif capability.get("capability") == "local_legal_rag":
             # 走过检索但证据为空（无命中）：回答必须按 BE-017 契约声明信息不足；
-            # 直接回答/未开通能力路径无此要求（ADR-0006 双规则）
+            # 直接回答/未开通能力路径无此要求（双规则）
             if _NO_EVIDENCE_MARKER not in answer:
                 issues.append("知识库无命中但回答未声明信息不足，禁止编造")
 

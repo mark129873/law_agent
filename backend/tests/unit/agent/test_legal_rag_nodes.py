@@ -250,7 +250,7 @@ def test_hybrid_retriever_partial_failure_is_not_error():
 # ---- EvidenceRankingNode ----
 
 def test_evidence_ranking_pre_truncates_candidates_by_rrf_before_rerank():
-    """粗排→精排：超过 rerank_max_candidates 的候选按 RRF 分预截断（ADR-0004 补充）。"""
+    """粗排→精排：超过 rerank_max_candidates 的候选按 RRF 分预截断。"""
     class CountingScorer:
         def __init__(self) -> None:
             self.docs_seen: list[str] = []

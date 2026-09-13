@@ -1,7 +1,7 @@
 """Web Search Stub 节点（BE-037，设计 §15.2）：一期只返回 NOT_IMPLEMENTED。
 
 强制约束 8/26：禁止实际访问 Web——后续二期把本节点替换为
-web_research_subgraph，主图路由接口不变（ADR-0001）。
+web_research_subgraph，主图路由接口不变。
 """
 
 from __future__ import annotations

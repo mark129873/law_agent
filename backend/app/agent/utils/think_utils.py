@@ -1,4 +1,4 @@
-"""思考内容工具（BE-042，ADR-0009 决策 D9）：think 事件的文本规整与统一发射。
+"""思考内容工具（BE-042，决策 D9）：think 事件的文本规整与统一发射。
 
 为什么截断在后端做：text ≤120 字是 SSE 契约的一部分，契约由生产端
 统一保证而不是每个消费端各自实现——前端零截断逻辑，后端只此一处
@@ -14,7 +14,7 @@ from app.agent.constants import node_label
 from app.agent.events import emit_event
 from app.domain.services.qa_workflow import QaStreamEvent
 
-# 思考内容单条上限（ADR-0009 决策 D9）：超长尾部以省略号截断——
+# 思考内容单条上限（决策 D9）：超长尾部以省略号截断——
 # 展示性截断，完整理由仍在节点 trace 与结构化日志里可追溯
 THINK_MAX_CHARS = 120
 

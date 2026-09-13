@@ -1,4 +1,4 @@
-"""混合检索服务：适配领域端口（BE-033，设计 §29，ADR-0003）。
+"""混合检索服务：适配领域端口（BE-033，设计 §29）。
 
 为什么不直连 pymilvus SDK（设计约束 25）：Dense + BM25 + RRF 融合
 已由 MilvusVectorStore 在服务端一次 hybrid_search 完成（BE-029），

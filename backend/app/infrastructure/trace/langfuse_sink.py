@@ -1,4 +1,4 @@
-"""Langfuse 可观测汇实现（BE-043，ADR-0010）。
+"""Langfuse 可观测汇实现（BE-043）。
 
 为什么 langfuse SDK 锁在本目录：外部观测平台属基础设施细节，
 领域层与应用层只依赖 domain/services/trace_sink.py 协议（DDD 守护

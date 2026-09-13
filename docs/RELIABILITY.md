@@ -96,7 +96,7 @@ LOG_LEVEL=ERROR  # 仅输出 ERROR
 - 会话历史清空
 **等等**
 
-## Langfuse 链路追踪（BE-043 / ADR-0010）
+## Langfuse 链路追踪（BE-043）
 
 - **开关与配置**：`LANGFUSE_ENABLED`（默认 false）+ `LANGFUSE_BASE_URL` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`（密钥只经 .env/环境注入，禁止提交与落日志）。关闭时 langfuse 模块零导入、零开销；开启但密钥缺失 → 启动期 WARN 降级为关闭（可观测故障不阻断业务）。
 - **采集范围**：每问一条 trace（session_id=conversation_id，input=问题，output=完整回答）→ 节点 span（with_node_status 包装器统一压栈/弹栈，含子图嵌套与异常路径）→ LLM generation（LLMService 统一入口：model/messages/output/耗时/重试轮次）；plan/think/sources/regenerating 记为 trace 事件留档。

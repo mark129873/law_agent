@@ -1,11 +1,11 @@
-"""可观测汇领域端口（BE-043，ADR-0010）：Langfuse 链路追踪的领域抽象。
+"""可观测汇领域端口（BE-043）：Langfuse 链路追踪的领域抽象。
 
 为什么端口放在领域层：trace 采集点分布在应用层（ChatService 的请求
 生命周期）与 agent 层（节点包装器、LLMService），它们都只依赖本协议；
 langfuse SDK 锁在 infrastructure/trace/（DDD 守护测试拦截越界导入），
 更换观测平台不动任何业务代码（DIP）。
 
-为什么用 ContextVar 注入（trace_sink_var）：与 ADR-0008 的事件发射器
+为什么用 ContextVar 注入（trace_sink_var）：与既有事件发射器
 同一机制——sink 由应用层在请求开始时放入上下文，图任务经
 asyncio.create_task 继承（创建发生在 set 之后）；禁用/无消费者时为
 None，全部上报点廉价跳过（与事件"无消费者安全丢弃"同一语义）。

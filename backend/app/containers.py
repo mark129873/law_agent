@@ -114,7 +114,7 @@ def _build_embedding_service(settings: Settings) -> EmbeddingService:
 
 
 def _build_reranker(settings: Settings) -> RerankerService:
-    """构造统一重排服务（BE-033/ADR-0004）。
+    """构造统一重排服务（BE-033）。
 
     为什么构造时不加载模型：CrossEncoderScorer 懒加载——首次 rerank
     才读本地模型，装配阶段零开销；加载失败在检索侧降级 RRF 序。
@@ -127,7 +127,7 @@ def _build_reranker(settings: Settings) -> RerankerService:
 
 
 def _build_trace_sink_factory(settings: Settings) -> Callable[[], TraceSink | None] | None:
-    """按配置构造 trace 汇工厂（BE-043/ADR-0010）。
+    """按配置构造 trace 汇工厂（BE-043）。
 
     关闭（默认）返回 None：ChatService 不构造任何观测实现，langfuse
     模块零导入零开销；开启但缺密钥时工厂内部 WARN 降级为恒 None
@@ -177,7 +177,7 @@ def create_container(settings: Settings | None = None) -> DIContainer:
         lambda c: RagService(c.resolve(EmbeddingService), c.resolve(VectorStore)),
         singleton=True,
     )
-    # 统一重排服务（BE-033/ADR-0004：本地 Qwen3-Reranker，懒加载）
+    # 统一重排服务（BE-033：本地 Qwen3-Reranker，懒加载）
     container.register(RerankerService, lambda c: _build_reranker(settings), singleton=True)
     container.register(
         DocumentService,

@@ -1,11 +1,11 @@
-"""主图组装：建造者 + 端口适配器（BE-038，设计 §3/§44，ADR-0001）。
+"""主图组装：建造者 + 端口适配器（BE-038，设计 §3/§44）。
 
 为什么这样拆分：
 - `AgentGraphBuilder`（建造者模式）按设计 §3 拓扑装配主图，
   Local Legal RAG 子图作为编译图节点整体接入（约束 5），
   装配规则集中一处；
 - `LangGraphQaWorkflow`（适配器模式）显式实现 QaWorkflow 领域端口，
-  langgraph 引擎封在适配器之内（ADR-0002：对外契约不随重写变化）。
+  langgraph 引擎封在适配器之内（对外契约不随重写变化）。
 
 SSE 事件在节点内推送（单一事实来源）：plan=hybrid_retriever 检索策略、
 sources=rag_result 证据、delta=回答流式、regenerating=重生成前提示。
@@ -126,7 +126,7 @@ class AgentGraphBuilder:
         builder.add_conditional_edges(
             "action_router_node", route_action, list(ACTION_TARGETS.values())
         )
-        # 各 Capability → observation → 回编排（受 max_global_steps 预算，ADR-0007）
+        # 各 Capability → observation → 回编排（受 max_global_steps 预算）
         builder.add_edge("legal_rag_subgraph", "observation_node")
         builder.add_edge("web_search_entry_node", "web_search_stub_node")
         builder.add_edge("web_search_stub_node", "observation_node")
@@ -149,7 +149,7 @@ class AgentGraphBuilder:
 
 def route_after_grounding(config: AgentConfig):
     """grounding 后路由（设计 §3）：通过 → 收尾；未过且预算内 → 回编排；
-    预算耗尽 → 兜底谨慎回答（ADR-0007：预算检查在条件边）。
+    预算耗尽 → 兜底谨慎回答（预算检查在条件边）。
 
     为什么预算比较用 >= 而不是 >：grounding_checker_agent 每次执行
     都会 +1 计数（含本次），即"本次校验已经消耗了一个步数"。
@@ -165,7 +165,7 @@ def route_after_grounding(config: AgentConfig):
 
 
 class LangGraphQaWorkflow(QaWorkflow):
-    """QaWorkflow 端口的 LangGraph 适配器（显式实现领域端口，ADR-0002）。
+    """QaWorkflow 端口的 LangGraph 适配器（显式实现领域端口）。
 
     为什么 astream 用事件队列而不是 graph.astream(custom)：实测
     langgraph 1.2.11 子图节点的 custom 事件不上浮父图流，而 plan/

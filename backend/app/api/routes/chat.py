@@ -87,7 +87,7 @@ async def chat_stream(payload: ChatStreamRequest, request: Request) -> Streaming
                         **({"duration_ms": event.duration_ms} if event.duration_ms is not None else {}),
                     })
                 elif event.type == "think":
-                    # 思考内容行（BE-042/ADR-0009）：text 已由后端截断（≤120 字）
+                    # 思考内容行（BE-042）：text 已由后端截断（≤120 字）
                     yield _sse_event({
                         "type": "think",
                         "node": event.node,

@@ -1,4 +1,4 @@
-"""Langfuse 可观测汇单元测试（BE-043，ADR-0010）。
+"""Langfuse 可观测汇单元测试（BE-043）。
 
 用假 langfuse 客户端锁住三级结构的调用契约（trace → 节点 span →
 generation 与流程事件）与失败降级（client 抛错不外泄）——不联网、

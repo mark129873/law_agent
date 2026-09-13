@@ -30,7 +30,7 @@ class QaStreamEvent:
     # 校验未通过、回答将重新生成（前端据此清空已渲染增量）；
     # status：图节点执行状态（BE-041，phase=start/end + 中文 label + 耗时，
     # 前端以浅色小字展示工作过程——字段只增不改，旧消费方静默忽略）；
-    # think：节点内的思考内容行（BE-042/ADR-0009：决策输出、运行细节、
+    # think：节点内的思考内容行（BE-042：决策输出、运行细节、
     # 流转说明，text 已由后端截断 ≤120 字——与 status 互补：
     # status 表节点起止，think 表过程内容）
     type: Literal["delta", "sources", "plan", "regenerating", "status", "think"]

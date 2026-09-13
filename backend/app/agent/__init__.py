@@ -6,7 +6,7 @@
 LangGraph 主图 + Local Legal RAG 子图上（设计 §3/§4），其余模块只应
 通过本包暴露的 create_qa_workflow 工厂使用工作流。
 
-架构说明见 docs/adr/0001~0007，设计依据 legal_agent_phase1_technical_design.md。
+架构说明见 docs/ARCHITECTURE.md，设计依据 legal_agent_phase1_technical_design.md。
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def create_qa_workflow(
     QaWorkflow 实现，LangGraph 与建造细节被封禁在本模块内部。
     依赖全部显式注入：planner 缺省跟随主 LLM（BE-030 约定延续），
     reranker 缺省按全局配置构造本地 CrossEncoder（懒加载，加载失败
-    自动降级 RRF 序，ADR-0004）。
+    自动降级 RRF 序）。
     """
     return LangGraphQaWorkflow(
         AgentGraphBuilder(

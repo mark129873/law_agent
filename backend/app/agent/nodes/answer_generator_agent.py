@@ -26,7 +26,7 @@ logger = logging.getLogger("app.agent.nodes.answer_generator")
 
 
 class AnswerGeneratorAgent:
-    """finish 路径的唯一流式出口（ADR 映射决策 4）。
+    """finish 路径的唯一流式出口（架构映射决策 4）。
 
     四种情形：
     1. 直接回答已有完整草稿（direct 能力已流式输出）→ 透传，不再调模型；

@@ -32,7 +32,7 @@ class EvidenceRankingNode:
         # 统一 rerank 用 original_query（约束 18）：SubQuery 用于召回，
         # 原始问题才代表用户真实意图的最终相关性
         original = state.get("normalized_query") or state.get("original_query") or ""
-        # 粗排→精排（ADR-0004 补充）：先按 RRF 分预截断到 rerank_max_candidates，
+        # 粗排→精排：先按 RRF 分预截断到 rerank_max_candidates，
         # 防止多查询候选全量进入 CPU CrossEncoder（本机实测约 15s/对不可行）；
         # RRF 序与 rerank 序高度相关，预截断对最终 top-k 质量影响有限
         pre_rerank = sorted(

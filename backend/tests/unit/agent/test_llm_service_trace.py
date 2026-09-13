@@ -1,4 +1,4 @@
-"""LLMService generation 采集单元测试（BE-043，ADR-0010）。
+"""LLMService generation 采集单元测试（BE-043）。
 
 用假 Provider + 假 span 锁定三条调用路径（invoke/structured_invoke/
 stream）的 generation 记录契约与无 span 时的零干扰行为。

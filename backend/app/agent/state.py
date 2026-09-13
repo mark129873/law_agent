@@ -2,7 +2,7 @@
 
 为什么保留 question/history/answer 三个"端口兼容键"：QaWorkflow
 领域端口与 ChatService 以 {"question","history"} 输入、answer 输出
-为契约（ADR-0002），主图状态必须兼容，重写才不外泄到应用层；
+为契约，主图状态必须兼容，重写才不外泄到应用层；
 其余字段按设计文档 §6 命名。
 
 为什么 trace 用 Annotated[list, operator.add]：通道统一走"追加"

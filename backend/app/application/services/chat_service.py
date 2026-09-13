@@ -3,7 +3,7 @@
 为什么所有问答都走 LangGraph 图的流式执行：对外唯一问答入口是 SSE
 流式接口（stream_answer），检索、Prompt 组装、模型调用只有一份实现
 （在图节点内），服务层只负责会话持久化与图执行，杜绝行为漂移。
-Langfuse trace（BE-043/ADR-0010）也挂在本服务：请求生命周期
+Langfuse trace（BE-043）也挂在本服务：请求生命周期
 （start_trace/end_trace）与流程事件（plan/think/sources/regenerating）
 只有这里能看到全貌；节点 span 与 LLM generation 分别由图包装器与
 LLMService 经同一 ContextVar 汇上报。
@@ -112,7 +112,7 @@ class ChatService:
                     # （Langfuse 节点 span 由图任务内的包装器上报，不走此处）
                     yield event
                 elif event.type == "think":
-                    # 思考内容行（BE-042/ADR-0009）：仅转发供前端思考块展示，
+                    # 思考内容行（BE-042）：仅转发供前端思考块展示，
                     # 同样不进 delta 聚合（与 status 同一职责边界）
                     if sink is not None:
                         sink.record_event(

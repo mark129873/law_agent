@@ -25,7 +25,7 @@ _TECH_LIBS = {
 # 全项目只允许在 app/agent/ 内导入 langgraph（工作流引擎隔离区）
 _LANGGRAPH_ALLOWED_PREFIX = "agent"
 
-# 重型本地推理库只允许在 app/agent/ 内导入（Reranker 服务隔离区，BE-033/ADR-0004）
+# 重型本地推理库只允许在 app/agent/ 内导入（Reranker 服务隔离区，BE-033）
 _AGENT_ONLY_LIBS = {"sentence_transformers", "torch", "transformers", "accelerate"}
 
 

@@ -123,7 +123,7 @@ class Settings(BaseSettings):
     planner_provider: PlannerProvider = PlannerProvider.FOLLOW
     planner_model: str = ""  # 空串表示用所选 Provider 的默认对话模型
 
-    # ---- Agent 服务（一期重写 BE-033，ADR-0004）----
+    # ---- Agent 服务（一期重写 BE-033）----
     # Rerank 总开关：默认开启（设计 §32 统一重排）。CPU 部署且无 CUDA 时
     # 实测约 15s/对不可行，可置 false 走 RRF 降级序（degraded 可观测）。
     rerank_enabled: bool = True
@@ -133,7 +133,7 @@ class Settings(BaseSettings):
     reranker_model_path: str = "Qwen/Qwen3-Reranker-0.6B"
     reranker_device: str = "cpu"
 
-    # ---- Langfuse 链路追踪（BE-043，ADR-0010）----
+    # ---- Langfuse 链路追踪（BE-043）----
     # 总开关：默认关闭——关闭时 langfuse 模块零导入、零开销，纯本地运行；
     # 开启但密钥缺失时装配点 WARN 降级为关闭（可观测故障不阻断业务）。
     langfuse_enabled: bool = False

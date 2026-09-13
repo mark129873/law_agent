@@ -1,4 +1,4 @@
-"""当前节点 span 上下文（BE-043，ADR-0010）。
+"""当前节点 span 上下文（BE-043）。
 
 为什么独立小模块：with_node_status 包装器压栈/弹栈 span，LLMService
 读取栈顶记录 generation——两者是 agent 层内"父 span 挂靠"的协作方，

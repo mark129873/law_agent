@@ -4,12 +4,24 @@
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`（当前分支 feature/auto_coder）
 - 标准启动路径：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 标准验证路径：`cd backend && uv run pytest tests -q`（全量 225 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
-- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016，ADR-0009）+ Langfuse trace（BE-043，ADR-0010）+ 全量 Prompt 优化（BE-044）全部 passing：主图 + Local Legal RAG 子图 + Web/Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化（打回率 RAG 2→0、闲聊 3→0），架构决策见 docs/adr/0001~0010，术语表 docs/glossary.md
+- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）全部 passing：主图 + Local Legal RAG 子图 + Web/Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化（打回率 RAG 2→0、闲聊 3→0），架构决策见 docs/ARCHITECTURE.md
 - 已知性能边界：本机 CPU（无 CUDA）上 Qwen3-Reranker-0.6B 约 15s/对，本地部署默认 `RERANK_ENABLED=false` 走 RRF 降级序（GPU 机器可开启精排）
 - 当前最高优先级未完成功能：无——BE-001~044 与 FE-001~016 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
 - 当前 blocker：无
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md（Session 001~020 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
 
+
+### Session 035（文档清理：删除 ADR 目录与 glossary 术语表 + 全量引用清理）
+- 日期：2026-09-14
+- 本轮目标：应用户要求删除 docs/adr/（0001~0010，工作区先前已删未提交）与 docs/glossary.md，并全量清理仓库内引用（用户确认删除是有意的文档重组；ADR 承载的设计实质——双预算、SSE 契约、事件机制、grounding 双规则等——已由 docs/ARCHITECTURE.md 完整承载）
+- 做了什么：手动逐处清理 34 个文件——文档层 6 个（ARCHITECTURE/RELIABILITY/plan/progress/session-handoff/feature_list.json，失效路径指针改指 docs/ARCHITECTURE.md）+ 后端源码 20 个 + 测试 7 个 + backend/.env.example；"ADR-XXXX" 标签全量剥离，解释性正文（为什么这么做）一律保留；冷分卷 docs/archive/ 确认无引用，按只读约定未动
+- 运行过的验证：
+  - grep 全仓库（排除 archive/.git/.venv/node_modules）ADR/glossary 引用 = 0
+  - feature_list.json JSON 语法校验通过（node JSON.parse）
+  - **测试按用户指示本轮跳过**（纯文档/注释改动，未触任何运行时逻辑与断言；上一基线 2026-09-13 Session 034：225 passed）
+- 已记录证据：本轮为文档清理，feature_list.json 无功能状态变化（仅 description 与 BE-040/BE-033/BE-036/BE-043 条目内的引用文本清理）
+- 已知风险或未解决问题：ADR 编号自此无落地文件（git 历史提交信息中的 ADR 引用随历史保留）；后续文档/注释不得再新增 ADR-XXXX 引用
+- 下一步最佳动作：失败查询链路优化（本轮已完成量化评估未实施：最坏路径 20 次 LLM 调用/24 次 Milvus 检索/3 次重排，正常成功查询约 9 次 LLM；候选方案=恢复轮经济模式+零新增早退+同能力防重入护栏+预算参数 .env 可配）；或既有可选产品增强/MySQL/Web Search
 
 ### Session 034（BE-044 全量 Prompt 优化：12 个 Prompt 五段结构化 + 编排器"不 finish"误诊修正）
 - 日期：2026-09-13
@@ -31,9 +43,9 @@
 
 ### Session 033（BE-043 Langfuse 全链路 trace：文档先行 → 实现 → 真实云端验证）
 - 日期：2026-09-13
-- 本轮目标：应用户要求接入 Langfuse 做 trace，开关作为配置放 .env 中（ADR-0010 文档先行，随后实现与真实云端验证）
-- 技术决策（详见 plan.md 三期增强节 + ADR-0010）：
-  - **可观测汇走领域端口**：domain/services/trace_sink.py 定义 TraceSink/TraceSpan 协议 + trace_sink_var（ContextVar，与 ADR-0008 事件机制同构）；langfuse 4.15.2 锁在 infrastructure/trace/（DDD 守护名单加 langfuse，domain/application 禁入）
+- 本轮目标：应用户要求接入 Langfuse 做 trace，开关作为配置放 .env 中（文档先行，随后实现与真实云端验证）
+- 技术决策（详见 plan.md 三期增强节）：
+  - **可观测汇走领域端口**：domain/services/trace_sink.py 定义 TraceSink/TraceSpan 协议 + trace_sink_var（ContextVar，与既有事件机制同构）；langfuse 4.15.2 锁在 infrastructure/trace/（DDD 守护名单加 langfuse，domain/application 禁入）
   - **三级采集各归其位**：trace 生命周期（start/end + plan/think/sources/regenerating 事件）归 ChatService（应用层唯一全景点）；节点 span 归 with_node_status 包装器（start_span 压栈/finally end 弹栈，子图复合节点天然父子嵌套，异常也 end）；LLM generation 归 LLMService（invoke/structured_invoke 含重试轮次/stream 三路径全覆盖，generation 挂当前节点 span）
   - **配置与降级**：Settings 增 LANGFUSE_ENABLED（默认 false）/LANGFUSE_BASE_URL（命名与用户 .env 预置及 SDK 口径一致）/LANGFUSE_PUBLIC_KEY/SECRET_KEY；关闭=工厂 None 零导入零开销；开启但缺密钥=WARN 降级恒 None；sink 全方法吞异常 WARN（可观测故障不阻断业务）
   - **踩坑记录**：①工厂实例注入但 ChatService 按可调用对象调用 → 工厂加 `__call__ = create` 别名；②pymilvus load_dotenv 把 .env 的 LANGFUSE_ENABLED=true 灌进测试环境 → test_api 夹具显式 `langfuse_enabled=False` 隔离；③langfuse v2 observations 查询 API 不带 fields 不返回 IO 字段——**数据其实一直在云端**，验证要用 trace.get 完整详情
@@ -50,8 +62,8 @@
 
 ### Session 032（全面测试基线 + 思考块 BE-042/FE-016：全面测试→用户样式反馈→当日实现与验证）
 - 日期：2026-09-13
-- 本轮目标：①按开工流程做全面测试（干净环境全量 pytest/前端 build/真实启动 smoke/真实 E2E）；②用户在浏览器看到 FE-015 平铺状态行后反馈"思考的样式不对，要豆包式可点开收起"→ 按 ADR-0009（grilling 定稿 D6~D12）实现思考块并验证
-- 技术决策（详见 plan.md 二期增强节 + ADR-0009）：
+- 本轮目标：①按开工流程做全面测试（干净环境全量 pytest/前端 build/真实启动 smoke/真实 E2E）；②用户在浏览器看到 FE-015 平铺状态行后反馈"思考的样式不对，要豆包式可点开收起"→ 按 grilling 定稿（D6~D12）实现思考块并验证
+- 技术决策（详见 plan.md 二期增强节）：
   - think 事件：QaStreamEvent 扩展 type=think（node/label/text），text 后端 `truncate_text(120)` 统一截断（契约生产端保证）；`emit_think` 统一发射（label 复用 NODE_LABELS，DRY）
   - 13 个节点接入：意图判定/编排决策（JSON 拼句）/选中检索与恢复策略/并发检索命中数/重排降级/证据评估结论/恢复计划/校验判定+理由（_verdict 统一出口）/兜底与重写流转（regenerating 同源）/Web+Plugin 未开通说明/引用来源条数
   - 前端思考块（豆包式）：标题行「思考中…/已完成思考 · Ns」+ 箭头点击切换；manualOpen=null 跟随默认（生成中展开、完成自动收起，消息 id 换名触发重挂载实现自动收起）；AppContext nodeStatuses 升级为 ThoughtLine 统一列表（status 按节点合并 + think 追加）；检索策略面板并入思考块；出错保留思考快照（D12，onError 不再清空并给半截消息挂快照+固定 id）；闲聊同展示（D11）
@@ -69,12 +81,12 @@
 ### Session 031（一期 Agent 模块重写：BE-032~041 + FE-014/015 + BE-040 全部落地）
 - 日期：2026-09-13
 - 本轮目标：按 legal_agent_phase1_technical_design.md 对 agent 模块整体重写（主图 + 独立 Local Legal RAG 子图 + Web/Plugin Stub + 服务层），并按用户决策 D1~D5 实现检索策略全量展示、直接回答路径、节点状态流式展示（Codex 风格浅色小字）、rerank top-10
-- 技术决策（详见 plan.md 与 docs/adr/0001~0008）：
-  - 主图 15 节点（意图路由/编排/动作路由/RAG 子图/Web+Plugin Stub/观察/直接回答/回答生成/grounding/兜底/收尾）+ 子图 10 节点（检索规划/策略路由/三查询变体/并发混合检索/证据重排/评估/恢复规划/结果）；预算 max_global_steps=4 与 max_retries=2 相互独立（ADR-0007）
-  - 服务层适配领域端口：MilvusService→VectorStore（不直连 SDK）、LLMService 结构化输出=JSON 容错+重试 1 次+安全默认、RerankerService=CrossEncoderScorer 懒加载+失败降级（ADR-0003/0004）
-  - **重大实测发现：langgraph 1.2.11 子图节点 custom 事件不上浮父图 astream**（探针证实）→ 事件机制改为 ContextVar 注入式发射器，适配器 astream=ainvoke+队列排空（ADR-0008）
+- 技术决策（详见 plan.md）：
+  - 主图 15 节点（意图路由/编排/动作路由/RAG 子图/Web+Plugin Stub/观察/直接回答/回答生成/grounding/兜底/收尾）+ 子图 10 节点（检索规划/策略路由/三查询变体/并发混合检索/证据重排/评估/恢复规划/结果）；预算 max_global_steps=4 与 max_retries=2 相互独立
+  - 服务层适配领域端口：MilvusService→VectorStore（不直连 SDK）、LLMService 结构化输出=JSON 容错+重试 1 次+安全默认、RerankerService=CrossEncoderScorer 懒加载+失败降级
+  - **重大实测发现：langgraph 1.2.11 子图节点 custom 事件不上浮父图 astream**（探针证实）→ 事件机制改为 ContextVar 注入式发射器，适配器 astream=ainvoke+队列排空
   - **重大实测发现：本机 CPU（无 CUDA，8 线程）Qwen3-Reranker-0.6B 约 15s/对，一轮 20 对约 5 分钟**→ 粗排预截断 rerank_max_candidates=20 + RERANK_ENABLED 开关（默认 true 忠实设计；本机 .env 置 false 走 RRF 降级序，GPU 机器可开启）
-  - grounding 双规则（ADR-0006）：检索路径要求【来源：…】/信息不足声明；直接回答路径只查编造法条；Web/Plugin 未开通跳过校验
+  - grounding 双规则：检索路径要求【来源：…】/信息不足声明；直接回答路径只查编造法条；Web/Plugin 未开通跳过校验
   - SSE 契约向后兼容：新增 status 事件（node/label/phase/duration_ms，中文标签映射 constants.NODE_LABELS）；ChatService/SSE 路由补显式分支（status 不进 delta 聚合）
   - 旧实现机械搬迁 _legacy/ 规避同名冲突（graph/nodes/prompts/state 四文件），BE-038 切换装配时删除；BE-030 置 deprecated
 - 运行过的验证：

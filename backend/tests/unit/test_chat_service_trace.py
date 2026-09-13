@@ -1,4 +1,4 @@
-"""ChatService trace 采集单元测试（BE-043，ADR-0010）。
+"""ChatService trace 采集单元测试（BE-043）。
 
 用假会话服务 + 假问答图 + 假 trace 汇锁定应用层接线契约：
 start_trace → 流程事件（plan/sources/think/regenerating）→ end_trace

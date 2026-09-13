@@ -221,7 +221,7 @@ def test_grounding_rule_requires_source_marker_with_context():
     )))
     assert result["grounding_passed"] is False
     assert any("来源" in issue for issue in result["grounding_issues"])
-    assert result["global_step_count"] == 1  # 打回回路经此计数（ADR-0007）
+    assert result["global_step_count"] == 1  # 打回回路经此计数
 
 
 def test_grounding_rule_requires_no_evidence_declaration():

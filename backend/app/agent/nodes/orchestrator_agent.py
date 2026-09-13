@@ -30,7 +30,7 @@ class OrchestratorAgent:
         step_count = int(state.get("global_step_count") or 0)
         max_steps = int(state.get("max_global_steps") or self._config.max_global_steps)
 
-        # 预算双保险第二道（第一道在 grounding 条件边，ADR-0007）：
+        # 预算双保险第二道（第一道在 grounding 条件边）：
         # 步数耗尽时无视 LLM 输出强制 finish——编排决策可以错，死循环不可以有
         if step_count >= max_steps:
             # 思考内容（BE-042）：强制收尾也是编排决策，前端思考块可见
