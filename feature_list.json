@@ -251,7 +251,8 @@
       "id": "BE-037",
       "name": "Web Search 与 Plugin Stub",
       "description": "web_search_entry_node（web_search_enabled 开关检查，false→DISABLED）、web_search_stub_node（NOT_IMPLEMENTED）、plugin_entry_node、plugin_stub_node（NOT_IMPLEMENTED）；禁止实际访问 Web、禁止动态加载外部代码。",
-      "status": "planned"
+      "status": "passing",
+      "evidence": "2026-09-13：web_search_entry（web_search_enabled=false→DISABLED 结果，true→继续）、web_search_stub（NOT_IMPLEMENTED，DISABLED 结果显式透传不覆盖，零网络访问）、plugin_entry（保留稳定接口，不解析不动态加载）、plugin_stub（NOT_IMPLEMENTED，禁 import/exec/外部代码）。约束 8/9/26 全部满足，二期替换 Stub 主图零重构。pytest 216 passed（新增 5 例）。"
     },
     {
       "id": "BE-038",
