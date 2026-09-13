@@ -265,7 +265,8 @@
       "id": "BE-041",
       "name": "节点运行状态流式事件（Codex 风格）",
       "description": "图构建器统一节点包装器：节点起止计时 + trace 写入 + status SSE 事件推送（phase=start/end、duration_ms、中文 label）；QaStreamEvent 值对象扩展 status 类型与 node/label/phase/duration_ms 字段（只增不改）；ChatService 增 status 分支仅转发不聚合；子图节点事件向主图 astream 传播的专项验证（不传播则降级为注入式发射器）。",
-      "status": "planned"
+      "status": "passing",
+      "evidence": "2026-09-13：QaStreamEvent 扩展 status 类型（node/label/phase/duration_ms，字段只增）；with_node_status 包装器（起止计时+status 事件+日志，异常也推 end 后重抛）经 add_node_traced 应用于主图 15 节点+子图 10 节点；langgraph 1.2.11 子图 custom 事件不上浮父图（探针实测）→ ContextVar 注入式发射器（astream=ainvoke+队列排空，GeneratorExit 取消任务）；RAG 复合节点显式 I/O 过滤；ChatService/SSE 路由补 status 分支（不进 delta 聚合）；修复 action_router 在 finish 时覆盖 last_capability。主图 E2E 5 case（§50）+ 事件序 + 包装器单测。pytest 195 passed。"
     },
     {
       "id": "BE-039",

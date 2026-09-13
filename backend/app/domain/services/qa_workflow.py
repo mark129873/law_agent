@@ -26,14 +26,21 @@ class QaStreamEvent:
     """
 
     # delta：一段增量回答文本；sources：本轮检索的参考来源（检索顺序即序号）；
-    # plan：规划器产出的子查询列表（重规划时再次出现）；regenerating：
-    # verify 校验未通过、回答将重新生成（前端据此清空已渲染增量）
-    type: Literal["delta", "sources", "plan", "regenerating"]
+    # plan：规划器产出的检索查询列表（重规划时再次出现）；regenerating：
+    # 校验未通过、回答将重新生成（前端据此清空已渲染增量）；
+    # status：图节点执行状态（BE-041，phase=start/end + 中文 label + 耗时，
+    # 前端以浅色小字展示工作过程——字段只增不改，旧消费方静默忽略）
+    type: Literal["delta", "sources", "plan", "regenerating", "status"]
     content: str = ""
     # 每项 {"source": 文件名, "content": 命中内容}；用 tuple 保持不可变
     sources: tuple[dict[str, str], ...] = ()
-    # plan 事件携带的子查询列表（数组顺序即执行顺序）
+    # plan 事件携带的检索查询列表（数组顺序即执行顺序）
     sub_queries: tuple[str, ...] = ()
+    # ---- status 事件专用字段（其余事件为空串/None）----
+    node: str = ""          # 节点名（如 hybrid_retriever_node）
+    label: str = ""         # 中文展示标签（如「检索知识库」）
+    phase: str = ""         # start / end
+    duration_ms: int | None = None  # phase=end 时的节点耗时
 
 
 # runtime_checkable：允许装配点与测试用 isinstance 校验实现方满足端口

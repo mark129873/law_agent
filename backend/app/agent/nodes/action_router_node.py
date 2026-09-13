@@ -22,13 +22,17 @@ ACTION_TARGETS: dict[str, str] = {
 
 
 class ActionRouterNode:
-    """登记当前能力（last_capability），映射规则由 route_action 消费。"""
+    """登记当前能力（last_capability），映射规则由 route_action 消费。
+
+    为什么 finish 不写 last_capability：finish 是"收尾指令"而非能力，
+    覆盖会让 answer_generator 读不到刚执行过的能力名
+    （如 web_search 的未开通说明文案依赖它）。
+    """
 
     async def __call__(self, state: AgentState) -> dict:
         timer = Timer()
         action = state.get("current_action") or "finish"
-        return {
-            "last_capability": action,
+        update: dict = {
             "trace": [
                 make_trace(
                     "action_router_node",
@@ -36,8 +40,11 @@ class ActionRouterNode:
                     timer.elapsed_ms(),
                     extra={"action": action, "target": ACTION_TARGETS.get(action, "answer_generator_agent")},
                 )
-            ],
+            ]
         }
+        if action != "finish":
+            update["last_capability"] = action
+        return update
 
 
 def route_action(state: AgentState) -> str:

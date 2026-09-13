@@ -157,10 +157,13 @@ def test_chat_stream_sse_protocol(client: TestClient) -> None:
                 events.append(json.loads(line[len("data: "):]))
 
     assert events[-1]["type"] == "done"
-    assert all(e["type"] != "sources" for e in events)  # 空知识库无来源事件
-    assert events[0]["type"] == "plan"  # BE-030：规划事件先行
-    assert events[0]["sub_queries"] == ["试用期多长？"]
-    deltas = [e["content"] for e in events if e["type"] == "delta"]
+    # status 事件（BE-041）与业务事件交织，业务断言在过滤 status 后进行
+    assert any(e["type"] == "status" and e["phase"] == "start" for e in events)
+    business_events = [e for e in events if e["type"] != "status"]
+    assert all(e["type"] != "sources" for e in business_events)  # 空知识库无来源事件
+    assert business_events[0]["type"] == "plan"  # BE-030：规划事件先行
+    assert business_events[0]["sub_queries"] == ["试用期多长？"]
+    deltas = [e["content"] for e in business_events if e["type"] == "delta"]
     assert "".join(deltas) == "知识库中暂无相关依据，建议咨询专业律师。"
 
     # 流结束后回答必须已持久化；无检索命中 → 来源为 null
@@ -191,11 +194,13 @@ def test_chat_stream_emits_sources_and_persists_them(client: TestClient) -> None
             if line.startswith("data: "):
                 events.append(json.loads(line[len("data: "):]))
 
-    sources_events = [e for e in events if e["type"] == "sources"]
+    # status 事件（BE-041）与业务事件交织，业务断言在过滤 status 后进行
+    business_events = [e for e in events if e["type"] != "status"]
+    sources_events = [e for e in business_events if e["type"] == "sources"]
     assert len(sources_events) == 1  # 最多一次
     # sources 先于第一个 delta 到达（检索节点先于生成节点执行）
-    first_delta_index = events.index(next(e for e in events if e["type"] == "delta"))
-    assert events.index(sources_events[0]) < first_delta_index
+    first_delta_index = business_events.index(next(e for e in business_events if e["type"] == "delta"))
+    assert business_events.index(sources_events[0]) < first_delta_index
     source_items = sources_events[0]["sources"]
     assert source_items and source_items[0]["source"] == "劳动法.txt"
     assert "违约金" in source_items[0]["content"]

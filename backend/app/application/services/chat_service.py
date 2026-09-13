@@ -67,7 +67,7 @@ class ChatService:
                 {"question": question, "history": history}, stream_mode="custom"
             ):
                 if event.type == "plan":
-                    # 规划拆解：仅向下游转发（前端展示子问题），不参与聚合
+                    # 规划拆解：仅向下游转发（前端展示检索策略），不参与聚合
                     yield event
                 elif event.type == "sources":
                     # 参考来源：重规划补检索时会再次出现，保留最新一批
@@ -81,6 +81,10 @@ class ChatService:
                         extra={"service": "chat", "conversation_id": conversation_id},
                     )
                     collected = []
+                    yield event
+                elif event.type == "status":
+                    # 节点执行状态（BE-041）：仅转发供前端展示工作过程，
+                    # 绝不进入 delta 聚合——否则状态文本会被拼进回答
                     yield event
                 else:
                     collected.append(event.content)

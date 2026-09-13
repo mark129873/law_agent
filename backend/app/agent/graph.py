@@ -21,6 +21,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from app.agent.config import AgentConfig
 from app.agent.events import event_emitter_var
+from app.agent.node_status import add_node_traced
 from app.agent.nodes import (
     ACTION_TARGETS,
     ActionRouterNode,
@@ -44,6 +45,14 @@ from app.agent.subgraphs.legal_rag.graph import build_legal_rag_graph
 from app.agent.plugins import PluginEntryNode, PluginStubNode
 from app.agent.web import WebSearchEntryNode, WebSearchStubNode
 from app.domain.services.qa_workflow import QaWorkflow
+
+# legal_rag 子图回写主图的键（其余子图内部键不外泄，见 LegalRAGState）
+_RAG_OUTPUT_KEYS = (
+    "rag_status",
+    "ranked_evidence",
+    "missing_evidence",
+    "suggested_external_queries",
+)
 
 
 class AgentGraphBuilder:
@@ -70,28 +79,44 @@ class AgentGraphBuilder:
         self._agent_config = agent_config or AgentConfig()
         self._rag_config = rag_config or LegalRAGConfig()
 
+    def _make_rag_node(self):
+        """构造 legal_rag 子图调用节点：显式输入/输出过滤（BE-038/041）。"""
+        rag_graph = build_legal_rag_graph(
+            self._planner, self._milvus, self._reranker, self._rag_config
+        )
+
+        async def _run_legal_rag(state: AgentState) -> dict:
+            result = await rag_graph.ainvoke(
+                {
+                    "original_query": state.get("original_query") or state.get("question", ""),
+                    "normalized_query": state.get("normalized_query", ""),
+                }
+            )
+            return {key: result[key] for key in _RAG_OUTPUT_KEYS if key in result}
+
+        return _run_legal_rag
+
     def build(self) -> CompiledStateGraph:
         builder = StateGraph(AgentState)
 
-        builder.add_node("query_router_agent", QueryRouterAgent(self._planner, self._agent_config))
-        builder.add_node("orchestrator_agent", OrchestratorAgent(self._planner, self._agent_config))
-        builder.add_node("action_router_node", ActionRouterNode())
-        # Local Legal RAG 子图整体接入（约束 5）：同名通道传递
-        # original_query/normalized_query 进、rag_status/ranked_evidence 等出
-        builder.add_node(
-            "legal_rag_subgraph",
-            build_legal_rag_graph(self._planner, self._milvus, self._reranker, self._rag_config),
-        )
-        builder.add_node("plugin_entry_node", PluginEntryNode())
-        builder.add_node("plugin_stub_node", PluginStubNode())
-        builder.add_node("web_search_entry_node", WebSearchEntryNode())
-        builder.add_node("web_search_stub_node", WebSearchStubNode())
-        builder.add_node("observation_node", ObservationNode())
-        builder.add_node("direct_answer_agent", DirectAnswerAgent(self._llm))
-        builder.add_node("answer_generator_agent", AnswerGeneratorAgent(self._llm))
-        builder.add_node("grounding_checker_agent", GroundingCheckerAgent(self._llm))
-        builder.add_node("fallback_generator_agent", FallbackGeneratorAgent(self._llm))
-        builder.add_node("final_answer_node", FinalAnswerNode(CitationService()))
+        # 全部节点经 with_node_status 包装（BE-041）：起止 status 事件 + 日志
+        add_node_traced(builder, "query_router_agent", QueryRouterAgent(self._planner, self._agent_config))
+        add_node_traced(builder, "orchestrator_agent", OrchestratorAgent(self._planner, self._agent_config))
+        add_node_traced(builder, "action_router_node", ActionRouterNode())
+        # Local Legal RAG 子图（约束 5）：显式包装子图调用——输入只传检索
+        # 所需键，输出只回写主图声明的键（比依赖 langgraph 同名通道匹配
+        # 更确定，也使子图复合节点本身获得 status 事件）
+        add_node_traced(builder, "legal_rag_subgraph", self._make_rag_node())
+        add_node_traced(builder, "plugin_entry_node", PluginEntryNode())
+        add_node_traced(builder, "plugin_stub_node", PluginStubNode())
+        add_node_traced(builder, "web_search_entry_node", WebSearchEntryNode())
+        add_node_traced(builder, "web_search_stub_node", WebSearchStubNode())
+        add_node_traced(builder, "observation_node", ObservationNode())
+        add_node_traced(builder, "direct_answer_agent", DirectAnswerAgent(self._llm))
+        add_node_traced(builder, "answer_generator_agent", AnswerGeneratorAgent(self._llm))
+        add_node_traced(builder, "grounding_checker_agent", GroundingCheckerAgent(self._llm))
+        add_node_traced(builder, "fallback_generator_agent", FallbackGeneratorAgent(self._llm))
+        add_node_traced(builder, "final_answer_node", FinalAnswerNode(CitationService()))
 
         # ---- 入口与顶层循环（设计 §3）----
         builder.add_edge(START, "query_router_agent")

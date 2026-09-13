@@ -12,6 +12,7 @@ from __future__ import annotations
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from app.agent.node_status import add_node_traced
 from app.agent.services.llm_service import LLMService
 from app.agent.services.milvus_service import MilvusService
 from app.agent.services.reranker_service import RerankerService
@@ -54,16 +55,17 @@ def build_legal_rag_graph(
     config = config or LegalRAGConfig()
     builder = StateGraph(LegalRAGState)
 
-    builder.add_node("retrieval_planner_agent", RetrievalPlannerAgent(llm, config))
-    builder.add_node("strategy_router_node", StrategyRouterNode())
-    builder.add_node("query_rewrite_agent", QueryRewriteAgent(llm, config))
-    builder.add_node("subquery_generator_agent", SubqueryGeneratorAgent(llm, config))
-    builder.add_node("query_expansion_agent", QueryExpansionAgent(llm, config))
-    builder.add_node("hybrid_retriever_node", HybridRetrieverNode(milvus, config))
-    builder.add_node("evidence_ranking_node", EvidenceRankingNode(reranker, config))
-    builder.add_node("evidence_grader_agent", EvidenceGraderAgent(llm, config))
-    builder.add_node("recovery_planner_agent", RecoveryPlannerAgent(llm, config))
-    builder.add_node("rag_result_node", RagResultNode())
+    # 全部节点经 with_node_status 包装（BE-041）：起止 status 事件 + 日志
+    add_node_traced(builder, "retrieval_planner_agent", RetrievalPlannerAgent(llm, config))
+    add_node_traced(builder, "strategy_router_node", StrategyRouterNode())
+    add_node_traced(builder, "query_rewrite_agent", QueryRewriteAgent(llm, config))
+    add_node_traced(builder, "subquery_generator_agent", SubqueryGeneratorAgent(llm, config))
+    add_node_traced(builder, "query_expansion_agent", QueryExpansionAgent(llm, config))
+    add_node_traced(builder, "hybrid_retriever_node", HybridRetrieverNode(milvus, config))
+    add_node_traced(builder, "evidence_ranking_node", EvidenceRankingNode(reranker, config))
+    add_node_traced(builder, "evidence_grader_agent", EvidenceGraderAgent(llm, config))
+    add_node_traced(builder, "recovery_planner_agent", RecoveryPlannerAgent(llm, config))
+    add_node_traced(builder, "rag_result_node", RagResultNode())
 
     builder.add_edge(START, "retrieval_planner_agent")
     builder.add_edge("retrieval_planner_agent", "strategy_router_node")
