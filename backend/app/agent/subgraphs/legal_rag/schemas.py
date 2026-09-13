@@ -52,3 +52,15 @@ class RecoveryPlan(BaseModel):
     )
     reason: str = ""
     missing_evidence: list[str] = Field(default_factory=list)
+
+
+class QueryVariants(BaseModel):
+    """查询变体生成器的统一输出（改写/子问题/扩展共用，BE-034）。
+
+    为什么共用一个模型：三个查询变体 Agent 的输出都是"字符串数组 + 上限"，
+    统一后 LLMService 的解析、上限截断与回退逻辑只写一份；
+    解析失败时的安全默认为空列表——原始查询已在检索队列中，
+    变体是增强而非必需，检索流程不因此中断。
+    """
+
+    queries: list[str] = Field(default_factory=list)

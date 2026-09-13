@@ -68,6 +68,7 @@ class LegalRAGState(TypedDict, total=False):
     # ---- 检索 ----
     retrieval_candidates: Annotated[list[EvidenceItem], operator.add]
     retrieved_query_texts: list[str]  # 已检索过的查询文本（恢复轮排除重复检索）
+    retrieval_error: str  # 检索通道故障描述（空串=正常；rag_result 据此输出 RETRIEVAL_ERROR）
 
     # ---- 证据 ----
     ranked_evidence: list[EvidenceItem]

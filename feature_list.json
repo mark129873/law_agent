@@ -230,7 +230,8 @@
       "id": "BE-034",
       "name": "Local Legal RAG 核心节点",
       "description": "retrieval_planner_agent、strategy_router_node（多选策略 fan-out）、query_rewrite_agent、subquery_generator_agent、query_expansion_agent、hybrid_retriever_node（asyncio.gather 多 Query 并发混合检索）、evidence_ranking_node（合并去重 + original_query 统一 rerank）、evidence_grader_agent、recovery_planner_agent、rag_result_node；legal_rag/prompts 6 文件。",
-      "status": "planned"
+      "status": "passing",
+      "evidence": "2026-09-13：10 节点全部实现——retrieval_planner（安全默认仅原始问题）、strategy_router（统一首轮/恢复计划归一化 + route_strategies 多选 fan-out 条件边）、改写/子查询/扩展三变体（模板方法基类 _query_variant_base，解析失败安全默认空列表、上限 2/5/3）、hybrid_retriever（collect 汇总 original→rewrite→subquery→expansion 去重/排除已检索/截断 8 条 + asyncio.gather 并发 + 单查询重试 1 次 + 全失败置 retrieval_error + plan 事件推全部查询）、evidence_ranking（dedup 三级键合并 matched_queries + original_query 统一 rerank + degraded 入 trace）、evidence_grader（安全默认不充分+预算内可恢复）、recovery_planner（已执行策略反推 + 默认选未执行动作）、rag_result（三态判定 + sources 事件仅在有证据且非故障时推）。prompts 6 文件；emit_event 助手（图外安全丢弃）。pytest 189 passed（新增 21 例节点测试）。"
     },
     {
       "id": "BE-035",
