@@ -223,7 +223,8 @@
       "id": "BE-033",
       "name": "Agent 服务层（LLM/Milvus/Reranker/Citation）",
       "description": "LLMService 适配 LLMProvider（structured_invoke=chat+JSON 容错+重试 1 次+安全默认）；MilvusService 适配 VectorStore 端口（不直连 SDK）；RerankerService 新增（Qwen3-Reranker-0.6B CrossEncoder、CPU、懒加载单例、失败降级 RRF 序 + reranker_degraded）；CitationService 引用构建。Settings 新增 RERANKER_* 字段 + .env.example 同步。",
-      "status": "planned"
+      "status": "passing",
+      "evidence": "2026-09-13：LLMService（structured_invoke=chat+JSON 容错提取+重试 1 次附修正指令+安全默认，extract_json_block 括号配对扫描可处理代码块/前后噪声/嵌套括号）；MilvusService 适配 VectorStore 端口（不直连 SDK，ADR-0003）；RerankerService 依赖注入打分器 + CrossEncoderScorer 懒加载单例（asyncio.Lock 双重检查 + to_thread，失败降级 RRF 序 + degraded 标记，ADR-0004）；CitationService 引用构建；Settings 新增 RERANKER_MODEL_PATH/RERANKER_DEVICE + .env.example 同步 + 本机 .env 指向本地快照；DDD 边界新增 sentence_transformers/torch 等 agent 隔离测试。pytest 168 passed（新增 14 例，修复 pymilvus load_dotenv 污染默认值断言问题）。"
     },
     {
       "id": "BE-034",

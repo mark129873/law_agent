@@ -24,6 +24,9 @@ _TECH_LIBS = {
 # 全项目只允许在 app/agent/ 内导入 langgraph（工作流引擎隔离区）
 _LANGGRAPH_ALLOWED_PREFIX = "agent"
 
+# 重型本地推理库只允许在 app/agent/ 内导入（Reranker 服务隔离区，BE-033/ADR-0004）
+_AGENT_ONLY_LIBS = {"sentence_transformers", "torch", "transformers", "accelerate"}
+
 
 def _imports_of(path: pathlib.Path) -> set[str]:
     """提取文件的全部顶层导入（import a / from a.b 均取首段）。"""
@@ -102,3 +105,14 @@ def test_langgraph_confined_to_agent_module() -> None:
         if "langgraph" in _imports_of(py) and not rel.startswith(_LANGGRAPH_ALLOWED_PREFIX):
             violations.append(rel)
     assert not violations, "langgraph 泄漏出 agent 隔离区：\n" + "\n".join(violations)
+
+
+def test_agent_heavy_libs_confined_to_agent_module() -> None:
+    """sentence_transformers/torch 等重型推理库只允许出现在 app/agent/ 内（BE-033）。"""
+    violations = []
+    for py in _iter_app_files():
+        rel = py.relative_to(APP_ROOT).as_posix()
+        hits = _imports_of(py) & _AGENT_ONLY_LIBS
+        if hits and not rel.startswith(_LANGGRAPH_ALLOWED_PREFIX):
+            violations.append(f"{rel}: {sorted(hits)}")
+    assert not violations, "重型推理库泄漏出 agent 隔离区：\n" + "\n".join(violations)

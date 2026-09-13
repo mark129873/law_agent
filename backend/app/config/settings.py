@@ -123,6 +123,13 @@ class Settings(BaseSettings):
     planner_provider: PlannerProvider = PlannerProvider.FOLLOW
     planner_model: str = ""  # 空串表示用所选 Provider 的默认对话模型
 
+    # ---- Agent 服务（一期重写 BE-033，ADR-0004）----
+    # Rerank 模型：本地 Qwen3-Reranker-0.6B（CrossEncoder，CPU 推理）。
+    # 可填 HF 模型 id（联网解析）或本地快照绝对路径（离线推荐）；
+    # 加载失败时检索降级为 RRF 融合序，不阻断问答。
+    reranker_model_path: str = "Qwen/Qwen3-Reranker-0.6B"
+    reranker_device: str = "cpu"
+
     @property
     def resolved_sqlite_db_path(self) -> str:
         """SQLite 数据库文件的实际路径（相对路径锚定到 backend/）。"""
