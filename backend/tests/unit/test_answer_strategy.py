@@ -4,7 +4,7 @@
 优先依据知识库、无依据时明确说明、禁止虚构法条。
 """
 
-from app.agent.prompts import LEGAL_SYSTEM_PROMPT, build_messages
+from app.agent._legacy.prompts import LEGAL_SYSTEM_PROMPT, build_messages
 from app.domain.entities.message import MessageRole
 
 

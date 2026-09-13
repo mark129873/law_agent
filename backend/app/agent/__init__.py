@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from app.agent.graph import LangGraphQaWorkflow, QaGraphBuilder
+from app.agent._legacy.graph import LangGraphQaWorkflow, QaGraphBuilder
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.services.qa_workflow import QaWorkflow
 from app.application.services.rag_service import RagService

@@ -11,8 +11,8 @@ import json
 import pytest
 import pytest_asyncio
 
-from app.agent.graph import build_qa_graph, run_qa
-from app.agent.prompts import (
+from app.agent._legacy.graph import build_qa_graph, run_qa
+from app.agent._legacy.prompts import (
     LEGAL_SYSTEM_PROMPT,
     PLANNER_SYSTEM_PROMPT,
     VERIFY_JUDGE_SYSTEM_PROMPT,

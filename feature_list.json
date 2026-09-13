@@ -216,7 +216,8 @@
       "id": "BE-032",
       "name": "Agent 模块一期重写骨架（基础类型）",
       "description": "按 legal_agent_phase1_technical_design.md 重建 agent/ 目录结构：主图 state/config/schemas/constants（含节点中文 label 映射表）、legal_rag 子图 state/config/schemas，utils（query 去重汇总/evidence 转换/dedup/trace/timing）。新旧模块并存不接装配点。",
-      "status": "planned"
+      "status": "passing",
+      "evidence": "2026-09-13：目录重建（旧四文件机械搬迁 _legacy/ 避免与 nodes//prompts//graph.py/state.py 同名冲突，BE-038 切换时删除）；主图 AgentState（端口兼容键+子图回写键+trace 追加归约器）、AgentConfig、schemas（QueryRouterOutput/OrchestratorDecision/GroundingCheck/CapabilityResult/Citation）、constants（状态字面量+24 节点中文 label）；legal_rag state（EvidenceItem/LegalRAGState，列表通道 operator.add 归约防 fan-out 并发写冲突、内部 trace 独立命名防父子覆盖）、LegalRAGConfig、schemas（RetrievalPlan/EvidenceGrade/RecoveryPlan）；utils 5 件。pytest 154 passed（新增 utils 15 例）。"
     },
     {
       "id": "BE-033",

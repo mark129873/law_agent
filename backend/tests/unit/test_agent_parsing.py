@@ -4,7 +4,7 @@ parse_sub_queries / parse_judge_verdict 是纯函数（无 IO），
 覆盖规划器与判分器小模型输出的各种失控形态。
 """
 
-from app.agent.nodes import parse_judge_verdict, parse_sub_queries
+from app.agent._legacy.nodes import parse_judge_verdict, parse_sub_queries
 
 # ---- parse_sub_queries ----
 

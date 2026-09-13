@@ -17,7 +17,7 @@ from typing import Any, AsyncIterator
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 
-from app.agent.nodes import (
+from app.agent._legacy.nodes import (
     MAX_PLAN_RUNS,
     VERDICT_CONTRACT,
     VERDICT_GROUNDING,
@@ -26,7 +26,7 @@ from app.agent.nodes import (
     RetrieveNode,
     VerifyNode,
 )
-from app.agent.state import AgentState
+from app.agent._legacy.state import AgentState
 from app.application.services.rag_service import RagService
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.services.qa_workflow import QaWorkflow

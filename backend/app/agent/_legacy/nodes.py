@@ -17,12 +17,12 @@ from abc import ABC, abstractmethod
 
 from langgraph.config import get_stream_writer
 
-from app.agent.prompts import (
+from app.agent._legacy.prompts import (
     build_messages,
     build_plan_messages,
     build_verify_messages,
 )
-from app.agent.state import AgentState
+from app.agent._legacy.state import AgentState
 from app.application.services.rag_service import RagService
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.services.qa_workflow import QaStreamEvent

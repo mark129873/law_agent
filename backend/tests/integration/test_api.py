@@ -42,7 +42,7 @@ class ScriptedLLM(LLMProvider):
     async def chat(self, messages: list[ChatMessage], params: LlmParams | None = None) -> str:
         self.received_messages.append(messages)
         system = messages[0].content
-        from app.agent.prompts import PLANNER_SYSTEM_PROMPT
+        from app.agent._legacy.prompts import PLANNER_SYSTEM_PROMPT
 
         if system == PLANNER_SYSTEM_PROMPT:
             return ""  # 解析失败 → 规划节点透传原问题

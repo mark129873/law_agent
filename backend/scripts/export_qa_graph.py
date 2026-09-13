@@ -27,7 +27,7 @@ _BACKEND_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 os.chdir(_BACKEND_ROOT)
 sys.path.insert(0, os.path.abspath(_BACKEND_ROOT))
 
-from app.agent.graph import QaGraphBuilder
+from app.agent._legacy.graph import QaGraphBuilder
 
 # 导出文件统一落在仓库根的 docs/ 下，与文档内嵌图保持同源
 _REPO_ROOT = os.path.abspath(os.path.join(_BACKEND_ROOT, ".."))
