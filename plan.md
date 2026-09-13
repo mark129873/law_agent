@@ -92,3 +92,63 @@
 - LLM 调用次数增加（D3 已接受）：PLANNER_PROVIDER=glm 缓解 + 每节点 latency 埋点。
 - 测试封闭性：reranker 真实模型不进自动化测试（Fake 替换），仅 E2E 验证。
 - LLM 结构化输出可靠性：JSON 容错 + 重试 1 次 + 安全默认，脚本化 Fake 覆盖回退路径。
+
+---
+
+# 二期增强：思考块（Thinking Panel，BE-042 + FE-016）
+
+> 依据：2026-09-13 用户需求「浅颜色字体统一归类为『思考』tag，可点击展示/收起（默认展示），答案输出完整时收起，且浅色字不仅表示运行节点，还要打印运行内容与 LLM 输出」。
+> 状态：grilling 定稿（ADR-0009），文档先行，代码未动。
+
+## 用户已确认的产品决策
+
+| # | 决策 | 来源 |
+|---|---|---|
+| D6 | 现有浅色过程行（节点状态 FE-015）+「检索策略」面板（FE-014）+ 新增内容行统一归入一个「思考」块容器，置于回答上方；生成中默认展开 | 用户原话「统一归类为『思考』tag，默认展示」 |
+| D7 | 回答输出完成后思考块**自动收起为一行摘要**（「已完成思考 · Ns」+ 展开箭头），点击可展开/收起（DeepSeek 式交互） | 用户选项「收起为一行」 |
+| D8 | 思考内容范围（在节点状态行之外新增四类）：① LLM 决策输出（意图判定/编排决策/证据评估/校验判定等）② 检索运行细节（命中数/重排降级/采用证据数）③ 检索策略并入思考块 ④ 重写/兜底流转过程 | 用户多选全选 |
+| D9 | 详细程度 = **原文截断打印**：非结构化 LLM 输出直接打印原文，超长截断；结构化 JSON 输出把关键字段拼成一句中文后再截断；截断上限 **120 字**，由**后端发事件前统一截断**（前端零截断逻辑） | 用户选「原文截断打印」+ 推荐默认（120 字/JSON 拼句） |
+| D10 | 思考内容**刷新后不保留**（客户端内存快照，与现状一致；不改数据库 schema） | 用户选「刷新后不保留」 |
+| D11 | 闲聊/直接回答路径**同样展示思考块**（内容行少、无检索相关条目，交互全站一致） | 推荐默认 |
+| D12 | 回答**出错时保留思考块**（现状清空 → 改为保留，便于定位出错前执行到哪一步；错误提示仍单独显示） | 推荐默认 |
+
+## Grilling 补齐的行为规则（先写 PRODUCT.md 再实现）
+
+1. think 事件 = 节点内打印的一条思考内容行；与 status 事件互补：status 表节点起止，think 表过程内容；同一节点可发多条 think。
+2. 检索策略并入：plan 事件契约不变（全部检索查询），前端把 sub_queries 渲染为思考块内「检索策略（N 条查询）」一节（有序号列表）；重新规划时覆盖该节。
+3. regenerating/兜底流转由后端发 think（如「回答未通过依据校验，自动重写中」「依据校验未通过且预算耗尽，生成谨慎回答」）——前端不自行合成流转文案，单一事实源在后端。
+4. 节点→内容清单（BE-042 落地范围）：query_router=意图判定；orchestrator=编排决策；strategy_router=选中策略；hybrid_retriever=查询数与命中数；evidence_ranking=重排启用/降级与保留条数；evidence_grader=评估结论；recovery_planner=恢复计划；grounding_checker=校验判定+理由；finish 路由=兜底触发说明；web/plugin stub=未开通说明；final_answer=引用来源条数；observation/direct_answer/answer_generator 不发（避免与回答本体重复）。
+5. 思考块收起后的总耗时 = 首个 status(start) 到最后一个 status(end) 的墙钟时间（前端计时，与节点耗时合计无关）。
+6. 出错保留：onError 不再清空思考行（现有 setNodeStatuses([]) 行为移除）；新提问仍清空重新记录。
+7. 历史消息（刷新/重开）不显示思考块——消息快照仅存当前浏览会话内存。
+8. 截断工具 `truncate_text(text, 120)` 放 agent/utils；think 事件 text 保证 ≤120 字（契约），前省略号结尾。
+
+## SSE 协议扩展（D8/D9 核心，字段只增不改）
+
+```json
+{"type": "think", "node": "evidence_grader_agent", "label": "评估证据充分性", "text": "证据评估：已有证据充分，10 条证据支撑回答"}
+```
+
+- `type` 增加 `"think"`；字段 node/label/text（label 复用 NODE_LABELS 映射）；text 已由后端截断。旧前端对未知事件类型静默忽略，向后兼容（ADR-0002 口径）。
+- ChatService 增 think 显式分支（仅转发，不进 delta 聚合）；SSE 路由增 think 帧映射。
+- test_api 序列断言放宽为「过滤 status 与 think 后保持原序」。
+
+## 功能拆分（feature_list.json）
+
+| ID | 名称 | 内容 |
+|---|---|---|
+| BE-042 | 思考事件流式输出 | truncate_text 工具、QaStreamEvent 扩展 think、各节点按清单发 think（JSON 拼句）、ChatService/SSE 分支、单测+集成事件序+api 断言放宽 |
+| FE-016 | 前端思考块 | types/chat.ts 增 think、AppContext 统一思考行列表（status 合并+think 追加、新提问清空、出错保留）、MessageBlock 思考块容器（生成中默认展开/完成后收起一行/点击切换、检索策略并入、快照挂消息）、build+浏览器回归 |
+
+## 执行序列
+
+1. 文档先行（本次）：plan.md + ADR-0009 + glossary + PRODUCT §3 + ARCHITECTURE §7 + feature_list（planned）→ 提交。
+2. BE-042 后端：工具→事件→节点→服务层→测试（全量 pytest 保持绿）→ 提交。
+3. FE-016 前端：types→AppContext→MessageBlock→npm run build→浏览器实操→ 提交。
+4. 收尾：真实 E2E 断言 think 事件 + 浏览器三场景回归 + progress/session-handoff/feature_list evidence + 沉降对账。
+
+## 风险与对策
+
+- think 事件量增加（每问题约 10~15 条）：浅色小字+可收起语义下可接受；SSE 单帧 <300 字节。
+- LLM 原文含英文/JSON 碎片：JSON 决策一律拼句（D9）；非结构化输出（grounding 理由）接受原文截断。
+- 前端状态复杂化：思考行统一数组（status 合并 + think 追加）替代现有 nodeStatuses 双状态，FE-015 语义保留为其中 status 行。

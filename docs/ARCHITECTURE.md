@@ -325,6 +325,7 @@ Chat 流式协议（SSE，`data: {json}\n\n`）：
 ```json
 {"type": "status", "node": "hybrid_retriever_node", "label": "混合检索知识库", "phase": "start"}
 {"type": "status", "node": "hybrid_retriever_node", "label": "混合检索知识库", "phase": "end", "duration_ms": 812}
+{"type": "think", "node": "evidence_grader_agent", "label": "评估证据充分性", "text": "证据评估：已有证据充分，10 条证据支撑回答"}
 {"type": "plan", "sub_queries": ["原始问题", "子查询一", "扩展术语"]}
 {"type": "sources", "sources": [{"source": "文件名", "content": "命中内容"}]}
 {"type": "delta", "content": "增量文本"}
@@ -332,8 +333,9 @@ Chat 流式协议（SSE，`data: {json}\n\n`）：
 {"type": "done", "conversation_id": "..."}
 {"type": "error", "message": "..."}
 ```
-- 事件顺序：`status`（每个节点起止各一帧，与业务事件交织）→ `plan`（每轮检索规划推一次，携带全部检索查询，重规划后覆盖）→ `sources`（每轮检索有命中时一次，以最终一批为准）→ `delta`（每轮生成一批）→（校验打回时 `regenerating` 后重复）→ `done`/`error`。字段只增不改，向后兼容（旧前端静默忽略新事件）。
+- 事件顺序：`status`（每个节点起止各一帧，与业务事件交织）→ `think`（节点内过程内容行，与 status 交织，同一节点可多条）→ `plan`（每轮检索规划推一次，携带全部检索查询，重规划后覆盖）→ `sources`（每轮检索有命中时一次，以最终一批为准）→ `delta`（每轮生成一批）→（校验打回时 `regenerating` 后重复）→ `done`/`error`。字段只增不改，向后兼容（旧前端静默忽略新事件）。
 - `status`（BE-041）：node=节点名、label=中文标签（agent/constants.py 映射）、phase=start/end、end 帧带 duration_ms；前端以浅色小字实时展示工作过程，done 后保留，新提问重新开始。
+- `think`（BE-042，ADR-0009）：node=产生节点、label=中文标签、text=过程内容文本（决策输出/运行细节/流转说明）；**后端发事件前经 `truncate_text(120)` 统一截断**（契约保证 ≤120 字，JSON 结构化输出先拼成中文句子）；与 status 互补——status 表节点起止，think 表过程内容；前端聚合进「思考」块（生成中默认展开，完成后收起为一行）。
 - `regenerating`：前端须清空已渲染增量（否则两版回答拼接）；`done` 后回答与 sources 已持久化，`GET .../messages` 原样返回（旧库自动 ALTER 迁移），历史消息同样可展示参考文档。
 
 ## 8. 启动与验证

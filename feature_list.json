@@ -295,6 +295,20 @@
       "description": "ARCHITECTURE §2/§3/§5/§7/§9 重写（新目录/端口/图拓扑/协议/测试数）；PRODUCT.md 行为变更定稿（D1~D5 + 行为规则 1~7）；RELIABILITY service 清单与日志规则补充；docs/adr/0001~0008 + docs/glossary.md；scripts/export_qa_graph.py 适配新图重导出 docs/qa_graph.mmd；verify_real_e2e.py 适配 + 真实运行（GLM+真实 Milvus+rerank 模型：上传→流式问答引用条文→sources/检索策略契约→status 事件序列→闲聊直接回答）；progress/session-handoff/clean-state-checklist 收尾与冷热沉降对账。",
       "status": "passing",
       "evidence": "2026-09-13：ARCHITECTURE §0/§1/§2/§3/§4/§5（主图+子图拓扑与事件机制全重写）/§6/§7（status 事件）/§9（197）/§10 同步；docs/glossary.md 术语表 + docs/adr/0001~0008；RELIABILITY agent 日志埋点说明；docs/qa_graph.mmd 重导出（15 节点）；verify_real_e2e.py 增 plan/status 断言并真实运行通过（GLM+Milvus：plan 检索策略→15 节点 status→回答引用第四十二条【来源】→sources 持久化一致）；浏览器端到端三场景（RAG 成功引用第七十一条/证据不足走兜底/闲聊直接回答）全部通过。干净环境 197 passed。"
+    },
+    {
+      "id": "BE-042",
+      "name": "思考事件（think）流式输出",
+      "description": "agent/utils 增 truncate_text(120)；QaStreamEvent 扩展 type=think（node/label/text，text 发事件前统一截断、JSON 决策拼句）；各节点按 plan.md 清单经 emit_event 发思考内容（意图判定/编排决策/选中策略/命中数/重排降级/评估结论/恢复计划/校验判定+理由/兜底触发/未开通说明/来源条数）；ChatService 与 SSE 路由增 think 分支（仅转发不进 delta 聚合）；单测+集成事件序+test_api 断言放宽（过滤 status 与 think 后原序不变）。",
+      "status": "planned",
+      "evidence": ""
+    },
+    {
+      "id": "FE-016",
+      "name": "前端思考块（Thinking Panel）",
+      "description": "types/chat.ts 增 think 事件与 onThink；AppContext 将 nodeStatuses 升级为统一思考行列表（status 同节点合并 + think 追加；新提问清空；出错保留——D12 行为变更）；MessageBlock 思考块容器：聚合状态行/检索策略（plan 并入）/think 内容行，浅色小字，生成中默认展开，完成后自动收起为「已完成思考 · Ns」一行（D7），点击展开/收起，done 后快照挂消息（D10 刷新不保留）；闲聊路径同样展示（D11）；npm run build + 浏览器回归。",
+      "status": "planned",
+      "evidence": ""
     }
   ]
 }

@@ -58,3 +58,5 @@
 | plan 事件语义 | 携带**全部检索查询**（非仅子问题）：前端「检索策略（N 条查询）」展示（决策 D1） |
 | rag_trace | 子图内部 trace（operator.add 归约器），独立命名避免与主图 trace 通道互相覆盖 |
 | trace | 节点执行记录（设计 §48）：node/status/duration_ms + 业务计数；主图 trace 通道为追加归约器 |
+| think 事件 | 节点内打印的思考内容行（BE-042/D9）：node + label + text（后端 `truncate_text(120)` 截断保证；JSON 决策拼句后打印）；与 status 互补——status 表节点起止，think 表过程内容（ADR-0009） |
+| 思考块（Thinking Panel） | 前端统一过程容器（FE-016/D6）：聚合 status 行 + plan 检索策略 + think 内容行；生成中默认展开，完成后自动收起为「已完成思考 · Ns」一行（D7），点击切换；仅内存快照，刷新不保留（D10），出错保留（D12） |
