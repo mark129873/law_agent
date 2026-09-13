@@ -3,13 +3,31 @@
 ## 当前已验证状态
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`（当前分支 feature/auto_coder）
 - 标准启动路径：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 197 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
-- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）全部 passing：主图 + Local Legal RAG 子图 + Web/Plugin Stub + 服务层 + 节点状态流式展示，架构决策见 docs/adr/0001~0008，术语表 docs/glossary.md
+- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 203 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
+- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016，ADR-0009）全部 passing：主图 + Local Legal RAG 子图 + Web/Plugin Stub + 服务层 + 节点状态流式展示 + 豆包式思考块（think 事件打印 LLM 决策/运行细节/流转过程，点击展开收起），架构决策见 docs/adr/0001~0009，术语表 docs/glossary.md
 - 已知性能边界：本机 CPU（无 CUDA）上 Qwen3-Reranker-0.6B 约 15s/对，本地部署默认 `RERANK_ENABLED=false` 走 RRF 降级序（GPU 机器可开启精排）
-- 当前最高优先级未完成功能：无——BE-001~041 与 FE-001~015 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
+- 当前最高优先级未完成功能：无——BE-001~042 与 FE-001~016 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
 - 当前 blocker：无
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md（Session 001~020 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
 
+
+### Session 032（全面测试基线 + 思考块 BE-042/FE-016：全面测试→用户样式反馈→当日实现与验证）
+- 日期：2026-09-13
+- 本轮目标：①按开工流程做全面测试（干净环境全量 pytest/前端 build/真实启动 smoke/真实 E2E）；②用户在浏览器看到 FE-015 平铺状态行后反馈"思考的样式不对，要豆包式可点开收起"→ 按 ADR-0009（grilling 定稿 D6~D12）实现思考块并验证
+- 技术决策（详见 plan.md 二期增强节 + ADR-0009）：
+  - think 事件：QaStreamEvent 扩展 type=think（node/label/text），text 后端 `truncate_text(120)` 统一截断（契约生产端保证）；`emit_think` 统一发射（label 复用 NODE_LABELS，DRY）
+  - 13 个节点接入：意图判定/编排决策（JSON 拼句）/选中检索与恢复策略/并发检索命中数/重排降级/证据评估结论/恢复计划/校验判定+理由（_verdict 统一出口）/兜底与重写流转（regenerating 同源）/Web+Plugin 未开通说明/引用来源条数
+  - 前端思考块（豆包式）：标题行「思考中…/已完成思考 · Ns」+ 箭头点击切换；manualOpen=null 跟随默认（生成中展开、完成自动收起，消息 id 换名触发重挂载实现自动收起）；AppContext nodeStatuses 升级为 ThoughtLine 统一列表（status 按节点合并 + think 追加）；检索策略面板并入思考块；出错保留思考快照（D12，onError 不再清空并给半截消息挂快照+固定 id）；闲聊同展示（D11）
+- 运行过的验证：
+  - 全面测试基线（实现前）：干净环境（data 不存在+reset_milvus）197 passed；前端 build 通过；真实启动 smoke（health/空列表/日志初始化序列含 BE-026 自愈）；真实 E2E 全断言通过（201 ready/plan 检索策略/16 节点 status/引用第四十二条/sources 持久化一致）；浏览器 RAG 路径 + grounding 打回→兜底路径真实触发
+  - 实现后：干净环境 203 passed（+6 例 think 单测：截断规则/契约拼装）；前端 build 通过；浏览器实操：RAG 生成中思考块默认展开（思考中…+意图判定/编排决策/选中检索策略/命中数实时滚动）→完成后自动收起「已完成思考 · 45.8s」→点击展开显示恢复循环全程（改写/拆解/扩展+校验打回理由+预算耗尽+兜底触发）→点击收回；闲聊路径思考块 10.6s 独立保留；截图确认左线缩进浅色样式
+  - 验证后已清理：law_chunks 集合 drop、backend/data 删除、前后端进程停止（vite 残留子进程 taskkill 清理）
+- 已记录证据：feature_list.json BE-042/FE-016（passing）；对账 58=38 热层（34 passing+4 deprecated）+20 archived
+- 已知风险或未解决问题：
+  - grounding judge 模型方差新增观察：闲聊"你能做什么"的能力介绍回答被 direct 规则档打回 3 次才通过（对"不得编造法条"过度敏感），预算耗尽强制收尾兜住——最终行为正确但 LLM 调用增多，建议后续调 direct 路径 judge Prompt 措辞
+  - IAB 自动化点击在该标签页系统性超时（fill/evaluate 正常），用 evaluate 程序化点击走 React 合成事件完成验证——自动化工具性问题，非产品缺陷
+  - 既有风险不变：每问题 LLM 调用 5~8 次；RERANK_ENABLED=false 降级；Ollama 真实 E2E 未跑
+- 下一步最佳动作：可选产品增强（会话重命名/停止按钮/CORS 收敛）、MySQL 8.0 接入、或 Web Search 二期（替换 Stub 即可）
 
 ### Session 031（一期 Agent 模块重写：BE-032~041 + FE-014/015 + BE-040 全部落地）
 - 日期：2026-09-13

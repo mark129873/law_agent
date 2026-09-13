@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from app.agent.constants import CAPABILITY_DISABLED, CAPABILITY_NOT_IMPLEMENTED
 from app.agent.state import AgentState
+from app.agent.utils.think_utils import emit_think
 from app.agent.utils.trace_utils import make_trace
 from app.agent.utils.timing_utils import Timer
 
@@ -28,6 +29,8 @@ class WebSearchStubNode:
                                extra={"status": CAPABILITY_DISABLED, "passthrough": True})
                 ]
             }
+        # 思考内容（BE-042）：未开通说明——一期 Stub 明确告知不编造外部结果
+        emit_think("web_search_stub_node", "网络搜索未开通，跳过外部检索")
         return {
             "capability_result": {
                 "capability": "web_search",

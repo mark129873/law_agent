@@ -13,6 +13,7 @@ from app.agent.schemas import GroundingCheck
 from app.agent.services.llm_service import LLMService
 from app.agent.state import AgentState
 from app.agent.utils.evidence_utils import format_evidence_context
+from app.agent.utils.think_utils import emit_think
 from app.agent.utils.trace_utils import make_trace
 from app.agent.utils.timing_utils import Timer
 
@@ -91,6 +92,17 @@ class GroundingCheckerAgent:
     ) -> dict:
         """统一写出判定与步数；打回反馈写入 grounding_issues 供编排消费。"""
         issues = list(check.unsupported_claims) + list(check.citation_issues)
+        # 思考内容（BE-042）：校验判定与理由是思考块最有价值的内容之一，
+        # 统一在判定出口发射（规则档/LLM judge/跳过三种路径都经此处）
+        if skipped:
+            emit_think("grounding_checker_agent", f"依据校验跳过：{check.reason}")
+        elif check.passed:
+            emit_think("grounding_checker_agent", f"依据校验通过：{check.reason or '回答与依据一致'}")
+        else:
+            emit_think(
+                "grounding_checker_agent",
+                f"依据校验未通过：{'；'.join(issues) or check.reason}",
+            )
         return {
             "grounding_passed": check.passed,
             "grounding_issues": [] if check.passed else issues or [check.reason or "回答依据校验未通过"],

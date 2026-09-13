@@ -17,6 +17,7 @@ from app.agent.prompts.fallback_generator import build_fallback_messages
 from app.agent.services.llm_service import LLMService
 from app.agent.state import AgentState
 from app.agent.utils.evidence_utils import format_evidence_context
+from app.agent.utils.think_utils import emit_think
 from app.agent.utils.trace_utils import make_trace
 from app.agent.utils.timing_utils import Timer
 from app.domain.services.qa_workflow import QaStreamEvent
@@ -79,6 +80,8 @@ class AnswerGeneratorAgent:
         # 打回重生成前必推 regenerating（前端清空已渲染增量，SSE 契约）
         if is_retry:
             emit_event(QaStreamEvent(type="regenerating"))
+            # 思考内容（BE-042）：重写是关键流转，前端思考块可见
+            emit_think("answer_generator_agent", "回答未通过依据校验，根据校验反馈自动重写中")
 
         logger.info(
             "Agent answer generation started",

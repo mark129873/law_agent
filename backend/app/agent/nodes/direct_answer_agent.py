@@ -9,6 +9,7 @@ from app.agent.events import emit_event
 from app.agent.prompts.direct_answer import build_direct_messages
 from app.agent.services.llm_service import LLMService
 from app.agent.state import AgentState
+from app.agent.utils.think_utils import emit_think
 from app.agent.utils.trace_utils import make_trace
 from app.agent.utils.timing_utils import Timer
 from app.domain.services.qa_workflow import QaStreamEvent
@@ -32,6 +33,8 @@ class DirectAnswerAgent:
         # 打回重答（grounding 失败后重走 direct）：清空旧增量前通知前端
         if state.get("answer_draft"):
             emit_event(QaStreamEvent(type="regenerating"))
+            # 思考内容（BE-042）：重写是关键流转，前端思考块可见
+            emit_think("direct_answer_agent", "回答未通过校验（不得编造法条），自动重写中")
 
         messages = build_direct_messages(
             state.get("original_query") or state["question"],

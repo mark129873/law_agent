@@ -9,6 +9,13 @@ interface ChatStreamParams {
   question: string
 }
 
+/** 思考内容行负载（BE-042）：与 think SSE 事件字段一致 */
+export interface ThinkPayload {
+  node: string
+  label: string
+  text: string
+}
+
 /** 流式问答回调：每收到一段增量、来源、结束信号或错误就通知调用方 */
 interface ChatStreamHandlers {
   onDelta: (content: string) => void
@@ -20,6 +27,8 @@ interface ChatStreamHandlers {
   onRegenerating?: () => void
   /** 节点执行状态（BE-041）：start 表示环节开始，end 携带耗时；同环节可能多轮出现（恢复重试） */
   onStatus?: (status: NodeStatus & { phase: 'start' | 'end' }) => void
+  /** 思考内容行（BE-042）：节点的决策输出/运行细节/流转说明，一条一行 */
+  onThink?: (think: ThinkPayload) => void
   onDone: (conversationId: string) => void
   onError: (message: string) => void
 }
@@ -27,8 +36,8 @@ interface ChatStreamHandlers {
 /**
  * 提交问题并持续消费流式回答。
  * 协议（docs/ARCHITECTURE.md 第 7 节）：响应体由若干条 "data: {json}\n\n" 组成，
- * json 的 type 字段区分 status（节点状态）/ plan（检索策略）/ sources（参考来源）/
- * delta（增量文本）/ regenerating（重生成）/ done（结束）/ error（出错）。
+ * json 的 type 字段区分 status（节点状态）/ think（思考内容）/ plan（检索策略）/
+ * sources（参考来源）/ delta（增量文本）/ regenerating（重生成）/ done（结束）/ error（出错）。
  */
 export async function streamChat(params: ChatStreamParams, handlers: ChatStreamHandlers): Promise<void> {
   const res = await fetch('/api/chat/stream', {
@@ -69,6 +78,8 @@ export async function streamChat(params: ChatStreamParams, handlers: ChatStreamH
         else if (event.type === 'regenerating') handlers.onRegenerating?.()
         else if (event.type === 'status')
           handlers.onStatus?.({ node: event.node, label: event.label, phase: event.phase, durationMs: event.duration_ms })
+        else if (event.type === 'think')
+          handlers.onThink?.({ node: event.node, label: event.label, text: event.text })
         else if (event.type === 'done') handlers.onDone(event.conversation_id)
         else if (event.type === 'error') handlers.onError(event.message)
       } catch {

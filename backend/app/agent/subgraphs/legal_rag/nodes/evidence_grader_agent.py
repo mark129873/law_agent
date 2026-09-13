@@ -14,6 +14,7 @@ from app.agent.subgraphs.legal_rag.prompts.evidence_grader import build_grader_m
 from app.agent.subgraphs.legal_rag.schemas import EvidenceGrade
 from app.agent.subgraphs.legal_rag.state import LegalRAGState
 from app.agent.utils.evidence_utils import format_evidence_context
+from app.agent.utils.think_utils import emit_think
 from app.agent.utils.trace_utils import make_trace
 from app.agent.utils.timing_utils import Timer
 
@@ -47,6 +48,18 @@ class EvidenceGraderAgent:
             EvidenceGrade,
             default=default,
         )
+        # 思考内容（BE-042）：评估结论拼成中文（JSON 判读 → 一句话）
+        if grade.sufficient:
+            emit_think(
+                "evidence_grader_agent",
+                f"证据评估：证据充分，{len(evidence)} 条证据支撑回答",
+            )
+        else:
+            recovery_note = "可本地恢复" if grade.local_recovery_possible else "本地不可恢复"
+            emit_think(
+                "evidence_grader_agent",
+                f"证据评估：证据不充分，缺失 {len(grade.missing_evidence)} 项证据（{recovery_note}）",
+            )
         return {
             "evidence_sufficient": grade.sufficient,
             "evidence_confidence": grade.confidence,

@@ -7,8 +7,17 @@ from app.agent.prompts.query_router import build_router_messages
 from app.agent.schemas import QueryRouterOutput
 from app.agent.services.llm_service import LLMService
 from app.agent.state import AgentState
+from app.agent.utils.think_utils import emit_think
 from app.agent.utils.trace_utils import make_trace
 from app.agent.utils.timing_utils import Timer
+
+# 请求类型 → 思考内容文案（BE-042/D9：JSON 结构化输出拼成中文句子后打印）
+_REQUEST_TYPE_LABELS = {
+    "local_rag": "法律事实型问题，将检索知识库",
+    "plugin": "插件能力请求",
+    "web": "网络搜索请求",
+    "direct": "一般性对话，将直接回答",
+}
 
 
 class QueryRouterAgent:
@@ -29,6 +38,11 @@ class QueryRouterAgent:
         default = QueryRouterOutput(normalized_query=question)
         routed = await self._llm.structured_invoke(
             build_router_messages(question), QueryRouterOutput, default=default
+        )
+        # 思考内容（BE-042）：把结构化判读拼成一句中文，前端思考块可读
+        emit_think(
+            "query_router_agent",
+            f"意图判定：{_REQUEST_TYPE_LABELS.get(routed.request_type, routed.request_type)}",
         )
         return {
             "original_query": question,

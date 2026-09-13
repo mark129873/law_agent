@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from app.agent.constants import CAPABILITY_NOT_IMPLEMENTED
 from app.agent.state import AgentState
+from app.agent.utils.think_utils import emit_think
 from app.agent.utils.trace_utils import make_trace
 from app.agent.utils.timing_utils import Timer
 
@@ -17,6 +18,8 @@ class PluginStubNode:
 
     async def __call__(self, state: AgentState) -> dict:
         timer = Timer()
+        # 思考内容（BE-042）：未开通说明——一期 Stub 明确告知不加载外部代码
+        emit_think("plugin_stub_node", "插件能力未开通，跳过插件调用")
         return {
             "capability_result": {
                 "capability": "plugin",

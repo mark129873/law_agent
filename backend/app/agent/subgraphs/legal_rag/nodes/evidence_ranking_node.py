@@ -13,6 +13,7 @@ from app.agent.services.reranker_service import RerankerService
 from app.agent.subgraphs.legal_rag.config import LegalRAGConfig
 from app.agent.subgraphs.legal_rag.state import EvidenceItem, LegalRAGState
 from app.agent.utils.dedup_utils import dedup_candidates
+from app.agent.utils.think_utils import emit_think
 from app.agent.utils.trace_utils import make_trace
 from app.agent.utils.timing_utils import Timer
 
@@ -38,6 +39,17 @@ class EvidenceRankingNode:
             candidates, key=lambda item: item.get("rrf_score") or 0.0, reverse=True
         )[: self._config.rerank_max_candidates]
         result = await self._reranker.rerank(original, pre_rerank, top_n=self._config.rerank_top_k)
+        # 思考内容（BE-042）：运行细节——精排是否可用（降级=按 RRF 融合序）与保留条数
+        if result.degraded:
+            emit_think(
+                "evidence_ranking_node",
+                f"证据重排降级（精排不可用），按融合排序保留 {len(result.items)} 条证据",
+            )
+        else:
+            emit_think(
+                "evidence_ranking_node",
+                f"证据重排完成：候选 {len(pre_rerank)} 条，保留 {len(result.items)} 条证据",
+            )
         return {
             "ranked_evidence": result.items,
             "rag_trace": [

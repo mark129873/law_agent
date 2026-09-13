@@ -359,12 +359,12 @@ npm run build                                      # tsc 类型检查 + 生产�
 
 | 层级 | 位置 | 数量 | 验证内容 |
 |------|------|------|---------|
-| 单元 | tests/unit/ | 127（含 agent 76） | DI 容器、配置、DDD 边界守护（AST，含 langgraph 与 sentence_transformers/torch 隔离区）、日志契约、Agent utils 纯函数、LLM 结构化输出容错、Reranker 排序与降级、RAG 子图 10 节点、主图 9 节点、Stub、状态包装器、回答策略、端口契约（内存 Fake）、文档 Pipeline 与解析器 |
+| 单元 | tests/unit/ | 133（含 agent 82） | DI 容器、配置、DDD 边界守护（AST，含 langgraph 与 sentence_transformers/torch 隔离区）、日志契约、Agent utils 纯函数（含思考内容截断/发射 BE-042）、LLM 结构化输出容错、Reranker 排序与降级、RAG 子图 10 节点、主图 9 节点、Stub、状态包装器、回答策略、端口契约（内存 Fake）、文档 Pipeline 与解析器 |
 | 集成 | tests/integration/（除 API） | 70（含 agent 12） | 真实 SQLite（持久化/级联/事务/迁移/ORM 契约/排序契约）、首次启动自愈、真实 Milvus 混合检索（不可达时跳过）、legal_rag 子图全场景（简单/多变体/恢复循环/预算耗尽/检索故障/事件序列）、主图 E2E 五 case（设计 §50：RAG 成功/直接回答/证据不足/Web DISABLED/Plugin NOT_IMPLEMENTED）、LLM/Embedding/RAG |
 | 接口 | tests/integration/test_api.py | 9 | 完整应用（临时 SQLite + Fake 向量库/LLM）：会话 CRUD、统一错误、SSE 协议（status/plan 先行、过滤 status 后原序不变）、文档上传删除、x-request-id |
 | 端到端 | scripts/（手工运行） | 3 脚本 | 真实 uvicorn + 真实 Milvus/LLM：上传→入库→流式 RAG 问答引用原文→检索策略/状态事件→持久化 |
 
-- 自动化合计 197 个，`uv run pytest` 全量运行无需外部服务（Fake 遵循领域端口，与生产实现互换验证同一契约）；唯一例外 test_milvus_vector_store.py 需真实 Milvus，不可达时自动跳过。
+- 自动化合计 203 个，`uv run pytest` 全量运行无需外部服务（Fake 遵循领域端口，与生产实现互换验证同一契约）；唯一例外 test_milvus_vector_store.py 需真实 Milvus，不可达时自动跳过。
 - Agent 测试的 Fake 体系：脚本化 LLMProvider（按系统提示特征分流输出）、Fake Embedding/VectorStore/RerankScorer——rerank 真实模型不进自动化测试，仅真实 E2E 验证。
 - E2E 脚本依赖真实服务，不纳入 pytest（保持自动化封闭性）；结论记录于 feature_list.json 各功能 evidence。测试数据源：tests/data_source/（专利法 TXT + MD 等）。
 

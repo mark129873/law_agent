@@ -157,10 +157,9 @@ def test_chat_stream_sse_protocol(client: TestClient) -> None:
                 events.append(json.loads(line[len("data: "):]))
 
     assert events[-1]["type"] == "done"
-    # status 事件（BE-041）与业务事件交织，业务断言在过滤 status 后进行
+    # status/think 过程事件（BE-041/BE-042）与业务事件交织，业务断言过滤后进行
     assert any(e["type"] == "status" and e["phase"] == "start" for e in events)
-    business_events = [e for e in events if e["type"] != "status"]
-    assert all(e["type"] != "sources" for e in business_events)  # 空知识库无来源事件
+    business_events = [e for e in events if e["type"] not in ("status", "think")]
     assert business_events[0]["type"] == "plan"  # BE-030：规划事件先行
     assert business_events[0]["sub_queries"] == ["试用期多长？"]
     deltas = [e["content"] for e in business_events if e["type"] == "delta"]
@@ -194,8 +193,8 @@ def test_chat_stream_emits_sources_and_persists_them(client: TestClient) -> None
             if line.startswith("data: "):
                 events.append(json.loads(line[len("data: "):]))
 
-    # status 事件（BE-041）与业务事件交织，业务断言在过滤 status 后进行
-    business_events = [e for e in events if e["type"] != "status"]
+    # status/think 过程事件（BE-041/BE-042）与业务事件交织，业务断言过滤后进行
+    business_events = [e for e in events if e["type"] not in ("status", "think")]
     sources_events = [e for e in business_events if e["type"] == "sources"]
     assert len(sources_events) == 1  # 最多一次
     # sources 先于第一个 delta 到达（检索节点先于生成节点执行）

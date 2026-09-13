@@ -7,17 +7,21 @@ from app.agent.utils.evidence_utils import (
     format_evidence_context,
 )
 from app.agent.utils.query_utils import collect_retrieval_queries, normalize_query_text
+from app.agent.utils.think_utils import THINK_MAX_CHARS, emit_think, truncate_text
 from app.agent.utils.timing_utils import Timer
 from app.agent.utils.trace_utils import make_trace
 
 __all__ = [
+    "THINK_MAX_CHARS",
     "Timer",
     "chunk_to_evidence",
     "collect_retrieval_queries",
     "content_hash",
     "dedup_candidates",
     "evidence_to_source",
+    "emit_think",
     "format_evidence_context",
     "make_trace",
     "normalize_query_text",
+    "truncate_text",
 ]

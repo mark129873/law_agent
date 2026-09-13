@@ -13,6 +13,7 @@ from app.agent.subgraphs.legal_rag.config import LegalRAGConfig
 from app.agent.subgraphs.legal_rag.prompts.recovery_planner import build_recovery_messages
 from app.agent.subgraphs.legal_rag.schemas import RecoveryPlan
 from app.agent.subgraphs.legal_rag.state import LegalRAGState
+from app.agent.utils.think_utils import emit_think
 from app.agent.utils.trace_utils import make_trace
 from app.agent.utils.timing_utils import Timer
 
@@ -43,6 +44,8 @@ class RecoveryPlannerAgent:
                 missing_evidence=missing,
             ),
         )
+        # 思考内容（BE-042）：恢复计划理由（模型原文，统一截断打印）
+        emit_think("recovery_planner_agent", f"恢复计划：{plan.reason}")
         return {
             "recovery_plan": {
                 "actions": list(plan.actions),

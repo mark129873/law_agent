@@ -9,6 +9,7 @@ from app.agent.prompts.fallback_generator import build_fallback_messages
 from app.agent.services.llm_service import LLMService
 from app.agent.state import AgentState
 from app.agent.utils.evidence_utils import format_evidence_context
+from app.agent.utils.think_utils import emit_think
 from app.agent.utils.trace_utils import make_trace
 from app.agent.utils.timing_utils import Timer
 from app.domain.services.qa_workflow import QaStreamEvent
@@ -29,6 +30,8 @@ class FallbackGeneratorAgent:
 
     async def __call__(self, state: AgentState) -> dict:
         timer = Timer()
+        # 思考内容（BE-042）：兜底触发是关键流转，前端思考块必须可见
+        emit_think("fallback_generator_agent", "回答依据校验未通过且重试预算耗尽，基于已有证据生成谨慎回答")
         # 旧草稿已流式输出过 → 先推 regenerating（前端清空增量，防拼接）
         if state.get("answer_draft"):
             emit_event(QaStreamEvent(type="regenerating"))

@@ -5,7 +5,7 @@
 // 所有网络请求都发生在 state/api 层，UI 组件不直接 fetch，保证数据访问只有一份实现。
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { Conversation, KnowledgeDocument, Message, NodeStatus, ReferenceSource } from '../types'
+import type { Conversation, KnowledgeDocument, Message, NodeStatus, ThoughtLine, ReferenceSource } from '../types'
 import * as conversationsApi from '../api/conversations'
 import * as documentsApi from '../api/documents'
 import { streamChat } from '../api/chat'
@@ -37,8 +37,8 @@ interface AppContextValue {
   streamError: string | null
   /** 检索规划产出的全部查询（检索策略展示）；null 表示当前没有可展示的策略 */
   subQueries: string[] | null
-  /** 当前生成过程的工作环节记录（BE-041/FE-015）：生成中实时更新，完成后快照挂到消息上 */
-  nodeStatuses: NodeStatus[]
+  /** 当前思考块过程记录（BE-041/BE-042/FE-016）：生成中实时更新，完成后快照挂到消息上 */
+  thoughts: ThoughtLine[]
 
   // —— 会话动作 ——
   refreshConversations: () => Promise<void>
@@ -141,32 +141,47 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamError, setStreamError] = useState<string | null>(null)
-  // 检索策略（plan 事件携带）：仅在生成过程中展示，结束后清空
+  // 检索策略（plan 事件携带）：生成中并入思考块展示；done 时快照挂到消息
   const [subQueries, setSubQueries] = useState<string[] | null>(null)
-  // 工作环节记录（BE-041）：status 事件实时更新；done 时快照挂到助手消息上，
-  // 供"回答完成后保留显示"；发起新提问时清空重新开始
-  const [nodeStatuses, setNodeStatuses] = useState<NodeStatus[]>([])
-  // 与 nodeStatuses 同步的 ref：onDone 回调里要读取最新值（闭包旧值问题）
-  const nodeStatusesRef = useRef<NodeStatus[]>([])
+  // 与 subQueries 同步的 ref：done/onError 回调里读快照用（闭包旧值问题）
+  const subQueriesRef = useRef<string[] | null>(null)
+  // 思考块过程记录（BE-041/BE-042）：status 行按节点合并、think 行追加，
+  // done 时快照挂到助手消息上保留显示；发起新提问时清空重新开始
+  const [thoughts, setThoughts] = useState<ThoughtLine[]>([])
+  // 与 thoughts 同步的 ref：onDone/onError 回调里要读快照（闭包旧值问题）
+  const thoughtsRef = useRef<ThoughtLine[]>([])
+  // 本轮思考起始墙钟（毫秒）：done 时算总耗时，思考块收起标题显示
+  const streamStartRef = useRef<number>(Date.now())
 
   /**
-   * 合并一条节点状态：同节点复用同一行（恢复重试时该行会再次变为执行中），
-   * start 更新标签并清空耗时，end 写入耗时——保持事件到达顺序即展示顺序。
+   * 合并一条节点状态行（kind=status）：同节点复用同一行（恢复重试时该行
+   * 会再次变为执行中），start 更新标签并清空耗时，end 写入耗时——
+   * 保持事件到达顺序即展示顺序。
    */
   const applyNodeStatus = useCallback((status: NodeStatus & { phase: 'start' | 'end' }) => {
-    const update = (prev: NodeStatus[]): NodeStatus[] => {
-      const index = prev.findIndex((item) => item.node === status.node)
-      const next =
+    const update = (prev: ThoughtLine[]): ThoughtLine[] => {
+      const index = prev.findIndex((item) => item.kind !== 'text' && item.node === status.node)
+      const next: ThoughtLine =
         status.phase === 'start'
-          ? { node: status.node, label: status.label }
-          : { node: status.node, label: status.label, durationMs: status.durationMs }
+          ? { kind: 'status', node: status.node, label: status.label }
+          : { kind: 'status', node: status.node, label: status.label, durationMs: status.durationMs }
       if (index === -1) return [...prev, next]
       const copy = [...prev]
       copy[index] = { ...copy[index], ...next }
       return copy
     }
-    setNodeStatuses(update)
-    nodeStatusesRef.current = update(nodeStatusesRef.current)
+    setThoughts(update)
+    thoughtsRef.current = update(thoughtsRef.current)
+  }, [])
+
+  /** 追加一条思考内容行（BE-042，kind=text）：节点决策/运行细节/流转说明 */
+  const applyThink = useCallback((think: { node: string; label: string; text: string }) => {
+    const update = (prev: ThoughtLine[]): ThoughtLine[] => [
+      ...prev,
+      { kind: 'text', node: think.node, label: think.label, text: think.text },
+    ]
+    setThoughts(update)
+    thoughtsRef.current = update(thoughtsRef.current)
   }, [])
 
   const clearStreamError = useCallback(() => setStreamError(null), [])
@@ -180,9 +195,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setIsStreaming(true)
       setStreamError(null)
       setSubQueries(null)
-      // 新提问重新开始记录工作环节（上一条消息的过程记录已挂到消息上保留）
-      setNodeStatuses([])
-      nodeStatusesRef.current = []
+      subQueriesRef.current = null
+      // 新提问重新开始记录思考过程（上一条消息的过程快照已挂到消息上保留）
+      setThoughts([])
+      thoughtsRef.current = []
+      // 记录本轮思考起始墙钟：done 时算总耗时（思考块收起标题显示）
+      streamStartRef.current = Date.now()
 
       // 本地乐观消息的临时 id 声明在 try 外：catch 里才能清理它们
       const tempUserId = `local-user-${Date.now()}`
@@ -220,12 +238,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
               sources = received
             },
             onPlan: (received) => {
-              // 检索策略：生成中展示，重新规划时会更新
+              // 检索策略：生成中并入思考块展示，重新规划时会更新
               setSubQueries(received)
+              subQueriesRef.current = received
             },
             onStatus: (status) => {
-              // 工作环节（BE-041）：浅色小字实时展示后端处理进度
+              // 节点状态行（BE-041）：思考块内浅色小字实时展示
               applyNodeStatus(status)
+            },
+            onThink: (think) => {
+              // 思考内容行（BE-042）：决策输出/运行细节/流转说明，追加一行
+              applyThink(think)
             },
             onRegenerating: () => {
               // 校验未通过、回答重写（BE-030）：清空已渲染的增量内容，
@@ -236,24 +259,50 @@ export function AppProvider({ children }: { children: ReactNode }) {
             },
             onDone: () => {
               // 换掉临时 id（移除流式光标标记），本地内容与后端持久化内容一致，无需重新拉取；
-              // 同时把工作环节快照挂到消息上——完成后保留显示（FE-015），直到下一条提问
+              // 同时把思考过程快照挂到消息上——完成后保留显示（FE-016），
+              // 收起后点击标题可重新展开；直到下一条提问
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId
-                    ? { ...m, id: `assistant-${Date.now()}`, sources, steps: nodeStatusesRef.current }
+                    ? {
+                        ...m,
+                        id: `assistant-${Date.now()}`,
+                        sources,
+                        steps: thoughtsRef.current,
+                        subQueries: subQueriesRef.current,
+                        thinkingMs: Date.now() - streamStartRef.current,
+                      }
                     : m,
                 ),
               )
-              setSubQueries(null) // 检索策略只在生成过程中展示
+              setSubQueries(null) // 检索策略快照已挂消息，生成中状态清空
+              subQueriesRef.current = null
             },
             onError: (message) => {
               setStreamError(message)
               setSubQueries(null)
-              setNodeStatuses([]) // 出错时过程记录不完整，一并清掉
-              nodeStatusesRef.current = []
-              // 出错时移除空的助手占位；已有部分内容的保留展示。
-              // 后端"异常中断不落库"，所以刷新后看到的与本地一致。
-              setMessages((prev) => prev.filter((m) => m.id !== assistantId || m.content !== ''))
+              subQueriesRef.current = null
+              // 出错时思考过程保留（D12）：用户能看到出错前执行到哪一步。
+              // 已有部分内容的助手消息：挂上过程快照并换成固定 id（不再显示流式光标）；
+              // 空占位移除。后端"异常中断不落库"，刷新后看到的与本地一致。
+              const snapshot = thoughtsRef.current
+              const startAt = streamStartRef.current
+              setMessages((prev) =>
+                prev
+                  .map((m) =>
+                    m.id === assistantId && m.content !== ''
+                      ? {
+                          ...m,
+                          id: `assistant-${Date.now()}`,
+                          steps: snapshot,
+                          subQueries: null,
+                          thinkingMs: Date.now() - startAt,
+                        }
+                      : m,
+                  )
+                  .filter((m) => m.id !== assistantId || m.content !== ''),
+              )
+              // 思考行列表保留展示（跟随当前流式消息），下一条提问时才清空
             },
           },
         )
@@ -341,7 +390,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       streamError,
       clearStreamError,
       subQueries,
-      nodeStatuses,
+      thoughts,
       documents,
       refreshDocuments,
       uploadDocument,
@@ -364,7 +413,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       streamError,
       clearStreamError,
       subQueries,
-      nodeStatuses,
+      thoughts,
       documents,
       refreshDocuments,
       uploadDocument,

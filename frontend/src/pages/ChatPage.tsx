@@ -22,7 +22,7 @@ export default function ChatPage() {
     streamError,
     clearStreamError,
     subQueries,
-    nodeStatuses,
+    thoughts,
     sendQuestion,
   } = useAppStore()
 
@@ -101,9 +101,11 @@ export default function ChatPage() {
                   key={message.id}
                   message={message}
                   streaming={isCurrent}
-                  subQueries={isCurrent ? subQueries : null}
-                  // 过程记录：生成中用 Context 实时值；已完成的消息用快照（FE-015 保留显示）
-                  steps={isCurrent ? nodeStatuses : message.steps}
+                  // 检索策略：生成中用 Context 实时值；已完成的消息用快照（思考块内展示）
+                  subQueries={isCurrent ? subQueries : message.subQueries}
+                  // 思考过程行：生成中用 Context 实时值；已完成的消息用快照（FE-016 保留显示）
+                  steps={isCurrent ? thoughts : message.steps}
+                  thinkingMs={message.thinkingMs}
                 />
               )
             })}

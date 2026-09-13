@@ -16,6 +16,7 @@ from app.agent.subgraphs.legal_rag.config import LegalRAGConfig
 from app.agent.subgraphs.legal_rag.state import EvidenceItem, LegalRAGState
 from app.agent.utils.evidence_utils import chunk_to_evidence
 from app.agent.utils.query_utils import collect_retrieval_queries
+from app.agent.utils.think_utils import emit_think
 from app.agent.utils.trace_utils import make_trace
 from app.agent.utils.timing_utils import Timer
 from app.domain.services.qa_workflow import QaStreamEvent
@@ -53,6 +54,7 @@ class HybridRetrieverNode:
         )
         if not queries:
             # 全部查询都已检索过（恢复轮排除后无新增）——不再重复检索
+            emit_think("hybrid_retriever_node", "本轮无新增查询（均已检索过），跳过重复检索")
             return {
                 "rag_trace": [
                     make_trace("hybrid_retriever_node", "success", timer.elapsed_ms(),
@@ -87,10 +89,18 @@ class HybridRetrieverNode:
         }
         if failed and not candidates:
             # 全部查询失败（各重试 1 次后）→ 检索通道故障（设计 §47：返回错误而非无限重试）
+            emit_think("hybrid_retriever_node", f"检索故障：全部 {len(queries)} 条查询失败")
             update["retrieval_error"] = f"hybrid search failed for all {len(queries)} queries"
             logger.error(
                 "Agent hybrid retrieval failed for all queries",
                 extra={"service": "agent", "query_count": len(queries), "failed": failed},
+            )
+        else:
+            # 思考内容（BE-042）：运行细节——查询数/命中数/失败数一行汇总
+            failed_note = f"，{len(failed)} 条查询失败" if failed else ""
+            emit_think(
+                "hybrid_retriever_node",
+                f"并发检索 {len(queries)} 条查询，命中 {len(candidates)} 条候选{failed_note}",
             )
         return update
 

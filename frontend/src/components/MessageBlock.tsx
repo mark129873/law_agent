@@ -3,34 +3,97 @@
 // 按字面显示会出现星号噪声；react-markdown 默认不解析原始 HTML，无注入风险。
 import { useState } from 'react'
 import Markdown from 'react-markdown'
-import { Books, CaretDown } from '@phosphor-icons/react'
-import type { Message, NodeStatus, ReferenceSource } from '../types'
+import { Books, Brain, CaretDown } from '@phosphor-icons/react'
+import type { Message, ThoughtLine, ReferenceSource } from '../types'
 
 interface MessageBlockProps {
   message: Message
-  /** 该消息是否正在流式生成中（末尾显示闪烁光标） */
+  /** 该消息是否正在流式生成中（末尾显示闪烁光标 + 思考块默认展开） */
   streaming?: boolean
-  /** 检索规划产出的全部查询（FE-014）：仅生成中的助手消息展示 */
+  /** 检索策略（FE-014/FE-016）：生成中来自 Context，完成后来自消息快照；并入思考块展示 */
   subQueries?: string[] | null
-  /** 生成过程的工作环节记录（FE-015）：生成中来自 Context，完成后来自消息快照 */
-  steps?: NodeStatus[] | null
+  /** 思考过程行（FE-016）：节点状态行 + 思考内容行，生成中来自 Context，完成后来自消息快照 */
+  steps?: ThoughtLine[] | null
+  /** 思考总耗时（毫秒）：完成后标题显示「已完成思考 · Ns」 */
+  thinkingMs?: number
 }
 
 /**
- * 工作环节过程记录（FE-015）：Codex 风格的浅色小字列表。
- * 执行中的环节显示「正在…」，完成后的环节显示耗时；
- * 整体使用最浅的墨色与最小字号，保证"可见但不抢视线"。
+ * 思考块（BE-042/FE-016，豆包式交互）：聚合节点状态行、思考内容行与检索策略。
+ * - 生成中默认展开（实时滚动执行过程），完成后自动收起为一行摘要；
+ * - 点击标题可随时展开/收回；manualOpen 为 null 表示"跟随默认值"——
+ *   这样同一组件在 streaming 由 true 变 false 时自动切换默认形态，
+ *   用户手动点过之后则以手动选择为准。
+ * - 整体浅色小字 + 左侧竖线缩进，保证"可见但不抢视线"。
  */
-function StepsList({ steps }: { steps: NodeStatus[] }) {
+function ThinkingPanel({
+  lines,
+  subQueries,
+  streaming,
+  thinkingMs,
+}: {
+  lines: ThoughtLine[]
+  subQueries?: string[] | null
+  streaming: boolean
+  thinkingMs?: number
+}) {
+  const [manualOpen, setManualOpen] = useState<boolean | null>(null)
+  const open = manualOpen ?? streaming
+  // 无任何过程内容时不渲染（历史消息刷新后恢复的场景）
+  if (lines.length === 0 && !(subQueries && subQueries.length > 0)) return null
+
+  const headerText = streaming
+    ? '思考中…'
+    : `已完成思考 · ${((thinkingMs ?? 0) / 1000).toFixed(1)}s`
+
   return (
-    <div className="mb-2 space-y-0.5">
-      {steps.map((step) => (
-        <p key={step.node} className="text-[11px] leading-relaxed text-ink-faint">
-          {step.durationMs === undefined
-            ? `正在${step.label}…`
-            : `${step.label} · ${(step.durationMs / 1000).toFixed(1)}s`}
-        </p>
-      ))}
+    <div className="mb-3">
+      {/* 标题行：图标 + 文案 + 展开箭头；aria-expanded 让读屏软件感知状态 */}
+      <button
+        type="button"
+        onClick={() => setManualOpen(!open)}
+        aria-expanded={open}
+        className="inline-flex items-center gap-1 text-[11px] font-medium text-ink-faint transition-colors hover:text-ink-soft"
+      >
+        <Brain size={13} aria-hidden />
+        {headerText}
+        <CaretDown
+          size={11}
+          className={`transition-transform duration-200 motion-reduce:transition-none ${open ? 'rotate-180' : ''}`}
+          aria-hidden
+        />
+      </button>
+
+      {open && (
+        <div className="mt-1.5 space-y-0.5 border-l border-line pl-3">
+          {/* 检索策略（plan 事件）：思考块内的独立小节，重规划时覆盖更新 */}
+          {subQueries && subQueries.length > 0 && (
+            <div className="mb-1.5">
+              <p className="text-[11px] font-medium text-ink-faint">
+                检索策略（{subQueries.length} 条查询）
+              </p>
+              <ol className="mt-0.5 list-decimal space-y-0.5 pl-4">
+                {subQueries.map((query, index) => (
+                  <li key={index} className="text-[11px] leading-relaxed text-ink-faint">
+                    {query}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+          {/* 过程行：按事件到达顺序渲染。状态行显示「正在…/耗时」，
+              内容行显示思考文本（后端已截断，前端零截断逻辑） */}
+          {lines.map((line, index) => (
+            <p key={`${line.kind}-${line.node}-${index}`} className="text-[11px] leading-relaxed text-ink-faint">
+              {line.kind === 'text'
+                ? line.text
+                : line.durationMs === undefined
+                  ? `正在${line.label}…`
+                  : `${line.label} · ${(line.durationMs / 1000).toFixed(1)}s`}
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -99,6 +162,7 @@ export default function MessageBlock({
   streaming = false,
   subQueries = null,
   steps = null,
+  thinkingMs,
 }: MessageBlockProps) {
   // 用户消息：右侧气泡，限制最大宽度防止长问题占满整行；保持纯文本（whitespace-pre-wrap）
   if (message.role === 'user') {
@@ -118,24 +182,14 @@ export default function MessageBlock({
   // 助手消息：左侧平铺 + Markdown 渲染；流式光标放在内容之后
   return (
     <div className="text-sm leading-relaxed text-ink">
-      {/* 检索策略（FE-014）：仅生成中且检索规划已产出时展示，
-          让用户了解本次使用了哪些检索查询；回答完成后消失 */}
-      {streaming && subQueries && subQueries.length > 0 && (
-        <div className="mb-2 rounded-xl border border-line bg-elevated px-3 py-2">
-          <p className="text-[11px] font-medium text-ink-faint">
-            检索策略（{subQueries.length} 条查询）
-          </p>
-          <ol className="mt-1 list-decimal space-y-0.5 pl-4">
-            {subQueries.map((query, index) => (
-              <li key={index} className="text-xs leading-relaxed text-ink-soft">
-                {query}
-              </li>
-            ))}
-          </ol>
-        </div>
-      )}
-      {/* 工作环节过程记录（FE-015）：生成中实时滚动，完成后保留显示（浅色、次级视觉） */}
-      {steps && steps.length > 0 && <StepsList steps={steps} />}
+      {/* 思考块（FE-016）：节点状态 + 思考内容 + 检索策略统一容器，
+          生成中默认展开、完成后收起一行，点击标题展开/收回 */}
+      <ThinkingPanel
+        lines={steps ?? []}
+        subQueries={subQueries}
+        streaming={streaming}
+        thinkingMs={thinkingMs}
+      />
       <Markdown
         components={{
           // 给常见元素补充与整体风格一致的间距（Markdown 默认渲染无样式）

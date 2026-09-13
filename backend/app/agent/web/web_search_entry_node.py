@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from app.agent.constants import CAPABILITY_DISABLED
 from app.agent.state import AgentState
+from app.agent.utils.think_utils import emit_think
 from app.agent.utils.trace_utils import make_trace
 from app.agent.utils.timing_utils import Timer
 
@@ -26,6 +27,8 @@ class WebSearchEntryNode:
                                extra={"enabled": True})
                 ]
             }
+        # 思考内容（BE-042）：未开通说明——配置关闭（DISABLED）分支
+        emit_think("web_search_entry_node", "网络搜索未开通（配置关闭），跳过外部检索")
         return {
             "capability_result": {
                 "capability": "web_search",

@@ -62,6 +62,7 @@ async def chat_stream(payload: ChatStreamRequest, request: Request) -> Streaming
     async def event_stream():
         # 领域事件 → SSE 帧的映射只存在这一份：
         # - status：节点执行状态（BE-041，前端浅色小字展示工作过程）
+        # - think：节点过程内容行（BE-042，决策输出/运行细节/流转说明，前端思考块）
         # - plan：检索规划产出的全部查询（检索策略展示，重规划时再次出现）
         # - sources：RAG 检索有命中时出现（参考文档数据源，重规划后以最新一批为准）
         # - delta：逐段增量文本
@@ -84,6 +85,14 @@ async def chat_stream(payload: ChatStreamRequest, request: Request) -> Streaming
                         "label": event.label,
                         "phase": event.phase,
                         **({"duration_ms": event.duration_ms} if event.duration_ms is not None else {}),
+                    })
+                elif event.type == "think":
+                    # 思考内容行（BE-042/ADR-0009）：text 已由后端截断（≤120 字）
+                    yield _sse_event({
+                        "type": "think",
+                        "node": event.node,
+                        "label": event.label,
+                        "text": event.text,
                     })
                 else:
                     yield _sse_event({"type": "delta", "content": event.content})

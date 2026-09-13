@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.agent.subgraphs.legal_rag.state import LegalRAGState
+from app.agent.utils.think_utils import emit_think
 from app.agent.utils.trace_utils import make_trace
 from app.agent.utils.timing_utils import Timer
 
@@ -11,6 +12,13 @@ _ACTION_FLAGS = {
     "query_rewrite": "use_query_rewrite",
     "subquery": "use_subquery",
     "query_expansion": "use_query_expansion",
+}
+
+# 策略动作 → 思考内容文案（BE-042/D9：JSON 计划拼成中文句子）
+_ACTION_LABELS = {
+    "query_rewrite": "改写查询",
+    "subquery": "拆解子问题",
+    "query_expansion": "扩展法律术语",
 }
 
 
@@ -41,6 +49,20 @@ class StrategyRouterNode:
             # 首轮：直接采用检索计划
             current = dict(state.get("retrieval_plan") or {})
             current["is_recovery"] = False
+        # 思考内容（BE-042）：选中的策略清单拼成中文（含原始问题与否一眼可读）
+        selected = [label for action, label in _ACTION_LABELS.items() if current.get(_ACTION_FLAGS[action])]
+        if current.get("is_recovery"):
+            emit_think(
+                "strategy_router_node",
+                f"选中恢复策略：{'、'.join(selected) or '原始问题'}",
+            )
+        else:
+            if current.get("use_original_query", True):
+                selected = ["原始问题", *selected]
+            emit_think(
+                "strategy_router_node",
+                f"选中检索策略：{'、'.join(selected) or '原始问题'}",
+            )
         return {
             "current_plan": current,
             "rag_trace": [

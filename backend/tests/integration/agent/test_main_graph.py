@@ -153,8 +153,8 @@ def test_case1_legal_question_rag_success():
     assert final["rag_status"] == "SUCCESS"
     assert final["answer"] == ANSWER_WITH_SOURCE
     assert final["citations"] and final["citations"][0]["citation_id"] == "1"
-    # 事件顺序契约：plan → sources → delta（过滤 status 后）
-    business = [e for e in events if e.type != "status"]
+    # 事件顺序契约：plan → sources → delta（过滤 status/think 过程事件后，BE-042）
+    business = [e for e in events if e.type not in ("status", "think")]
     types = [e.type for e in business]
     assert types.index("plan") < types.index("sources") < types.index("delta")
     # BE-041：状态事件覆盖主图与子图节点（ContextVar 跨子图贯通）
@@ -162,6 +162,12 @@ def test_case1_legal_question_rag_success():
     assert "query_router_agent" in status_nodes  # 主图节点
     assert {"hybrid_retriever_node", "evidence_ranking_node", "rag_result_node"} <= status_nodes  # 子图节点
     assert all(e.label for e in events if e.type == "status")  # 中文标签必有
+    # BE-042：思考内容事件（决策输出/运行细节）随节点流转产出，契约字段齐全
+    think_events = [e for e in events if e.type == "think"]
+    assert think_events, "RAG 路径应产生 think 事件"
+    assert all(e.label and e.text and len(e.text) <= 121 for e in think_events)  # text ≤120 字契约
+    think_nodes = {e.node for e in think_events}
+    assert {"query_router_agent", "orchestrator_agent", "evidence_grader_agent"} <= think_nodes
 
 
 def test_case2_general_question_direct_answer():
@@ -177,7 +183,7 @@ def test_case2_general_question_direct_answer():
     final, events = _run(workflow, "你好，你是谁？")
     assert final["answer"] == ANSWER_GENERAL
     assert final["last_capability"] == "direct_answer"
-    business = [e for e in events if e.type != "status"]
+    business = [e for e in events if e.type not in ("status", "think")]
     assert all(e.type != "plan" and e.type != "sources" for e in business)  # 未检索
     assert any(e.type == "delta" for e in business)
     assert llm.call_log.count(PLANNER_MARKER) == 0  # 路由直达，不经检索规划
@@ -197,7 +203,7 @@ def test_case3_no_evidence_declares_insufficient():
     final, events = _run(workflow, "完全不相关的冷门问题？")
     assert final["rag_status"] == "LOCAL_EVIDENCE_INSUFFICIENT"
     assert final["answer"] == ANSWER_INSUFFICIENT  # BE-017 契约声明
-    assert all(e.type != "sources" for e in events if e.type != "status")  # 无命中无来源事件
+    assert all(e.type != "sources" for e in events if e.type not in ("status", "think"))  # 无命中无来源事件
     assert final["missing_evidence"] == ["冷门主题"]
 
 
@@ -215,7 +221,7 @@ def test_case4_web_request_disabled():
     assert final["last_capability"] == "web_search"
     assert final["capability_status"] == "DISABLED"
     assert "尚未开通" in final["answer"]
-    assert all(e.type != "sources" for e in events if e.type != "status")
+    assert all(e.type != "sources" for e in events if e.type not in ("status", "think"))
 
 
 def test_case5_plugin_request_not_implemented():

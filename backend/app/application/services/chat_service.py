@@ -86,6 +86,10 @@ class ChatService:
                     # 节点执行状态（BE-041）：仅转发供前端展示工作过程，
                     # 绝不进入 delta 聚合——否则状态文本会被拼进回答
                     yield event
+                elif event.type == "think":
+                    # 思考内容行（BE-042/ADR-0009）：仅转发供前端思考块展示，
+                    # 同样不进 delta 聚合（与 status 同一职责边界）
+                    yield event
                 else:
                     collected.append(event.content)
                     yield event
