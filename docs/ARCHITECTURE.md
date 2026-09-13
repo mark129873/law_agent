@@ -5,7 +5,8 @@
 -实现变更不得改变 PRODUCT.md 描述的用户可见行为；行为要变，先改 PRODUCT.md，再改实现
 -后端使用python3.11.15, 使用uv进行环境管理,.venv是虚拟环境
 -后端使用fastapi, 接口使用异步函数
--后端使用langraph, 大模型支持ollama本地部署以及使用glm的api, 
+-后端使用langgraph, 大模型支持ollama本地部署以及使用glm的api
+-Agent 模块一期重写（2026-09）：主图轻量编排 + 独立 Local Legal RAG 子图 + Web/Plugin Stub 入口，架构决策见 docs/adr/0001~0008，设计依据 legal_agent_phase1_technical_design.md；统一重排采用本地 Qwen3-Reranker-0.6B（CrossEncoder，失败/关闭时降级 RRF 序）
 -数据库此版本支持sqlite3, 后续版本支持mysql8.0根据配置进行切换, 做好数据库接口层抽象
 -数据库实现统一走 SQLAlchemy 2.0 async ORM（声明式模型 + Data Mapper 映射），SQLite 是当前唯一已启用的 Provider，MySQL 8.0 接入只需换 URL 与异步驱动
 -向量数据库使用 Milvus（standalone 部署，backend/docker-compose.yml 编排 etcd + minio + milvus），稠密向量与稀疏 BM25 混合检索由 Milvus 服务端 hybrid_search 完成（BE-029），业务代码经 VectorStore 端口访问，不感知具体实现
@@ -18,7 +19,7 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                         Frontend                            │
 │        React + TypeScript + Vite + Tailwind CSS            │
-│              Chat / 会话管理 / 知识库管理（待开发）           │
+│     Chat / 会话管理 / 知识库管理 / 检索策略与过程展示          │
 └───────────────────────────┬─────────────────────────────────┘
                             │ HTTP / SSE
                             ▼
@@ -27,7 +28,7 @@
 │  API 层 ──▶ Application 层 ──▶ Domain 层（实体 + 端口）      │
 │                    ▲                     ▲                  │
 │                    └── Infrastructure 层实现领域端口          │
-│  Agent 模块（LangGraph，实现 QaWorkflow 端口）                │
+│  Agent 模块（LangGraph 主图 + legal_rag 子图，实现 QaWorkflow）│
 └──────────────┬──────────────────┬───────────────────────────┘
                ▼                  ▼
       ┌────────────────┐  ┌────────────────┐
@@ -35,12 +36,13 @@
       └────────────────┘  └────────────────┘
                │
                ▼
-      ┌─────────────────────────────┐
-      │ LLM：Ollama 本地 / GLM API  │
-      └─────────────────────────────┘
+      ┌──────────────────────────────────┐
+      │ LLM：Ollama 本地 / GLM API        │
+      │ Rerank：本地 Qwen3-Reranker-0.6B  │
+      └──────────────────────────────────┘
 ```
 
-技术栈：Python 3.11 + FastAPI（全异步）+ uv 环境管理 + LangGraph + SQLAlchemy 2.0 async ORM（声明式模型 + AsyncSession，当前挂 aiosqlite 驱动）+ Milvus（服务端 hybrid_search：稠密 + 稀疏 BM25，RRF 融合）+ httpx。
+技术栈：Python 3.11 + FastAPI（全异步）+ uv 环境管理 + LangGraph + SQLAlchemy 2.0 async ORM（声明式模型 + AsyncSession，当前挂 aiosqlite 驱动）+ Milvus（服务端 hybrid_search：稠密 + 稀疏 BM25，RRF 融合）+ sentence-transformers（Qwen3-Reranker-0.6B CrossEncoder 统一重排）+ httpx。
 前端技术栈：React 19 + TypeScript（严格模式）+ Vite 8 + Tailwind CSS v4 + React Router 7 + 原生 Fetch（无 axios）。
 
 ## 2. 目录结构
@@ -75,12 +77,21 @@ backend/
 │   │   ├── document_parser/    # PdfParser（pypdf）/ TextParser（txt/md，多编码回退）
 │   │   └── embedding/          # OllamaEmbeddingService（/api/embed 批量）
 │   │
-│   ├── agent/                  # LangGraph Agent（※ 全项目唯一允许导入 langgraph 的业务模块）
-│   │   ├── __init__.py         # 对外唯一入口：create_qa_workflow 工厂
-│   │   ├── graph.py            # QaGraphBuilder 建造者 + LangGraphQaWorkflow 适配器
-│   │   ├── nodes.py            # AgentNode 抽象基类 + Retrieve/Generate 节点（命令模式）
-│   │   ├── prompts.py          # 法律问答策略 Prompt
-│   │   └── state.py            # AgentState
+│   ├── agent/                  # LangGraph Agent（※ 全项目唯一允许导入 langgraph 与重型推理库的业务模块）
+│   │   ├── __init__.py         # 对外唯一入口：create_qa_workflow 工厂（端口组合注入）
+│   │   ├── graph.py            # AgentGraphBuilder 建造者（主图装配）+ LangGraphQaWorkflow 适配器（ContextVar 事件流）
+│   │   ├── constants.py        # 状态字面量 + 节点中文标签映射（status 事件文案）
+│   │   ├── schemas.py          # QueryRouterOutput / OrchestratorDecision / GroundingCheck / CapabilityResult / Citation
+│   │   ├── state.py            # AgentState（主图状态；trace 追加归约器）
+│   │   ├── config.py           # AgentConfig（max_global_steps 等，由装配点从 Settings 构造）
+│   │   ├── events.py           # ContextVar 注入式事件发射器（跨子图事件贯通，ADR-0008）
+│   │   ├── node_status.py      # with_node_status 全节点包装（起止 status 事件 + 结构化日志）
+│   │   ├── nodes/              # 主图 9 节点（_agent=LLM 节点 / _node=确定性节点，设计 §2.1）
+│   │   ├── prompts/            # 主图 6 Prompt（意图路由/编排/直接回答/回答生成/校验/兜底）
+│   │   ├── services/           # LLMService（结构化输出容错）/ MilvusService / RerankerService / CitationService
+│   │   ├── subgraphs/legal_rag/  # Local Legal RAG 子图：graph + state/config/schemas + nodes 10 + prompts 6
+│   │   ├── web/ plugins/       # Web Search / Plugin 一期 Stub（仅 NOT_IMPLEMENTED/DISABLED 入口）
+│   │   └── utils/              # query 汇总 / dedup / evidence 转换 / trace / timing 纯函数
 │   │
 │   ├── common/                 # 横切基础设施：di.py 轻量容器 / logging.py 结构化 JSON 日志（stdout + backend/log 落盘）
 │   ├── config/settings.py      # 统一配置（pydantic-settings，相对路径锚定 backend/）
@@ -140,7 +151,7 @@ frontend/                        # 前端独立项目（React + TS + Vite）
 | `LLMProvider` | domain/repositories/llm_provider.py | OllamaProvider / GLMProvider |
 | `DocumentParser` | domain/services/document_parser.py | TextParser（txt/md 多编码回退）/ PdfParser（pypdf） |
 | `EmbeddingService` | domain/services/embedding.py | OllamaEmbeddingService（/api/embed 批量） |
-| `QaWorkflow` | domain/services/qa_workflow.py | LangGraph 工作流（agent/，`create_qa_workflow` 工厂） |
+| `QaWorkflow` | domain/services/qa_workflow.py | LangGraph 工作流（agent/，`create_qa_workflow` 工厂：主图 + legal_rag 子图 + Web/Plugin Stub） |
 
 ### ORM 使用约定（BE-025，精要）
 - **两套模型、一层映射（Data Mapper）**：ORM 模型（models.py）只属于 infrastructure，领域实体保持纯 dataclass，`mappers.py` 显式双向映射；仓储出口只返回领域实体，ORM 模型不得越过 infrastructure 边界（测试锁定）。
@@ -157,7 +168,8 @@ frontend/                        # 前端独立项目（React + TS + Vite）
 ```text
 POST /api/chat/stream {conversation_id, question}
   ▼ ChatService：历史快照 → 保存用户消息 → QaWorkflow 端口 astream（图执行见 §5）
-  ▼ 节点经 get_stream_writer 推领域事件（QaStreamEvent）→ SSE：plan / sources / delta* / regenerating / done | error
+  ▼ 节点经 emit_event（ContextVar 注入队列）推领域事件（QaStreamEvent）
+  ▼ SSE：status* / plan / sources / delta* / regenerating / done | error
   ▼ 流正常结束：完整回答与参考来源一起持久化为 assistant 消息（异常中断不落库）
 ```
 - **所有 LLM 问答必须走图**：唯一问答入口是 SSE 流式接口；检索、Prompt 组装、模型调用只有一份实现，禁止图外直连 LLMProvider 问答。图引擎的 `ainvoke`（测试/脚本经 `run_qa`）与流式共用同一节点实例。
@@ -180,15 +192,15 @@ DELETE /api/documents/{id}：向量按 document_id 删除 + 元数据删除（�
 - 集合懒建（首次 `add_chunks` 按实际 embedding 维度创建）；集合不存在时检索返回空 = 空知识库语义。
 - Milvus 数据由容器卷持久化，不在 `backend/data/`——干净环境重置除删 data 外还需运行 `scripts/reset_milvus.py`（见 RELIABILITY.md）。
 
-## 5. Agent 工作流（LangGraph）
+## 5. Agent 工作流（LangGraph，一期重写）
 
 ### 面向对象结构
-- `AgentNode`（抽象基类）+ `PlanNode` / `RetrieveNode` / `GenerateNode` / `VerifyNode`（命令模式）：`__call__` 使节点实例直接注册进图，新增节点继承基类即可。
-- `QaGraphBuilder`（建造者）：统一装配 Plan-and-Execute 闭环（rag 必选——知识库检索是问答固有环节，"无知识库"由空命中路径承接），装配与条件边规则集中一处。
-- `LangGraphQaWorkflow`（适配器）显式实现 `QaWorkflow` 领域端口，langgraph 引擎封在适配器之内；对外唯一入口 `create_qa_workflow(llm, rag, planner=None)` 工厂（planner 缺省跟随主 LLM，BE-030）。
-- 所有问题统一进规划闭环：简单问题 = 规划器输出单子查询透传原问题的退化情形，不做问题分类路由。
+- `AgentGraphBuilder`（建造者，agent/graph.py）：按设计 §3 拓扑装配主图，Local Legal RAG 子图作为复合节点接入（显式输入/输出过滤）；装配与条件边规则集中一处。
+- `LangGraphQaWorkflow`（适配器）：显式实现 `QaWorkflow` 领域端口；`astream` = ainvoke + ContextVar 事件队列排空（ADR-0008，规避 langgraph 1.2.11 子图 custom 事件不上浮的实测缺陷）；对外唯一入口 `create_qa_workflow(llm, embedding, vector_store, planner, reranker, …)` 工厂。
+- 节点命名（设计 §2.1）：带 LLM 的节点以 `_agent` 结尾（意图路由/编排/检索规划/查询变体/证据评估/恢复规划/直接回答/回答生成/校验/兜底），确定性节点以 `_node` 结尾（动作路由/观察/策略路由/混合检索/证据重排/结果/stub/收尾）。
+- 模型分工：planner（PLANNER_PROVIDER）服务决策密集的轻节点（意图路由/顶层编排/RAG 子图规划），主 LLM 服务回答生成与 grounding 校验——强模型规划 + 快模型执行。
 
-### 图拓扑（BE-030；由 scripts/export_qa_graph.py 生成，拓扑变更后重跑即可同步）
+### 主图拓扑（由 scripts/export_qa_graph.py 生成，拓扑变更后重跑即可同步）
 
 ```mermaid
 ---
@@ -198,33 +210,81 @@ config:
 ---
 graph TD;
 	__start__([<p>__start__</p>]):::first
-	plan(plan)
-	retrieve(retrieve)
-	generate(generate)
-	verify(verify)
-	__end__([<p>__end__</p>]):::last
-	__start__ --> plan;
-	generate --> verify;
-	plan --> retrieve;
-	retrieve -.-> generate;
-	retrieve -. &nbsp;replan&nbsp; .-> plan;
-	verify -. &nbsp;end&nbsp; .-> __end__;
-	verify -. &nbsp;regenerate&nbsp; .-> generate;
-	verify -. &nbsp;replan&nbsp; .-> plan;
+	query_router_agent(query_router_agent)
+	orchestrator_agent(orchestrator_agent)
+	action_router_node(action_router_node)
+	legal_rag_subgraph(legal_rag_subgraph)
+	plugin_entry_node(plugin_entry_node)
+	plugin_stub_node(plugin_stub_node)
+	web_search_entry_node(web_search_entry_node)
+	web_search_stub_node(web_search_stub_node)
+	observation_node(observation_node)
+	direct_answer_agent(direct_answer_agent)
+	answer_generator_agent(answer_generator_agent)
+	grounding_checker_agent(grounding_checker_agent)
+	fallback_generator_agent(fallback_generator_agent)
+	final_answer_node(final_answer_node)
+	__start__ --> query_router_agent;
+	query_router_agent --> orchestrator_agent;
+	orchestrator_agent --> action_router_node;
+	action_router_node -. &nbsp;local_rag&nbsp; .-> legal_rag_subgraph;
+	action_router_node -. &nbsp;plugin&nbsp; .-> plugin_entry_node;
+	action_router_node -. &nbsp;web_search&nbsp; .-> web_search_entry_node;
+	action_router_node -. &nbsp;direct_answer&nbsp; .-> direct_answer_agent;
+	action_router_node -. &nbsp;finish&nbsp; .-> answer_generator_agent;
+	plugin_entry_node --> plugin_stub_node;
+	web_search_entry_node --> web_search_stub_node;
+	legal_rag_subgraph --> observation_node;
+	plugin_stub_node --> observation_node;
+	web_search_stub_node --> observation_node;
+	direct_answer_agent --> observation_node;
+	observation_node --> orchestrator_agent;
+	answer_generator_agent --> grounding_checker_agent;
+	grounding_checker_agent -. &nbsp;retry&nbsp; .-> orchestrator_agent;
+	grounding_checker_agent -. &nbsp;fallback&nbsp; .-> fallback_generator_agent;
+	grounding_checker_agent -. &nbsp;final&nbsp; .-> final_answer_node;
+	fallback_generator_agent --> final_answer_node;
+	final_answer_node --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
 	classDef last fill:#bfb6fc
 ```
 
-条件边分支语义：`retrieve` 空命中且 `plan_runs` 未用尽 → `replan`（回 plan 改写子查询），否则默认进 `generate`；`verify` 按 `verify_verdict` 三态路由——`grounding`（依据不足）→ `replan`、`contract`（表达契约失败）→ `regenerate`、`pass`（或预算用尽降级放行）→ `end`。
+- **顶层循环**：query_router（规范化+意图+请求类型）→ orchestrator（决定下一能力，受 `max_global_steps=4` 预算，超限强制 finish）→ action_router（§46.1 确定性映射）→ Capability → observation（CapabilityResult 归一、步数+1）→ orchestrator；finish 后 answer_generator → grounding_checker → final_answer / fallback。
+- **Capability**：legal_rag 子图（检索）；web_search / plugin（一期 Stub，仅 NOT_IMPLEMENTED/DISABLED，替换 Stub 即接入二期实现，主图零重构）；direct_answer（一般性对话直接流式回答，D2——法律事实型问题默认走检索）。
+- **回答收尾链**：answer_generator 是 finish 路径唯一流式出口（direct 已有完整草稿时透传）；grounding_checker 规则档先行（有依据必须【来源：…】、检索无命中必须声明信息不足、direct 路径只查编造引用）+ LLM judge 档；未通过且预算内回 orchestrator，预算耗尽走 fallback 谨慎回答。grounding 每次执行递增 global_step_count（防打回回路绕过预算，ADR-0007）。
 
-- **预算防死循环**：`plan_runs ≤ 2`、`generate_runs ≤ 2`，超限输出当前答案并记 WARN。verify 打回分两路的原因：依据不足是"检索缺口"，重规划补检索比重写有效；表达契约失败是"生成缺口"，带反馈（verify_feedback）重生成更便宜。
-- **LangGraph 陷阱（踩坑记录）**：同一节点的静态出边与条件边不能并存——replan 路径下 generate 会在同一超级步并发执行并写同一 state 键，触发 `InvalidUpdateError`；故 retrieve 出边只保留条件边。
-- **verify 两档**：规则档（引用来源存在性 / BE-017 信息不足声明 / 退化检查）零成本先行；judge 档 LLM groundedness 判分，解析失败视为 pass（记 WARN）——判分是增强而非闸门。
-- 节点行为：plan 产出 `sub_queries` 并推 plan 事件（前端据此展示问题拆解，重规划时也推）；retrieve 逐子查询混合检索按 chunk 合并去重，有命中推 sources 事件（契约：先于当轮全部 delta，重规划后以最新一批为准）；generate 组装 Prompt 流式生成逐 token 推 delta；verify 校验打回前推 regenerating 事件。
+### Local Legal RAG 子图（agent/subgraphs/legal_rag/，设计 §4）
 
-### 法律问答策略（agent/prompts.py，BE-017）
-优先依据知识库上下文回答并注明来源文件；依据为空或不足时明确告知"知识库中暂无相关依据，建议咨询专业律师"；严禁虚构法律条文、案例编号或结论，先给结论再给依据。
+```text
+retrieval_planner_agent（检索计划，四类策略多选）
+  → strategy_router_node（归一化当前计划；条件边 fan-out 到选中的变体节点）
+      ├─ query_rewrite_agent（改写 ≤2）   ┐
+      ├─ subquery_generator_agent（拆分 ≤5）├─ 并发生成 → hybrid_retriever_node
+      ├─ query_expansion_agent（扩展 ≤3）  ┘
+      └─（无变体启用时直接进检索）
+  → hybrid_retriever_node（汇总全部查询去重/排除已检索/截断 ≤8，asyncio.gather 并发，
+    每 Query 独立走 Milvus Dense+BM25+RRF；单查询失败重试 1 次，全失败置 RETRIEVAL_ERROR；
+    推送 plan 事件=本轮全部检索查询）
+  → evidence_ranking_node（dedup 三级键合并 matched_queries → RRF 预截断 20 →
+    以 original_query 统一 rerank → top-10；reranker 失败/关闭降级 RRF 序）
+  → evidence_grader_agent（覆盖度/缺失/冲突/可恢复性；安全默认=不充分）
+  → 路由：充分 → rag_result_node（SUCCESS，推 sources 事件）；
+          可恢复且 retry_count<max_retries=2 → recovery_planner_agent（本地三动作多选，
+          避免重复失败策略）→ 回 strategy_router_node；
+          否则 → rag_result_node（LOCAL_EVIDENCE_INSUFFICIENT，已有证据照常推送）
+```
+
+- 子图内部 trace 命名 `rag_trace`（operator.add 归约器），不回写主图——避免父子同名通道互相覆盖；查询变体列表通道同样配追加归约器（fan-out 并行写安全）。
+
+### 事件机制与 SSE 映射（ADR-0002/0008）
+
+- 所有节点经 `with_node_status` 包装（建造者层统一，节点零改动）：起止推 `status` 事件（中文 label 映射表在 agent/constants.py）+ 结构化日志；事件发射统一走 `emit_event`（ContextVar 注入队列，跨子图贯通，图外安全丢弃）。
+- SSE 事件（字段只增不改）：`status`（节点执行状态，前端浅色过程展示）→ `plan`（本轮全部检索查询，检索策略展示，重规划后覆盖）→ `sources`（最终采用证据，先于当轮 delta）→ `delta`*（回答流式）→（打回时 `regenerating` 后重复 plan?→sources→delta）→ `done`/`error`。
+- regenerating 规则：任何节点再次开始流式输出前，若 answer_draft 已存在必先推 regenerating（前端清空已渲染增量）。
+
+### 法律问答策略（agent/prompts/answer_generator.py，BE-017）
+优先依据知识库上下文回答并注明来源文件；依据为空或不足时明确告知"知识库中暂无相关依据，建议咨询专业律师"；严禁虚构法律条文、案例编号或结论，先给结论再给依据。直接回答路径使用独立 Prompt（不提及检索语境，不编造法条，ADR-0006）。
 
 ## 6. 配置管理
 
@@ -235,9 +295,12 @@ graph TD;
 | `DB_PROVIDER` | sqlite / mysql | sqlite |
 | `VECTOR_STORE_PROVIDER` | milvus（当前唯一已启用 Provider） | milvus |
 | `LLM_PROVIDER` | ollama / glm | ollama |
-| `PLANNER_PROVIDER` | follow / ollama / glm | follow（跟随 LLM_PROVIDER，BE-030） |
+| `PLANNER_PROVIDER` | follow / ollama / glm | follow（跟随 LLM_PROVIDER） |
 | `PLANNER_MODEL` | 模型名 | 空（用所选 Provider 的默认模型） |
 | `LLM_ENABLE_THINKING` | true / false | false |
+| `RERANK_ENABLED` | true / false | true（CPU 且无 CUDA 实测约 15s/对，建议 false 走 RRF 降级序） |
+| `RERANKER_MODEL_PATH` | HF 模型 id 或本地快照绝对路径 | Qwen/Qwen3-Reranker-0.6B |
+| `RERANKER_DEVICE` | cpu / cuda | cpu |
 | `MILVUS_URI` | — | http://127.0.0.1:19530 |
 | `HOST` / `PORT` / `LOG_LEVEL` | — | 0.0.0.0 / 8000 / INFO |
 
@@ -260,14 +323,17 @@ graph TD;
 
 Chat 流式协议（SSE，`data: {json}\n\n`）：
 ```json
-{"type": "plan", "sub_queries": ["子问题1", "子问题2"]}
+{"type": "status", "node": "hybrid_retriever_node", "label": "混合检索知识库", "phase": "start"}
+{"type": "status", "node": "hybrid_retriever_node", "label": "混合检索知识库", "phase": "end", "duration_ms": 812}
+{"type": "plan", "sub_queries": ["原始问题", "子查询一", "扩展术语"]}
 {"type": "sources", "sources": [{"source": "文件名", "content": "命中内容"}]}
 {"type": "delta", "content": "增量文本"}
 {"type": "regenerating"}
 {"type": "done", "conversation_id": "..."}
 {"type": "error", "message": "..."}
 ```
-- 事件顺序（BE-030）：`plan`（每次规划推一次，重规划时再次出现）→ `sources`（每轮检索有命中时一次，重规划后以最新一批为准）→ `delta`（每轮生成一批）→（verify 打回时 `regenerating` 后重复 sources→delta）→ `done`/`error`。字段只增不改，向后兼容（旧前端静默忽略新事件）。
+- 事件顺序：`status`（每个节点起止各一帧，与业务事件交织）→ `plan`（每轮检索规划推一次，携带全部检索查询，重规划后覆盖）→ `sources`（每轮检索有命中时一次，以最终一批为准）→ `delta`（每轮生成一批）→（校验打回时 `regenerating` 后重复）→ `done`/`error`。字段只增不改，向后兼容（旧前端静默忽略新事件）。
+- `status`（BE-041）：node=节点名、label=中文标签（agent/constants.py 映射）、phase=start/end、end 帧带 duration_ms；前端以浅色小字实时展示工作过程，done 后保留，新提问重新开始。
 - `regenerating`：前端须清空已渲染增量（否则两版回答拼接）；`done` 后回答与 sources 已持久化，`GET .../messages` 原样返回（旧库自动 ALTER 迁移），历史消息同样可展示参考文档。
 
 ## 8. 启动与验证
@@ -291,17 +357,21 @@ npm run build                                      # tsc 类型检查 + 生产�
 
 | 层级 | 位置 | 数量 | 验证内容 |
 |------|------|------|---------|
-| 单元 | tests/unit/ | 62 | DI 容器、配置、DDD 边界守护（AST）、日志契约（BE-027）、规划/判分解析容错（BE-030）、回答策略、端口契约（内存 Fake）、文档 Pipeline 与解析器 |
-| 集成 | tests/integration/（除 API） | 68 | 真实 SQLite（持久化/级联/事务/迁移/ORM 契约/排序契约）、首次启动自愈（BE-026）、真实 Milvus 混合检索（不可达时跳过，BE-029）、LLM/Embedding/RAG、Agent 统一规划闭环（BE-030） |
-| 接口 | tests/integration/test_api.py | 9 | 完整应用（临时 SQLite + Fake 向量库/LLM）：会话 CRUD、统一错误、SSE 协议（plan 先行）、文档上传删除、x-request-id |
-| 端到端 | scripts/（手工运行） | 3 脚本 | 真实 uvicorn + 真实 Milvus/LLM：上传→入库→流式 RAG 问答引用原文→持久化 |
+| 单元 | tests/unit/ | 127（含 agent 76） | DI 容器、配置、DDD 边界守护（AST，含 langgraph 与 sentence_transformers/torch 隔离区）、日志契约、Agent utils 纯函数、LLM 结构化输出容错、Reranker 排序与降级、RAG 子图 10 节点、主图 9 节点、Stub、状态包装器、回答策略、端口契约（内存 Fake）、文档 Pipeline 与解析器 |
+| 集成 | tests/integration/（除 API） | 70（含 agent 12） | 真实 SQLite（持久化/级联/事务/迁移/ORM 契约/排序契约）、首次启动自愈、真实 Milvus 混合检索（不可达时跳过）、legal_rag 子图全场景（简单/多变体/恢复循环/预算耗尽/检索故障/事件序列）、主图 E2E 五 case（设计 §50：RAG 成功/直接回答/证据不足/Web DISABLED/Plugin NOT_IMPLEMENTED）、LLM/Embedding/RAG |
+| 接口 | tests/integration/test_api.py | 9 | 完整应用（临时 SQLite + Fake 向量库/LLM）：会话 CRUD、统一错误、SSE 协议（status/plan 先行、过滤 status 后原序不变）、文档上传删除、x-request-id |
+| 端到端 | scripts/（手工运行） | 3 脚本 | 真实 uvicorn + 真实 Milvus/LLM：上传→入库→流式 RAG 问答引用原文→检索策略/状态事件→持久化 |
 
-- 自动化合计 139 个，`uv run pytest` 全量运行无需外部服务（Fake 遵循领域端口，与生产实现互换验证同一契约）；唯一例外 test_milvus_vector_store.py 需真实 Milvus，不可达时自动跳过。
-- E2E 脚本依赖真实服务，不纳入 pytest（保持自动化封闭性）；结论记录于 feature_list.json 各功能 evidence。测试数据源：tests/data_source/（专利法 TXT + MD）。
+- 自动化合计 197 个，`uv run pytest` 全量运行无需外部服务（Fake 遵循领域端口，与生产实现互换验证同一契约）；唯一例外 test_milvus_vector_store.py 需真实 Milvus，不可达时自动跳过。
+- Agent 测试的 Fake 体系：脚本化 LLMProvider（按系统提示特征分流输出）、Fake Embedding/VectorStore/RerankScorer——rerank 真实模型不进自动化测试，仅真实 E2E 验证。
+- E2E 脚本依赖真实服务，不纳入 pytest（保持自动化封闭性）；结论记录于 feature_list.json 各功能 evidence。测试数据源：tests/data_source/（专利法 TXT + MD 等）。
 
 ## 10. 扩展点与预留
 
 - **MySQL 8.0**：ORM 已统一表结构与 DML，接入只剩安装 `aiomysql` 驱动 + `containers.py` 加 `mysql+aiomysql://…` URL 分支并启用 `DbProvider.MYSQL`；需补真实实例集成验证与迁移方案（Alembic autogenerate 可直接消费现有声明式模型）。
 - **Milvus**：容器内存上限（backend/docker-compose.yml）milvus 2GB / etcd 256MB / minio 256MB（合计 2.5GB ≈ 4GB WSL2 的 62%，防无界增长拖垮宿主机）；`MILVUS_URI` 默认 http://127.0.0.1:19530。
-- **新文档格式**：实现 `DocumentParser` 策略并注册进工厂；**新 LLM Provider**：实现 `LLMProvider`（chat + stream + model_name）+ 容器加分支，密钥仅环境注入；**新问答节点**：继承 `AgentNode`，在 `QaGraphBuilder.build()` 接线。
+- **Web Search（二期）**：把 `agent/web/web_search_stub_node` 替换为 web_research_subgraph 并在 AgentGraphBuilder 改接节点即可，主图路由接口不变（ADR-0001）；`suggested_external_queries` 已从 RAG 子图透传到主图 state 备用。
+- **Plugin / Skill Runtime（二期）**：把 `agent/plugins/plugin_stub_node` 替换为 runtime 实现，约束同上；一期 Stub 不做任何动态加载。
+- **新文档格式**：实现 `DocumentParser` 策略并注册进工厂；**新 LLM Provider**：实现 `LLMProvider`（chat + stream + model_name）+ 容器加分支，密钥仅环境注入；**新 Agent 节点**：实现节点类并在 AgentGraphBuilder/build_legal_rag_graph 接线 + constants.py 登记中文标签（status 事件文案）。
+- **Rerank**：GPU 机器设 `RERANKER_DEVICE=cuda` 即启用精排（ADR-0004）；`rerank_max_candidates=20` 控制精排输入规模。
 - **前端**：遵循 §7 API 契约与 SSE 协议；开发期统一请求相对路径 `/api/...` 由 Vite 代理，前端代码不感知后端地址。

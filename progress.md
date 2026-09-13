@@ -3,11 +3,38 @@
 ## 当前已验证状态
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`（当前分支 feature/auto_coder）
 - 标准启动路径：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 139 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：无——BE-001~031 与 FE-001~013 全部 passing（BE-007/008/028 置 deprecated）
+- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 197 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
+- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）全部 passing：主图 + Local Legal RAG 子图 + Web/Plugin Stub + 服务层 + 节点状态流式展示，架构决策见 docs/adr/0001~0008，术语表 docs/glossary.md
+- 已知性能边界：本机 CPU（无 CUDA）上 Qwen3-Reranker-0.6B 约 15s/对，本地部署默认 `RERANK_ENABLED=false` 走 RRF 降级序（GPU 机器可开启精排）
+- 当前最高优先级未完成功能：无——BE-001~041 与 FE-001~015 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
 - 当前 blocker：无
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md（Session 001~020 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
 
+
+### Session 031（一期 Agent 模块重写：BE-032~041 + FE-014/015 + BE-040 全部落地）
+- 日期：2026-09-13
+- 本轮目标：按 legal_agent_phase1_technical_design.md 对 agent 模块整体重写（主图 + 独立 Local Legal RAG 子图 + Web/Plugin Stub + 服务层），并按用户决策 D1~D5 实现检索策略全量展示、直接回答路径、节点状态流式展示（Codex 风格浅色小字）、rerank top-10
+- 技术决策（详见 plan.md 与 docs/adr/0001~0008）：
+  - 主图 15 节点（意图路由/编排/动作路由/RAG 子图/Web+Plugin Stub/观察/直接回答/回答生成/grounding/兜底/收尾）+ 子图 10 节点（检索规划/策略路由/三查询变体/并发混合检索/证据重排/评估/恢复规划/结果）；预算 max_global_steps=4 与 max_retries=2 相互独立（ADR-0007）
+  - 服务层适配领域端口：MilvusService→VectorStore（不直连 SDK）、LLMService 结构化输出=JSON 容错+重试 1 次+安全默认、RerankerService=CrossEncoderScorer 懒加载+失败降级（ADR-0003/0004）
+  - **重大实测发现：langgraph 1.2.11 子图节点 custom 事件不上浮父图 astream**（探针证实）→ 事件机制改为 ContextVar 注入式发射器，适配器 astream=ainvoke+队列排空（ADR-0008）
+  - **重大实测发现：本机 CPU（无 CUDA，8 线程）Qwen3-Reranker-0.6B 约 15s/对，一轮 20 对约 5 分钟**→ 粗排预截断 rerank_max_candidates=20 + RERANK_ENABLED 开关（默认 true 忠实设计；本机 .env 置 false 走 RRF 降级序，GPU 机器可开启）
+  - grounding 双规则（ADR-0006）：检索路径要求【来源：…】/信息不足声明；直接回答路径只查编造法条；Web/Plugin 未开通跳过校验
+  - SSE 契约向后兼容：新增 status 事件（node/label/phase/duration_ms，中文标签映射 constants.NODE_LABELS）；ChatService/SSE 路由补显式分支（status 不进 delta 聚合）
+  - 旧实现机械搬迁 _legacy/ 规避同名冲突（graph/nodes/prompts/state 四文件），BE-038 切换装配时删除；BE-030 置 deprecated
+- 运行过的验证：
+  - 每功能全量 pytest 保持绿：154→168→189→195→216→185（删旧 31 例）→197；干净环境重置后终验 **197 passed**（unit 127 含 agent 76 / integration 70 含 agent 12 / api 9；真实 Milvus 5 例不可达时跳过）
+  - 前端 npm run build 通过；浏览器实操（GLM+真实 Milvus+专利法）：法律问题生成中浅色状态行实时滚动（含"正在检索知识库…"与子图节点）+「检索策略（N 条查询）」面板→done 后 16 节点状态保留+「参考文档 10」；第二个法律问题一次成功引用第七十一条赔偿规则并标注来源；闲聊直接回答（无检索策略、无"暂无依据"声明、仅主图节点状态）；grounding 双打回→兜底谨慎回答路径真实触发一次
+  - 真实 E2E（verify_real_e2e.py，GLM+Milvus，RERANK 关闭）：上传 TXT/MD 均 201 ready→plan 携带检索策略→15 节点 status 贯通→回答正确引用第四十二条"二十年"并标注【来源】→sources 与持久化一致→事件序 plan<sources<delta
+  - 图可视化：export_qa_graph.py 桩依赖重导出 15 节点 Mermaid（docs/qa_graph.mmd，内嵌 ARCHITECTURE §5）
+  - 验证后已清理：law_chunks 集合 drop、backend/data 删除、前后端进程停止
+- 已记录证据：feature_list.json BE-032~041、FE-014/015、BE-040（passing）+ BE-030（deprecated）；对账 56=36 热层（32 passing+4 deprecated）+20 archived
+- 已知风险或未解决问题：
+  - Rerank 精排在 CPU 机器默认关闭（RERANK_ENABLED=false 降级 RRF 序）——功能已验证可跑通，GPU 机器开启即得精排
+  - grounding LLM judge 存在模型行为方差（GLM 偶发首答缺【来源】被规则档打回；重生成+兜底路径已验证兜住）
+  - 每问题 LLM 调用 5~8 次（忠实设计 D3），本地 Ollama 部署首字延迟明显（PLANNER_PROVIDER=glm 缓解规划环节）
+  - Ollama LLM 路径的真实模型 E2E 未跑（本轮 E2E 走 GLM 配置；图闭环行为由集成测试锁定）
+- 下一步最佳动作：可选产品增强（会话重命名/停止按钮/CORS 收敛）、MySQL 8.0 接入、或 Web Search 二期（替换 Stub 即可，suggested_external_queries 已透传备用）
 
 ### Session 030（进度文档冷热分层：progress.md 与 feature_list.json 固定批量沉降）
 - 日期：2026-09-12
