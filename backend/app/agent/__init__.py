@@ -6,7 +6,7 @@
 LangGraph 主图 + Local Legal RAG 子图上（设计 §3/§4），其余模块只应
 通过本包暴露的 create_qa_workflow 工厂使用工作流。
 
-架构说明见 docs/ARCHITECTURE.md，设计依据 legal_agent_phase1_technical_design.md。
+架构说明见 docs/ARCHITECTURE.md，设计依据 docs/archive/legal_agent_phase1_technical_design.md。
 """
 
 from __future__ import annotations

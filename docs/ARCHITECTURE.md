@@ -3,10 +3,8 @@
 ## 0. 简单描述
 -本文档只描述**架构与实现**（分层、数据流、配置、契约、测试体系）；用户可见的行为需求见 docs/PRODUCT.md
 -实现变更不得改变 PRODUCT.md 描述的用户可见行为；行为要变，先改 PRODUCT.md，再改实现
--后端使用python3.11.15, 使用uv进行环境管理,.venv是虚拟环境
--后端使用fastapi, 接口使用异步函数
--后端使用langgraph, 大模型支持ollama本地部署以及使用glm的api
--Agent 模块一期重写（2026-09）：主图轻量编排 + 独立 Local Legal RAG 子图 + Web/Plugin Stub 入口，设计依据 legal_agent_phase1_technical_design.md；统一重排采用本地 Qwen3-Reranker-0.6B（CrossEncoder，失败/关闭时降级 RRF 序）
+-后端 Python 3.11（uv 管理环境，.venv 虚拟环境）+ FastAPI（接口全异步）+ LangGraph，LLM 支持 Ollama 本地部署与 GLM API（详细技术栈见 §1 末尾）
+-Agent 模块一期重写（2026-09）：主图轻量编排 + 独立 Local Legal RAG 子图 + Web/Plugin Stub 入口，设计依据 docs/archive/legal_agent_phase1_technical_design.md；统一重排采用本地 Qwen3-Reranker-0.6B（CrossEncoder，失败/关闭时降级 RRF 序）
 -数据库此版本支持sqlite3, 后续版本支持mysql8.0根据配置进行切换, 做好数据库接口层抽象
 -数据库实现统一走 SQLAlchemy 2.0 async ORM（声明式模型 + Data Mapper 映射），SQLite 是当前唯一已启用的 Provider，MySQL 8.0 接入只需换 URL 与异步驱动
 -向量数据库使用 Milvus（standalone 部署，backend/docker-compose.yml 编排 etcd + minio + milvus），稠密向量与稀疏 BM25 混合检索由 Milvus 服务端 hybrid_search 完成（BE-029），业务代码经 VectorStore 端口访问，不感知具体实现
@@ -71,7 +69,7 @@ backend/
 │   │   └── services/           # document_parser / embedding / qa_workflow / trace_sink 端口
 │   │
 │   ├── infrastructure/         # 基础设施实现（实现领域端口）
-│   │   ├── database/sqlalchemy/ # SQLAlchemyDatabase（models.py 声明式 ORM 模型 / mappers.py 实体↔模型映射 / types.py 时区无损时间列 / database.py 端口实现）；方言无关，MySQL 预留靠 URL 切换
+│   │   ├── database/sqlalchemy/ # SQLAlchemyDatabase（models/mappers/types/database 四件套，约定见 §3）；方言无关，MySQL 靠 URL 切换
 │   │   ├── vector_store/       # MilvusVectorStore（dense+sparse 单集合，服务端 hybrid_search）
 │   │   ├── llm/                # OllamaProvider / GLMProvider
 │   │   ├── document_parser/    # PdfParser（pypdf）/ TextParser（txt/md，多编码回退）
