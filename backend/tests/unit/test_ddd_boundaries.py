@@ -19,6 +19,7 @@ APP_ROOT = pathlib.Path(__file__).resolve().parents[2] / "app"
 _TECH_LIBS = {
     "fastapi", "httpx", "pymilvus", "sqlalchemy", "aiosqlite", "pypdf",
     "langgraph", "pydantic", "pydantic_settings", "uvicorn",
+    "langfuse",  # BE-043：Langfuse 可观测平台锁定在 infrastructure/trace/
 }
 
 # 全项目只允许在 app/agent/ 内导入 langgraph（工作流引擎隔离区）

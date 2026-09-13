@@ -92,6 +92,9 @@ def client(tmp_path):
         sqlite_db_path=str(tmp_path / "api.db"),
         log_dir=str(tmp_path / "log"),
         log_level="INFO",
+        # 显式关闭 Langfuse：隔离 pymilvus load_dotenv 把 .env 灌入环境变量的
+        # 副作用（LANGFUSE_ENABLED=true 泄漏会让接口测试触真实观测平台）
+        langfuse_enabled=False,
         _env_file=None,
     )
     app = create_app(settings)

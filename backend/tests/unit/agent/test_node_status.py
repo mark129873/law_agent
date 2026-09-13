@@ -73,3 +73,98 @@ def test_wrapper_without_consumer_drops_events_silently():
     # 无事件接收器（图外直调）——不抛错
     result = asyncio.run(wrapped({}))
     assert result == {}
+
+
+# ---- BE-043：Langfuse span 压栈/弹栈（包装器统一采集） ----
+class RecordingSink:
+    """假 trace 汇：记录 start_span/end 调用。"""
+
+    def __init__(self) -> None:
+        self.span_calls: list = []
+
+    def start_trace(self, **kw):
+        pass
+
+    def start_span(self, *, node: str, parent=None):
+        self.span_calls.append(("start_span", node))
+        return RecordingSpan(self.span_calls, node)
+
+    def record_event(self, **kw):
+        pass
+
+    def end_trace(self, **kw):
+        pass
+
+
+class RecordingSpan:
+    def __init__(self, calls: list, node: str) -> None:
+        self._calls = calls
+        self._node = node
+        self.ended: list = []
+
+    def record_generation(self, **kw):
+        pass
+
+    def end(self, *, duration_ms=None, error=None):
+        self._calls.append(("end_span", self._node, duration_ms, error))
+
+
+def test_wrapper_pushes_and_ends_span_when_sink_present():
+    """有 sink：start_span(node, parent=外层) → end_span(耗时)。"""
+    from app.agent.trace_context import trace_span_var
+    from app.domain.services.trace_sink import trace_sink_var as sink_var
+
+    async def node(state):
+        return {"ok": True}
+
+    sink = RecordingSink()
+    async def _run():
+        sink_token = sink_var.set(sink)
+        try:
+            wrapped = with_node_status("query_router_agent", node)
+            result = await wrapped({})
+            return result, trace_span_var.get()
+        finally:
+            sink_var.reset(sink_token)
+
+    result, span_after = asyncio.run(_run())
+    assert result == {"ok": True}
+    assert sink.span_calls[0] == ("start_span", "query_router_agent")
+    end_call = sink.span_calls[1]
+    assert end_call[0] == "end_span" and end_call[1] == "query_router_agent"
+    assert end_call[3] is None  # 成功路径无 error
+    assert span_after is None  # 弹栈后上下文恢复
+
+
+def test_wrapper_ends_span_with_error_on_exception():
+    """异常路径：span.end(error=...) 后异常原样抛出。"""
+    from app.domain.services.trace_sink import trace_sink_var as sink_var
+
+    async def node(state):
+        raise RuntimeError("节点故障")
+
+    sink = RecordingSink()
+
+    async def _run():
+        sink_token = sink_var.set(sink)
+        try:
+            wrapped = with_node_status("answer_generator_agent", node)
+            await wrapped({})
+        except RuntimeError:
+            pass
+        finally:
+            sink_var.reset(sink_token)
+
+    asyncio.run(_run())
+    end_call = sink.span_calls[1]
+    assert end_call[0] == "end_span" and end_call[3] == "节点故障"
+
+
+def test_wrapper_skips_span_without_sink():
+    """无 sink（未启用）：零调用、零干扰。"""
+    async def node(state):
+        return {}
+
+    wrapped = with_node_status("observation_node", node)
+    result, _ = _run_with_capture(wrapped, {})
+    assert result == {}

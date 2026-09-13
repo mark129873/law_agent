@@ -133,6 +133,17 @@ class Settings(BaseSettings):
     reranker_model_path: str = "Qwen/Qwen3-Reranker-0.6B"
     reranker_device: str = "cpu"
 
+    # ---- Langfuse 链路追踪（BE-043，ADR-0010）----
+    # 总开关：默认关闭——关闭时 langfuse 模块零导入、零开销，纯本地运行；
+    # 开启但密钥缺失时装配点 WARN 降级为关闭（可观测故障不阻断业务）。
+    langfuse_enabled: bool = False
+    # Langfuse 服务地址：云版或自托管实例（如 http://localhost:3000）；
+    # 变量名与 langfuse SDK 自身的 LANGFUSE_BASE_URL 口径一致
+    langfuse_base_url: str = "https://cloud.langfuse.com"
+    # 项目密钥：敏感配置，只经 .env/环境变量注入，禁止提交仓库与写入日志
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+
     @property
     def resolved_sqlite_db_path(self) -> str:
         """SQLite 数据库文件的实际路径（相对路径锚定到 backend/）。"""

@@ -3,18 +3,23 @@
 为什么所有问答都走 LangGraph 图的流式执行：对外唯一问答入口是 SSE
 流式接口（stream_answer），检索、Prompt 组装、模型调用只有一份实现
 （在图节点内），服务层只负责会话持久化与图执行，杜绝行为漂移。
+Langfuse trace（BE-043/ADR-0010）也挂在本服务：请求生命周期
+（start_trace/end_trace）与流程事件（plan/think/sources/regenerating）
+只有这里能看到全貌；节点 span 与 LLM generation 分别由图包装器与
+LLMService 经同一 ContextVar 汇上报。
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from typing import AsyncIterator
+from typing import AsyncIterator, Callable
 
 from app.application.services.conversation_service import ConversationService
 from app.domain.entities.llm import ChatMessage
 from app.domain.entities.message import MessageRole
 from app.domain.services.qa_workflow import QaStreamEvent, QaWorkflow
+from app.domain.services.trace_sink import TraceSink, trace_sink_var
 
 logger = logging.getLogger("app.chat.service")
 
@@ -26,10 +31,13 @@ class ChatService:
         self,
         conversation_service: ConversationService,
         qa_graph: QaWorkflow,
+        trace_sink_factory: Callable[[], TraceSink | None] | None = None,
     ) -> None:
         self._conversations = conversation_service
         # 只依赖工作流端口：LangGraph 是可整体替换的实现细节
         self._graph = qa_graph
+        # trace 汇工厂（BE-043）：None 表示未启用（不导入不构造观测实现）
+        self._trace_sink_factory = trace_sink_factory
 
     async def ensure_conversation(self, conversation_id: str) -> None:
         """校验会话存在，供流式接口在进入流之前返回 404。"""
@@ -61,18 +69,32 @@ class ChatService:
 
         collected: list[str] = []
         sources: list[dict[str, str]] = []
+        # Langfuse trace（BE-043）：每请求新建 sink 并注入上下文——图任务
+        # 经 create_task 继承（节点 span/generation 上报的可见性基础）；
+        # 工厂为 None（未启用）时 sink 恒 None，全部上报点跳过
+        sink = self._trace_sink_factory() if self._trace_sink_factory is not None else None
+        sink_token = trace_sink_var.set(sink) if sink is not None else None
         try:
+            if sink is not None:
+                sink.start_trace(session_id=conversation_id, question=question)
             # 检索与 Prompt 组装都在图节点内完成（图内部唯一实现）
             async for event in self._graph.astream(
                 {"question": question, "history": history}, stream_mode="custom"
             ):
                 if event.type == "plan":
                     # 规划拆解：仅向下游转发（前端展示检索策略），不参与聚合
+                    if sink is not None:
+                        sink.record_event(
+                            name="plan",
+                            payload={"sub_queries": "；".join(event.sub_queries)},
+                        )
                     yield event
                 elif event.type == "sources":
                     # 参考来源：重规划补检索时会再次出现，保留最新一批
                     # （持久化的 sources 只记录最终生成所用的那批）
                     sources = [dict(item) for item in event.sources]
+                    if sink is not None:
+                        sink.record_event(name="sources", payload={"count": str(len(sources))})
                     yield event
                 elif event.type == "regenerating":
                     # verify 打回重生成：重置增量聚合，避免两版回答拼接
@@ -81,25 +103,45 @@ class ChatService:
                         extra={"service": "chat", "conversation_id": conversation_id},
                     )
                     collected = []
+                    if sink is not None:
+                        sink.record_event(name="regenerating", payload={})
                     yield event
                 elif event.type == "status":
                     # 节点执行状态（BE-041）：仅转发供前端展示工作过程，
                     # 绝不进入 delta 聚合——否则状态文本会被拼进回答
+                    # （Langfuse 节点 span 由图任务内的包装器上报，不走此处）
                     yield event
                 elif event.type == "think":
                     # 思考内容行（BE-042/ADR-0009）：仅转发供前端思考块展示，
                     # 同样不进 delta 聚合（与 status 同一职责边界）
+                    if sink is not None:
+                        sink.record_event(
+                            name="think", payload={"node": event.node, "text": event.text}
+                        )
                     yield event
                 else:
                     collected.append(event.content)
                     yield event
+            full_answer = "".join(collected)
+            if sink is not None:
+                sink.end_trace(
+                    output=full_answer,
+                    metadata={
+                        "source_count": str(len(sources)),
+                        "answer_length": str(len(full_answer)),
+                    },
+                )
         except Exception as error:
+            if sink is not None:
+                sink.end_trace(error=str(error))
             logger.error(
                 "Chat stream failed",
                 extra={"service": "chat", "conversation_id": conversation_id, "error": str(error)},
             )
             raise
-        full_answer = "".join(collected)
+        finally:
+            if sink_token is not None:
+                trace_sink_var.reset(sink_token)
         await self._conversations.add_message(
             conversation_id, MessageRole.ASSISTANT, full_answer, sources=sources or None
         )

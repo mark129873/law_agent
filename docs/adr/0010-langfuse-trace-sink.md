@@ -15,7 +15,7 @@
    - **节点 span → with_node_status 包装器**（agent 层，"每个节点都有 span"由装配机制保证，DRY）：执行前 `start_span(node, parent=栈顶)` 压入 agent 内部 `trace_span_var`，finally 中 `span.end(duration_ms, error)` 弹出恢复父级——子图复合节点天然形成父子嵌套；异常路径也 end。
    - **LLM generation → LLMService**（agent 层，模型调用唯一入口 BE-033）：invoke / structured_invoke（每次尝试一条，metadata 带 attempt 与 schema 名）/ stream（聚合增量后一条）经当前 span 记 generation（model、messages、output、耗时、错误）。
 3. **基础设施实现 + 装配开关**：`infrastructure/trace/langfuse_sink.py` 持有 langfuse 客户端（懒初始化单例）；`containers` 按 `LANGFUSE_ENABLED` 注入工厂——关闭时工厂返回 None（langfuse 模块零导入、零开销）；开启但密钥缺失 → WARN 降级为 None（同类于 BE-027 日志故障不阻断业务）。**LangfuseTraceSink 全部方法内部 try/except + WARN**：可观测上报永远不把业务变成 5xx。
-4. **配置**（pydantic-settings，敏感字段只经 .env/环境注入）：`LANGFUSE_ENABLED`（默认 false）、`LANGFUSE_HOST`（默认 https://cloud.langfuse.com）、`LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY`。
+4. **配置**（pydantic-settings，敏感字段只经 .env/环境注入）：`LANGFUSE_ENABLED`（默认 false）、`LANGFUSE_BASE_URL`（默认 https://cloud.langfuse.com）、`LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY`。
 5. **DDD 守护**：langfuse 加入 domain/application 技术库禁入名单（测试锁死）；实现只存在于 infrastructure。
 
 ## 备选与取舍

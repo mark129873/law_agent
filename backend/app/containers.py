@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from typing import Callable
+
 from app.agent import create_qa_workflow
 from app.agent.config import AgentConfig
 from app.agent.services.reranker_service import CrossEncoderScorer, RerankerService
@@ -22,6 +24,7 @@ from app.config.settings import PlannerProvider, Settings, VectorStoreProvider, 
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
 from app.domain.services.embedding import EmbeddingService
+from app.domain.services.trace_sink import TraceSink
 from app.domain.repositories.database import Database
 from app.infrastructure.database.sqlalchemy.database import SQLAlchemyDatabase, sqlite_url
 from app.infrastructure.document_parser.pdf_parser import PdfParser
@@ -29,6 +32,7 @@ from app.infrastructure.document_parser.text_parser import TextParser
 from app.infrastructure.embedding.ollama_embedding import OllamaEmbeddingService
 from app.infrastructure.llm.glm import GLMProvider
 from app.infrastructure.llm.ollama import OllamaProvider
+from app.infrastructure.trace.langfuse_sink import LangfuseTraceSinkFactory
 from app.infrastructure.vector_store.milvus import MilvusVectorStore
 
 
@@ -122,6 +126,22 @@ def _build_reranker(settings: Settings) -> RerankerService:
     )
 
 
+def _build_trace_sink_factory(settings: Settings) -> Callable[[], TraceSink | None] | None:
+    """按配置构造 trace 汇工厂（BE-043/ADR-0010）。
+
+    关闭（默认）返回 None：ChatService 不构造任何观测实现，langfuse
+    模块零导入零开销；开启但缺密钥时工厂内部 WARN 降级为恒 None
+    （可观测故障不阻断业务，见 infrastructure/trace/langfuse_sink.py）。
+    """
+    if not settings.langfuse_enabled:
+        return None
+    return LangfuseTraceSinkFactory(
+        base_url=settings.langfuse_base_url,
+        public_key=settings.langfuse_public_key,
+        secret_key=settings.langfuse_secret_key,
+    )
+
+
 def create_container(settings: Settings | None = None) -> DIContainer:
     """创建并装配应用容器。
 
@@ -184,6 +204,8 @@ def create_container(settings: Settings | None = None) -> DIContainer:
                 agent_config=AgentConfig(),
                 rag_config=LegalRAGConfig(),
             ),
+            # Langfuse trace 汇工厂（BE-043）：按 LANGFUSE_ENABLED 注入，关闭为 None
+            trace_sink_factory=_build_trace_sink_factory(settings),
         ),
         singleton=True,
     )

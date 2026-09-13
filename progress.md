@@ -3,13 +3,32 @@
 ## 当前已验证状态
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`（当前分支 feature/auto_coder）
 - 标准启动路径：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 203 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
-- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016，ADR-0009）全部 passing：主图 + Local Legal RAG 子图 + Web/Plugin Stub + 服务层 + 节点状态流式展示 + 豆包式思考块（think 事件打印 LLM 决策/运行细节/流转过程，点击展开收起），架构决策见 docs/adr/0001~0009，术语表 docs/glossary.md
+- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 225 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
+- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016，ADR-0009）+ Langfuse trace（BE-043，ADR-0010）全部 passing：主图 + Local Legal RAG 子图 + Web/Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关，trace→节点 span→LLM generation 三级上云），架构决策见 docs/adr/0001~0010，术语表 docs/glossary.md
 - 已知性能边界：本机 CPU（无 CUDA）上 Qwen3-Reranker-0.6B 约 15s/对，本地部署默认 `RERANK_ENABLED=false` 走 RRF 降级序（GPU 机器可开启精排）
-- 当前最高优先级未完成功能：无——BE-001~042 与 FE-001~016 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
+- 当前最高优先级未完成功能：无——BE-001~043 与 FE-001~016 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
 - 当前 blocker：无
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md（Session 001~020 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
 
+
+### Session 033（BE-043 Langfuse 全链路 trace：文档先行 → 实现 → 真实云端验证）
+- 日期：2026-09-13
+- 本轮目标：应用户要求接入 Langfuse 做 trace，开关作为配置放 .env 中（ADR-0010 文档先行，随后实现与真实云端验证）
+- 技术决策（详见 plan.md 三期增强节 + ADR-0010）：
+  - **可观测汇走领域端口**：domain/services/trace_sink.py 定义 TraceSink/TraceSpan 协议 + trace_sink_var（ContextVar，与 ADR-0008 事件机制同构）；langfuse 4.15.2 锁在 infrastructure/trace/（DDD 守护名单加 langfuse，domain/application 禁入）
+  - **三级采集各归其位**：trace 生命周期（start/end + plan/think/sources/regenerating 事件）归 ChatService（应用层唯一全景点）；节点 span 归 with_node_status 包装器（start_span 压栈/finally end 弹栈，子图复合节点天然父子嵌套，异常也 end）；LLM generation 归 LLMService（invoke/structured_invoke 含重试轮次/stream 三路径全覆盖，generation 挂当前节点 span）
+  - **配置与降级**：Settings 增 LANGFUSE_ENABLED（默认 false）/LANGFUSE_BASE_URL（命名与用户 .env 预置及 SDK 口径一致）/LANGFUSE_PUBLIC_KEY/SECRET_KEY；关闭=工厂 None 零导入零开销；开启但缺密钥=WARN 降级恒 None；sink 全方法吞异常 WARN（可观测故障不阻断业务）
+  - **踩坑记录**：①工厂实例注入但 ChatService 按可调用对象调用 → 工厂加 `__call__ = create` 别名；②pymilvus load_dotenv 把 .env 的 LANGFUSE_ENABLED=true 灌进测试环境 → test_api 夹具显式 `langfuse_enabled=False` 隔离；③langfuse v2 observations 查询 API 不带 fields 不返回 IO 字段——**数据其实一直在云端**，验证要用 trace.get 完整详情
+- 运行过的验证：
+  - 文档先行提交（0a14ca9）后实现；干净环境全量 pytest **225 passed**（+22 例：假客户端锁 sink 契约与降级、ChatService 生命周期序、LLMService 三路径 generation、包装器 span 压弹栈、Settings 默认值/开关、DDD 守护）
+  - **真实 Langfuse 云端验证通过**（用户 .env 预置密钥，jp.cloud.langfuse.com，server v4.35.0）：服务启用启动健康 → verify_real_e2e.py 全断言通过（回答引用第四十二条）→ 云端查询确认：1 条 trace（name=chat，input=问题原文，output=完整回答）、29 个节点 span（主图编排循环 + RAG 子图嵌套）、11 个 generation（model=glm-4.5-air，含 Prompt 消息与输出，metadata 带 attempt/schema/duration_ms）、15 条 flow:think + 2 条 flow:regenerating（本轮真实触发 2 次校验打回）
+  - 验证后已清理：law_chunks 集合 drop、backend/data 删除、后端进程停止
+- 已记录证据：feature_list.json BE-043（passing）；对账 59=39 热层（35 passing+4 deprecated）+20 archived
+- 已知风险或未解决问题：
+  - Langfuse SDK 后台批量上报（OTel exporter）：沙箱内曾见 export timeout 日志（网络受限场景），不影响业务（sink 吞异常）；网络通畅时无感
+  - session 归组目前放在 trace metadata（session_id 字段），未用 SDK propagate_attributes 跨任务传播——Langfuse UI 的 Sessions 视图暂不聚合，属可选增强
+  - 自托管 Langfuse 未验证（用户用云版）；MySQL/Web Search 等既有未验证项不变
+- 下一步最佳动作：可选产品增强（会话重命名/停止按钮/CORS 收敛）、MySQL 8.0 接入、或 Web Search 二期
 
 ### Session 032（全面测试基线 + 思考块 BE-042/FE-016：全面测试→用户样式反馈→当日实现与验证）
 - 日期：2026-09-13

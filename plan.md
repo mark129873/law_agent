@@ -166,7 +166,7 @@
 2. **trace 生命周期归 ChatService**（应用层）：请求开始 `start_trace(session_id=conversation_id, input=question)`；plan/think/sources/regenerating 经 `record_event` 记为 trace 事件；正常结束 `end_trace(output=完整回答)`，异常 `end_trace(error=...)` 后原样上抛。
 3. **节点 span 归 with_node_status 包装器**（agent 层，DRY 与 status 同一机制）：节点执行前 `start_span(node, parent=当前栈顶)` 压入 `trace_span_var`，结束 `span.end(duration_ms, error)` 弹出——异常也 end；子图复合节点天然形成父子嵌套。
 4. **LLM generation 归 LLMService**（agent 层，模型调用唯一入口）：invoke/structured_invoke（含重试轮次）/stream 三条路径都经当前 span 记 generation（model + messages + output + 耗时 + attempt）。
-5. **开关与装配**：Settings 新增 `langfuse_enabled`（默认 false）/`langfuse_host`/`langfuse_public_key`/`langfuse_secret_key`（密钥只走 .env，不进仓库不进日志）；containers 按开关注入工厂——关闭时 ChatService/LLMService 拿到 None，零开销零 langfuse import；开启但缺密钥 → WARN 降级为 None（可观测故障不阻断业务）。
+5. **开关与装配**：Settings 新增 `langfuse_enabled`（默认 false）/`langfuse_base_url`/`langfuse_public_key`/`langfuse_secret_key`（BASE_URL 命名与用户 .env 预置及 SDK 自身口径一致）（密钥只走 .env，不进仓库不进日志）；containers 按开关注入工厂——关闭时 ChatService/LLMService 拿到 None，零开销零 langfuse import；开启但缺密钥 → WARN 降级为 None（可观测故障不阻断业务）。
 6. **失败降级**：LangfuseTraceSink 全部方法内部 try/except + WARN 日志——上报失败绝不影响问答。
 
 ## 验证口径
