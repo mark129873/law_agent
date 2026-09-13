@@ -237,7 +237,8 @@
       "id": "BE-035",
       "name": "Legal RAG 子图组装",
       "description": "build_legal_rag_graph：按设计 §4 拓扑装配 + route_after_evidence_grade（max_retries 预算控制 recovery 回边）；子图可独立 ainvoke 运行（SUCCESS 与 LOCAL_EVIDENCE_INSUFFICIENT 两态输出）。",
-      "status": "planned"
+      "status": "passing",
+      "evidence": "2026-09-13：build_legal_rag_graph 按 §4 拓扑装配 10 节点（依赖注入三服务+配置）；route_strategies 多选 fan-out 条件边（无变体直接进检索）；route_after_evidence_grade 恢复预算路由（sufficient→result；local_recovery_possible 且 retry_count<max_retries=2→recover 回 strategy_router）。集成测试 6 例（Fake 构建同一拓扑 + 单次执行 stream_mode=[custom,values] 捕事件与终态）：简单成功/复杂多变体+恢复一轮成功（两轮 plan 查询不相交、retry_count=1）/预算耗尽 LOCAL_EVIDENCE_INSUFFICIENT（missing_evidence+suggested_external_queries 透传）/不可恢复直出/检索故障 RETRIEVAL_ERROR（无 sources）/rag_trace 全节点覆盖。pytest 195 passed。"
     },
     {
       "id": "BE-036",
