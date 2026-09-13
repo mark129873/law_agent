@@ -211,6 +211,78 @@
       "status": "passing",
       "evidence": "2026-09-12：export_qa_graph.py 桩依赖建图导出 Mermaid（docs/qa_graph.mmd，--png 可选）；ARCHITECTURE §5 内嵌同源图。运行验证六节点与全部条件边标签与 graph.py 路由一致。",
       "testedAt": "2026-09-12"
+    },
+    {
+      "id": "BE-032",
+      "name": "Agent 模块一期重写骨架（基础类型）",
+      "description": "按 legal_agent_phase1_technical_design.md 重建 agent/ 目录结构：主图 state/config/schemas/constants（含节点中文 label 映射表）、legal_rag 子图 state/config/schemas，utils（query 去重汇总/evidence 转换/dedup/trace/timing）。新旧模块并存不接装配点。",
+      "status": "planned"
+    },
+    {
+      "id": "BE-033",
+      "name": "Agent 服务层（LLM/Milvus/Reranker/Citation）",
+      "description": "LLMService 适配 LLMProvider（structured_invoke=chat+JSON 容错+重试 1 次+安全默认）；MilvusService 适配 VectorStore 端口（不直连 SDK）；RerankerService 新增（Qwen3-Reranker-0.6B CrossEncoder、CPU、懒加载单例、失败降级 RRF 序 + reranker_degraded）；CitationService 引用构建。Settings 新增 RERANKER_* 字段 + .env.example 同步。",
+      "status": "planned"
+    },
+    {
+      "id": "BE-034",
+      "name": "Local Legal RAG 核心节点",
+      "description": "retrieval_planner_agent、strategy_router_node（多选策略 fan-out）、query_rewrite_agent、subquery_generator_agent、query_expansion_agent、hybrid_retriever_node（asyncio.gather 多 Query 并发混合检索）、evidence_ranking_node（合并去重 + original_query 统一 rerank）、evidence_grader_agent、recovery_planner_agent、rag_result_node；legal_rag/prompts 6 文件。",
+      "status": "planned"
+    },
+    {
+      "id": "BE-035",
+      "name": "Legal RAG 子图组装",
+      "description": "build_legal_rag_graph：按设计 §4 拓扑装配 + route_after_evidence_grade（max_retries 预算控制 recovery 回边）；子图可独立 ainvoke 运行（SUCCESS 与 LOCAL_EVIDENCE_INSUFFICIENT 两态输出）。",
+      "status": "planned"
+    },
+    {
+      "id": "BE-036",
+      "name": "主图节点",
+      "description": "query_router_agent、orchestrator_agent（max_global_steps 预算+超限强制 finish）、action_router_node、observation_node（CapabilityResult 统一合并）、direct_answer_agent、answer_generator_agent、grounding_checker_agent（RAG/direct 双规则）、fallback_generator_agent、final_answer_node；prompts 6 文件。direct 路径只校验不编造法条；web/plugin 未开通生成说明性回答。",
+      "status": "planned"
+    },
+    {
+      "id": "BE-037",
+      "name": "Web Search 与 Plugin Stub",
+      "description": "web_search_entry_node（web_search_enabled 开关检查，false→DISABLED）、web_search_stub_node（NOT_IMPLEMENTED）、plugin_entry_node、plugin_stub_node（NOT_IMPLEMENTED）；禁止实际访问 Web、禁止动态加载外部代码。",
+      "status": "planned"
+    },
+    {
+      "id": "BE-038",
+      "name": "主图组装与装配切换",
+      "description": "agent/graph.py build_agent_graph 按设计 §3 拓扑组装主图（legal_rag 子图作为节点接入）；SSE 事件映射（plan=检索规划全部查询/sources=ranked evidence/delta=流式回答/regenerating=重生成）；create_qa_workflow 新签名；containers/settings 接线；删除旧 agent 文件（nodes.py/prompts.py/graph.py/state.py）并标记 BE-030 deprecated。",
+      "status": "planned"
+    },
+    {
+      "id": "BE-041",
+      "name": "节点运行状态流式事件（Codex 风格）",
+      "description": "图构建器统一节点包装器：节点起止计时 + trace 写入 + status SSE 事件推送（phase=start/end、duration_ms、中文 label）；QaStreamEvent 值对象扩展 status 类型与 node/label/phase/duration_ms 字段（只增不改）；ChatService 增 status 分支仅转发不聚合；子图节点事件向主图 astream 传播的专项验证（不传播则降级为注入式发射器）。",
+      "status": "planned"
+    },
+    {
+      "id": "BE-039",
+      "name": "Agent 重写测试体系重建",
+      "description": "backend/tests/{unit,integration}/agent/：各节点单测（脚本化 Fake LLM/Reranker/向量库，覆盖 JSON 容错回退）、RAG 子图集成 7 场景（简单/复杂/子查询/改写/扩展/恢复/证据不足）、主图 E2E 5 case（设计 §50）、SSE 序列（含 status 交织，过滤 status 后原序不变）、direct 路径与 web/plugin stub；fakes 扩展；test_ddd_boundaries 增加 sentence_transformers/torch 隔离；删除旧 test_agent_graph/test_agent_parsing。",
+      "status": "planned"
+    },
+    {
+      "id": "FE-014",
+      "name": "前端检索策略展示与直接回答适配",
+      "description": "生成中的「问题拆解」改为「检索策略（N 条查询）」展示全部检索查询；AppContext.sendQuestion 发起新提问时清空 subQueries（direct 路径无 plan 事件，防残留上一轮列表）；npm run build + 浏览器回归验证。",
+      "status": "planned"
+    },
+    {
+      "id": "FE-015",
+      "name": "前端节点运行状态浅色展示",
+      "description": "types 扩展 status SSE 事件类型；api/chat.ts 增 onStatus 回调；AppContext nodeStatuses 状态（新提问清空、regenerating 跨轮累加）；MessageBlock 生成中以浅色小字实时渲染节点状态行（开始=「正在{label}…」、结束补耗时、done 后保留在消息上方）；npm run build + 浏览器回归验证。",
+      "status": "planned"
+    },
+    {
+      "id": "BE-040",
+      "name": "Agent 重写文档/可视化/真实 E2E 收尾",
+      "description": "ARCHITECTURE §2/§3/§5/§7/§9 重写（新目录/端口/图拓扑/协议/测试数）；PRODUCT.md 行为变更定稿（D1~D5 + 行为规则 1~7）；RELIABILITY service 清单与日志规则补充；docs/adr/0001~0008 + docs/glossary.md；scripts/export_qa_graph.py 适配新图重导出 docs/qa_graph.mmd；verify_real_e2e.py 适配 + 真实运行（GLM+真实 Milvus+rerank 模型：上传→流式问答引用条文→sources/检索策略契约→status 事件序列→闲聊直接回答）；progress/session-handoff/clean-state-checklist 收尾与冷热沉降对账。",
+      "status": "planned"
     }
   ]
 }
