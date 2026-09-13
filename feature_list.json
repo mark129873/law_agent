@@ -272,7 +272,8 @@
       "id": "BE-039",
       "name": "Agent 重写测试体系重建",
       "description": "backend/tests/{unit,integration}/agent/：各节点单测（脚本化 Fake LLM/Reranker/向量库，覆盖 JSON 容错回退）、RAG 子图集成 7 场景（简单/复杂/子查询/改写/扩展/恢复/证据不足）、主图 E2E 5 case（设计 §50）、SSE 序列（含 status 交织，过滤 status 后原序不变）、direct 路径与 web/plugin stub；fakes 扩展；test_ddd_boundaries 增加 sentence_transformers/torch 隔离；删除旧 test_agent_graph/test_agent_parsing。",
-      "status": "planned"
+      "status": "passing",
+      "evidence": "2026-09-13：tests/{unit,integration}/agent/ 共 88 例——unit/agent 75（utils 15/services 14/rag 节点 21/主图节点 16/stub 5/包装器 4），integration/agent 13（子图 6/主图 E2E 7，§50 五 case 全覆盖）；脚本化 Fake 全覆盖（LLM/Embedding/向量库/打分器，零外部依赖），真实 Milvus 5 例不可达自动跳过；test_ddd_boundaries 新增sentence_transformers/torch 隔离断言（现 5 例）；删旧 test_agent_graph 19 例+test_agent_parsing 13 例；test_api ScriptedLLM 适配新 Prompt 契约（status 过滤断言）。干净环境全量 195 passed；脚本语法/导入验证通过。"
     },
     {
       "id": "FE-014",
