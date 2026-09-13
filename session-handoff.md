@@ -13,10 +13,10 @@
   - Langfuse 打回率对比：RAG regenerating 2→0、闲聊 3→0；judge verdict 留档取证（时间线定位编排器重复决策）
   - 验证后已清理：law_chunks 集合 drop、backend/data 删除、后端进程停止
 
-## 本轮改动（Session 035：删除 ADR 体系与术语表 + 全量引用清理）
-- **删除**：docs/adr/（0001~0010）+ docs/glossary.md——用户确认有意删除；ADR 设计实质内容由 docs/ARCHITECTURE.md 承载
-- **引用清理（34 文件）**：失效路径指针统一改指 docs/ARCHITECTURE.md；"ADR-XXXX" 标签全量剥离（解释性正文保留）；覆盖文档层 6 文件 + 后端源码 20 文件 + 测试 7 文件 + .env.example；冷分卷 docs/archive/ 无引用未动
-- **验证**：grep 引用清零 + feature_list.json JSON 校验通过；pytest 按用户指示跳过（纯注释/文档改动，基线 225）
+## 本轮改动（Session 036：plan.md 悬空引用修复 + 契约/决策归档）
+- **新家**：ARCHITECTURE.md §11「Prompt 与事件硬约束契约」（9 角色标记词/字面锚点/JSON 契约/BE-044 要点/think 清单——**改 Prompt 前的唯一权威清单**）；PRODUCT.md §6「已确认的产品决策记录（D1~D12）」
+- **悬空引用修复**：progress.md 4 处 + handoff 1 处 + feature_list.json 1 处 "plan.md" 引用改指新家；Langfuse 设计确认 RELIABILITY 已承载不重复
+- **上一轮（Session 035 文档清理，760cdf9）**：删除 glossary，34 文件 ADR 引用全量清理
 - **上一轮（Session 034 Prompt 优化，d3ed8bc/6053892）**：12 个 Prompt 五段结构化 + 编排器 finish 总则修正（打回率 RAG 2→0、闲聊 3→0）
 - **上一轮（Session 033 Langfuse，0a14ca9/8f6e0fb）**：RELIABILITY/ARCHITECTURE + trace_sink 端口 + infrastructure sink + ChatService/包装器/LLMService 采集 + .env 开关
 - **后端**：
@@ -41,7 +41,7 @@
   - **langfuse v4 查询口径**：验证/导出要用 `api.trace.get(id)` 完整详情或 observations.get_many 带 fields——get_many 裸调不返回 input/output/model，别误判为上报缺失
   - **SDK 后台批量上报**：网络受限时见 export timeout 日志（sink 吞异常不影响业务）；进程退出前如需强推可 `client.flush()`
   - **编排器"不 finish"误诊已修正（BE-044）**：旧记录"judge 对 direct 路径过度敏感"实为编排器重复选 direct_answer（Langfuse 时间线取证）——若回归先查编排决策的 generation 留档（api.trace.get），不要想当然调 judge Prompt
-  - **Prompt 修改纪律**：9 个角色标记词（意图路由器/顶层编排器/回答校验器/检索规划器/改写器/子查询生成器/扩展器/证据评估器/恢复规划器）与 BE-017 字面锚点被测试断言，改 Prompt 前先查 tests 的 marker/锚点清单（plan.md BE-044 节有全列表）
+  - **Prompt 修改纪律**：9 个角色标记词（意图路由器/顶层编排器/回答校验器/检索规划器/改写器/子查询生成器/扩展器/证据评估器/恢复规划器）与 BE-017 字面锚点被测试断言，改 Prompt 前先查 tests 的 marker/锚点清单（docs/ARCHITECTURE.md §11「Prompt 与事件硬约束契约」有全列表）
   - 既有风险不变：每问题 LLM 调用 5~8 次；BE-017 字面锚点三方联动
   - **ADR 体系已删除（Session 035）**：注释/文档不得再新增 ADR-XXXX 引用；架构决策统一引用 docs/ARCHITECTURE.md
   - **Windows 端口清理**：停 uvicorn/npm 后子进程可能残留占端口，需 netstat 找 PID + taskkill //F

@@ -299,7 +299,7 @@
     {
       "id": "BE-042",
       "name": "思考事件（think）流式输出",
-      "description": "agent/utils 增 truncate_text(120)；QaStreamEvent 扩展 type=think（node/label/text，text 发事件前统一截断、JSON 决策拼句）；各节点按 plan.md 清单经 emit_event 发思考内容（意图判定/编排决策/选中策略/命中数/重排降级/评估结论/恢复计划/校验判定+理由/兜底触发/未开通说明/来源条数）；ChatService 与 SSE 路由增 think 分支（仅转发不进 delta 聚合）；单测+集成事件序+test_api 断言放宽（过滤 status 与 think 后原序不变）。",
+      "description": "agent/utils 增 truncate_text(120)；QaStreamEvent 扩展 type=think（node/label/text，text 发事件前统一截断、JSON 决策拼句）；各节点按节点→内容清单（docs/ARCHITECTURE.md §11）经 emit_event 发思考内容（意图判定/编排决策/选中策略/命中数/重排降级/评估结论/恢复计划/校验判定+理由/兜底触发/未开通说明/来源条数）；ChatService 与 SSE 路由增 think 分支（仅转发不进 delta 聚合）；单测+集成事件序+test_api 断言放宽（过滤 status 与 think 后原序不变）。",
       "status": "passing",
       "evidence": "2026-09-13：QaStreamEvent 扩展 type=think（node/label/text）；agent/utils/think_utils.py truncate_text(120)+emit_think 统一发射；13 个节点按清单接入（意图判定/编排决策/选中策略/命中数/重排降级/评估结论/恢复计划/校验判定+理由/兜底与重写流转/未开通说明/来源条数）；ChatService 与 SSE 路由 think 分支（仅转发不进 delta 聚合）。干净环境 203 passed（+6 例 think 单测）；主图集成断言 think 契约字段与 ≤120 字；test_api 过滤 status+think 后业务原序。"
     },

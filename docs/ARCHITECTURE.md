@@ -382,3 +382,23 @@ npm run build                                      # tsc 类型检查 + 生产�
 - **新文档格式**：实现 `DocumentParser` 策略并注册进工厂；**新 LLM Provider**：实现 `LLMProvider`（chat + stream + model_name）+ 容器加分支，密钥仅环境注入；**新 Agent 节点**：实现节点类并在 AgentGraphBuilder/build_legal_rag_graph 接线 + constants.py 登记中文标签（status 事件文案）。
 - **Rerank**：GPU 机器设 `RERANKER_DEVICE=cuda` 即启用精排；`rerank_max_candidates=20` 控制精排输入规模。
 - **前端**：遵循 §7 API 契约与 SSE 协议；开发期统一请求相对路径 `/api/...` 由 Vite 代理，前端代码不感知后端地址。
+
+## 11. Prompt 与事件硬约束契约（BE-042/044，原 plan.md 承载，此处为唯一权威清单）
+
+12 个 Prompt（主图 6 + RAG 子图 6）统一五段结构：角色定位 → 任务与输入说明 → 输出格式（JSON 示例）→ 判定/执行规则 → 输出纪律。**以下契约被测试脚本化 Fake 与断言锁定，修改 Prompt / 事件语义前必查本节**：
+
+### 9 个角色标记词（测试 Fake 按其分流输出，不可改动或移动）
+意图路由器、顶层编排器、回答校验器、检索规划器、改写器、子查询生成器、扩展器、证据评估器、恢复规划器。
+
+### 字面锚点（与 grounding_checker 规则档字面联动）
+- answer_generator 必含：「优先依据」「知识库中暂无相关依据（，建议咨询专业律师）」「禁止」「严禁虚构」；引用以【来源：文件名】标注（与 grounding_checker 的 `_SOURCE_MARKER` 联动）。
+- 检索无命中的回答必含信息不足声明（与 `_NO_EVIDENCE_MARKER` 联动）。
+
+### JSON 契约（输出键与值域不可变更）
+normalized_query / intent / request_type / extracted_conditions；action / reason；use_* / target_evidence；queries；sufficient / confidence / missing_evidence / conflicts / local_recovery_possible / suggested_external_queries；actions / missing_evidence / reason；passed / unsupported_claims / citation_issues / reason。
+
+### BE-044 优化要点（行为契约零变更前提下）
+JSON 纪律（以 { 开始以 } 结束、禁 markdown 代码块）；JSON 示例统一加"值仅为格式示意"防锚定；answer_generator 补【来源：文件名】格式硬约束与简洁约束；grounding 降误判（实质一致即可/无关数字不算法律数据/宁可放行）；direct_answer 禁输出法条编号与精确法律数据。验证口径：Langfuse regenerating 打回率 RAG 2→0、闲聊 3→0。
+
+### think 事件节点→内容清单（BE-042）
+query_router=意图判定；orchestrator=编排决策；strategy_router=选中策略；hybrid_retriever=查询数与命中数；evidence_ranking=重排启用/降级与保留条数；evidence_grader=评估结论；recovery_planner=恢复计划；grounding_checker=校验判定+理由；finish 路由=兜底触发说明；web/plugin stub=未开通说明；final_answer=引用来源条数；observation / direct_answer / answer_generator 不发（避免与回答本体重复）。

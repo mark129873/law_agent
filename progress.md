@@ -11,6 +11,17 @@
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md（Session 001~020 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
 
 
+### Session 036（文档修复：plan.md 悬空引用清理 + 契约/决策归档）
+- 日期：2026-09-14
+- 本轮目标：plan.md 被删除后（ce56bf8）遗留两类问题修复——①progress/session-handoff/feature_list 共 6 处 "详见 plan.md" 死指针；②plan.md 承载的三类内容无归档去处（BE-044 硬约束清单、D1~D12 决策表、Langfuse 设计摘要）
+- 技术决策：
+  - 只增小节不新增文件：**ARCHITECTURE.md 新增 §11「Prompt 与事件硬约束契约」**（9 角色标记词全列表 + 字面锚点 + JSON 契约键值域 + BE-044 优化要点 + think 节点→内容清单，注明为唯一权威清单）；**PRODUCT.md 新增 §6「已确认的产品决策记录（D1~D12）」**（决策留档防实现漂移）
+  - Langfuse 设计摘要经逐条比对确认 RELIABILITY.md「Langfuse 链路追踪」节已完整承载，不重复新增，引用改指该处
+- 运行过的验证：grep 热层文件 plan.md 引用仅剩 §11 标题中的出处说明（有意保留）；feature_list.json JSON 校验通过；本轮纯文档改动，测试沿用 Session 034 基线（225）
+- 已记录证据：本轮为文档修复，feature_list.json 无功能状态变化
+- 已知风险或未解决问题：**热层 Session 数 17 > 15，冷热分层沉降条件已触发待执行**（按规则沉 10 个最旧 Session 到 docs/archive/progress-archive-021-030.md，passing 条目 36+4 未超 40 暂不触发 feature_list 沉降）
+- 下一步最佳动作：执行 Session 沉降；失败查询链路优化（方案已备）；OllamaProvider 重试/降级（Session 028 遗留）
+
 ### Session 035（文档清理：删除 ADR 目录与 glossary 术语表 + 全量引用清理）
 - 日期：2026-09-14
 - 本轮目标：应用户要求删除 docs/adr/（0001~0010，工作区先前已删未提交）与 docs/glossary.md，并全量清理仓库内引用（用户确认删除是有意的文档重组；ADR 承载的设计实质——双预算、SSE 契约、事件机制、grounding 双规则等——已由 docs/ARCHITECTURE.md 完整承载）
@@ -26,7 +37,7 @@
 ### Session 034（BE-044 全量 Prompt 优化：12 个 Prompt 五段结构化 + 编排器"不 finish"误诊修正）
 - 日期：2026-09-13
 - 本轮目标：应用户要求优化全部 Prompt（主图 6 + RAG 子图 6）。硬约束：9 个角色标记词（测试脚本化 Fake 分流依赖）、BE-017 字面锚点（优先依据/知识库中暂无相关依据/禁止/严禁虚构/【来源：）、JSON 键与值域零变更
-- 技术决策（详见 plan.md 四期增强节）：
+- 技术决策（Prompt 硬约束契约全列表见 docs/ARCHITECTURE.md §11）：
   - **统一五段结构**：角色 → 任务 → 输出格式 → 规则 → 纪律；JSON 纪律升级为"以 { 开始以 } 结束、禁 markdown 代码块"（减少容错解析重试）；所有 JSON 示例加"值仅为格式示意"（消除锚定偏差，evidence_grader 的 sufficient:true 示例曾与代码安全默认反向）
   - **answer_generator**：明确【来源：文件名】格式硬约束+示例（grounding 规则档按该字面检查，此前只说"注明来源文件"致 GLM 偶发漏写被打回）；补"简洁不重复、不堆砌无关条文"（E2E 实测回答有重复句）
   - **grounding 校验器降误判**：RAG 档补"实质一致即可不要求逐字匹配"+"信息不足声明判通过"；GENERAL 档补"无关数字不算法律数据"+"宁可放行不可误杀"
@@ -44,7 +55,7 @@
 ### Session 033（BE-043 Langfuse 全链路 trace：文档先行 → 实现 → 真实云端验证）
 - 日期：2026-09-13
 - 本轮目标：应用户要求接入 Langfuse 做 trace，开关作为配置放 .env 中（文档先行，随后实现与真实云端验证）
-- 技术决策（详见 plan.md 三期增强节）：
+- 技术决策（Langfuse 设计决策见 docs/RELIABILITY.md「Langfuse 链路追踪」节）：
   - **可观测汇走领域端口**：domain/services/trace_sink.py 定义 TraceSink/TraceSpan 协议 + trace_sink_var（ContextVar，与既有事件机制同构）；langfuse 4.15.2 锁在 infrastructure/trace/（DDD 守护名单加 langfuse，domain/application 禁入）
   - **三级采集各归其位**：trace 生命周期（start/end + plan/think/sources/regenerating 事件）归 ChatService（应用层唯一全景点）；节点 span 归 with_node_status 包装器（start_span 压栈/finally end 弹栈，子图复合节点天然父子嵌套，异常也 end）；LLM generation 归 LLMService（invoke/structured_invoke 含重试轮次/stream 三路径全覆盖，generation 挂当前节点 span）
   - **配置与降级**：Settings 增 LANGFUSE_ENABLED（默认 false）/LANGFUSE_BASE_URL（命名与用户 .env 预置及 SDK 口径一致）/LANGFUSE_PUBLIC_KEY/SECRET_KEY；关闭=工厂 None 零导入零开销；开启但缺密钥=WARN 降级恒 None；sink 全方法吞异常 WARN（可观测故障不阻断业务）
@@ -63,7 +74,7 @@
 ### Session 032（全面测试基线 + 思考块 BE-042/FE-016：全面测试→用户样式反馈→当日实现与验证）
 - 日期：2026-09-13
 - 本轮目标：①按开工流程做全面测试（干净环境全量 pytest/前端 build/真实启动 smoke/真实 E2E）；②用户在浏览器看到 FE-015 平铺状态行后反馈"思考的样式不对，要豆包式可点开收起"→ 按 grilling 定稿（D6~D12）实现思考块并验证
-- 技术决策（详见 plan.md 二期增强节）：
+- 技术决策（决策 D6~D12 见 docs/PRODUCT.md §6）：
   - think 事件：QaStreamEvent 扩展 type=think（node/label/text），text 后端 `truncate_text(120)` 统一截断（契约生产端保证）；`emit_think` 统一发射（label 复用 NODE_LABELS，DRY）
   - 13 个节点接入：意图判定/编排决策（JSON 拼句）/选中检索与恢复策略/并发检索命中数/重排降级/证据评估结论/恢复计划/校验判定+理由（_verdict 统一出口）/兜底与重写流转（regenerating 同源）/Web+Plugin 未开通说明/引用来源条数
   - 前端思考块（豆包式）：标题行「思考中…/已完成思考 · Ns」+ 箭头点击切换；manualOpen=null 跟随默认（生成中展开、完成自动收起，消息 id 换名触发重挂载实现自动收起）；AppContext nodeStatuses 升级为 ThoughtLine 统一列表（status 按节点合并 + think 追加）；检索策略面板并入思考块；出错保留思考快照（D12，onError 不再清空并给半截消息挂快照+固定 id）；闲聊同展示（D11）
@@ -81,7 +92,7 @@
 ### Session 031（一期 Agent 模块重写：BE-032~041 + FE-014/015 + BE-040 全部落地）
 - 日期：2026-09-13
 - 本轮目标：按 legal_agent_phase1_technical_design.md 对 agent 模块整体重写（主图 + 独立 Local Legal RAG 子图 + Web/Plugin Stub + 服务层），并按用户决策 D1~D5 实现检索策略全量展示、直接回答路径、节点状态流式展示（Codex 风格浅色小字）、rerank top-10
-- 技术决策（详见 plan.md）：
+- 技术决策（产品决策 D1~D5 见 docs/PRODUCT.md §6）：
   - 主图 15 节点（意图路由/编排/动作路由/RAG 子图/Web+Plugin Stub/观察/直接回答/回答生成/grounding/兜底/收尾）+ 子图 10 节点（检索规划/策略路由/三查询变体/并发混合检索/证据重排/评估/恢复规划/结果）；预算 max_global_steps=4 与 max_retries=2 相互独立
   - 服务层适配领域端口：MilvusService→VectorStore（不直连 SDK）、LLMService 结构化输出=JSON 容错+重试 1 次+安全默认、RerankerService=CrossEncoderScorer 懒加载+失败降级
   - **重大实测发现：langgraph 1.2.11 子图节点 custom 事件不上浮父图 astream**（探针证实）→ 事件机制改为 ContextVar 注入式发射器，适配器 astream=ainvoke+队列排空
