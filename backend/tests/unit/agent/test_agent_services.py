@@ -195,6 +195,18 @@ def test_rerank_empty_documents_skips_scorer():
     assert scorer.calls == []
 
 
+def test_rerank_disabled_degrades_to_rrf_order_without_scoring():
+    """RERANK_ENABLED=false：整体降级为原序截断（CPU 无 CUDA 部署的可行性开关）。"""
+    scorer = FakeScorer([0.9, 0.1])
+    service = RerankerService(scorer, enabled=False)
+    docs = [{"chunk_id": "c1", "content": "甲"}, {"chunk_id": "c2", "content": "乙"}]
+    result = asyncio.run(service.rerank("q", docs, top_n=1))
+    assert result.degraded is True
+    assert "disabled" in result.error
+    assert [item["chunk_id"] for item in result.items] == ["c1"]  # 原序截断
+    assert scorer.calls == []  # 不触发打分（不加载模型）
+
+
 def test_rerank_uses_query_for_scoring():
     scorer = FakeScorer([0.0, 0.0, 0.0])
     service = RerankerService(scorer)
@@ -224,10 +236,11 @@ def test_citations_numbered_and_deduped():
 def test_reranker_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     # pymilvus import 的 load_dotenv 副作用会把 .env 的值灌进进程环境
     # （Session 027 已记录），默认值断言前先清除（与 test_settings 同模式）
-    monkeypatch.delenv("RERANKER_MODEL_PATH", raising=False)
-    monkeypatch.delenv("RERANKER_DEVICE", raising=False)
+    for key in ("RERANK_ENABLED", "RERANKER_MODEL_PATH", "RERANKER_DEVICE"):
+        monkeypatch.delenv(key, raising=False)
     from app.config.settings import Settings
 
     settings = Settings(_env_file=None)  # 不读 .env，验证纯默认值
+    assert settings.rerank_enabled is True  # 默认开启（设计 §32 忠实）
     assert settings.reranker_model_path == "Qwen/Qwen3-Reranker-0.6B"
     assert settings.reranker_device == "cpu"

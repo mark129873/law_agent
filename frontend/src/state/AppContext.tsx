@@ -5,7 +5,7 @@
 // 所有网络请求都发生在 state/api 层，UI 组件不直接 fetch，保证数据访问只有一份实现。
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { Conversation, KnowledgeDocument, Message, ReferenceSource } from '../types'
+import type { Conversation, KnowledgeDocument, Message, NodeStatus, ReferenceSource } from '../types'
 import * as conversationsApi from '../api/conversations'
 import * as documentsApi from '../api/documents'
 import { streamChat } from '../api/chat'
@@ -35,8 +35,10 @@ interface AppContextValue {
   isStreaming: boolean
   /** 流式/提问过程的错误信息；null 表示无错误 */
   streamError: string | null
-  /** 规划器产出的问题拆解（BE-030）；null 表示当前没有可展示的拆解 */
+  /** 检索规划产出的全部查询（检索策略展示）；null 表示当前没有可展示的策略 */
   subQueries: string[] | null
+  /** 当前生成过程的工作环节记录（BE-041/FE-015）：生成中实时更新，完成后快照挂到消息上 */
+  nodeStatuses: NodeStatus[]
 
   // —— 会话动作 ——
   refreshConversations: () => Promise<void>
@@ -139,8 +141,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamError, setStreamError] = useState<string | null>(null)
-  // 问题拆解（BE-030）：plan 事件携带，仅在生成过程中展示，结束后清空
+  // 检索策略（plan 事件携带）：仅在生成过程中展示，结束后清空
   const [subQueries, setSubQueries] = useState<string[] | null>(null)
+  // 工作环节记录（BE-041）：status 事件实时更新；done 时快照挂到助手消息上，
+  // 供"回答完成后保留显示"；发起新提问时清空重新开始
+  const [nodeStatuses, setNodeStatuses] = useState<NodeStatus[]>([])
+  // 与 nodeStatuses 同步的 ref：onDone 回调里要读取最新值（闭包旧值问题）
+  const nodeStatusesRef = useRef<NodeStatus[]>([])
+
+  /**
+   * 合并一条节点状态：同节点复用同一行（恢复重试时该行会再次变为执行中），
+   * start 更新标签并清空耗时，end 写入耗时——保持事件到达顺序即展示顺序。
+   */
+  const applyNodeStatus = useCallback((status: NodeStatus & { phase: 'start' | 'end' }) => {
+    const update = (prev: NodeStatus[]): NodeStatus[] => {
+      const index = prev.findIndex((item) => item.node === status.node)
+      const next =
+        status.phase === 'start'
+          ? { node: status.node, label: status.label }
+          : { node: status.node, label: status.label, durationMs: status.durationMs }
+      if (index === -1) return [...prev, next]
+      const copy = [...prev]
+      copy[index] = { ...copy[index], ...next }
+      return copy
+    }
+    setNodeStatuses(update)
+    nodeStatusesRef.current = update(nodeStatusesRef.current)
+  }, [])
 
   const clearStreamError = useCallback(() => setStreamError(null), [])
 
@@ -153,6 +180,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setIsStreaming(true)
       setStreamError(null)
       setSubQueries(null)
+      // 新提问重新开始记录工作环节（上一条消息的过程记录已挂到消息上保留）
+      setNodeStatuses([])
+      nodeStatusesRef.current = []
 
       // 本地乐观消息的临时 id 声明在 try 外：catch 里才能清理它们
       const tempUserId = `local-user-${Date.now()}`
@@ -190,8 +220,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
               sources = received
             },
             onPlan: (received) => {
-              // 规划器的问题拆解：生成中展示，重新规划时会更新
+              // 检索策略：生成中展示，重新规划时会更新
               setSubQueries(received)
+            },
+            onStatus: (status) => {
+              // 工作环节（BE-041）：浅色小字实时展示后端处理进度
+              applyNodeStatus(status)
             },
             onRegenerating: () => {
               // 校验未通过、回答重写（BE-030）：清空已渲染的增量内容，
@@ -201,15 +235,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
               )
             },
             onDone: () => {
-              // 换掉临时 id（移除流式光标标记），本地内容与后端持久化内容一致，无需重新拉取
+              // 换掉临时 id（移除流式光标标记），本地内容与后端持久化内容一致，无需重新拉取；
+              // 同时把工作环节快照挂到消息上——完成后保留显示（FE-015），直到下一条提问
               setMessages((prev) =>
-                prev.map((m) => (m.id === assistantId ? { ...m, id: `assistant-${Date.now()}`, sources } : m)),
+                prev.map((m) =>
+                  m.id === assistantId
+                    ? { ...m, id: `assistant-${Date.now()}`, sources, steps: nodeStatusesRef.current }
+                    : m,
+                ),
               )
-              setSubQueries(null) // 拆解只在生成过程中展示
+              setSubQueries(null) // 检索策略只在生成过程中展示
             },
             onError: (message) => {
               setStreamError(message)
               setSubQueries(null)
+              setNodeStatuses([]) // 出错时过程记录不完整，一并清掉
+              nodeStatusesRef.current = []
               // 出错时移除空的助手占位；已有部分内容的保留展示。
               // 后端"异常中断不落库"，所以刷新后看到的与本地一致。
               setMessages((prev) => prev.filter((m) => m.id !== assistantId || m.content !== ''))
@@ -300,6 +341,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       streamError,
       clearStreamError,
       subQueries,
+      nodeStatuses,
       documents,
       refreshDocuments,
       uploadDocument,
@@ -322,6 +364,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       streamError,
       clearStreamError,
       subQueries,
+      nodeStatuses,
       documents,
       refreshDocuments,
       uploadDocument,

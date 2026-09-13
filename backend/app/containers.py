@@ -114,8 +114,12 @@ def _build_reranker(settings: Settings) -> RerankerService:
 
     为什么构造时不加载模型：CrossEncoderScorer 懒加载——首次 rerank
     才读本地模型，装配阶段零开销；加载失败在检索侧降级 RRF 序。
+    RERANK_ENABLED=false 时整体降级（CPU 无 CUDA 部署的可行性开关）。
     """
-    return RerankerService(CrossEncoderScorer(settings.reranker_model_path, settings.reranker_device))
+    return RerankerService(
+        CrossEncoderScorer(settings.reranker_model_path, settings.reranker_device),
+        enabled=settings.rerank_enabled,
+    )
 
 
 def create_container(settings: Settings | None = None) -> DIContainer:

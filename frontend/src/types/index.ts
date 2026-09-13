@@ -20,6 +20,21 @@ export interface Message {
   created_at: string
   /** 参考文档来源：仅 RAG 检索有命中的回答携带（后端持久化，历史消息同样可展示） */
   sources?: ReferenceSource[] | null
+  /**
+   * 生成过程的工作环节记录（BE-041/FE-015）：仅本地展示，不持久化——
+   * 刷新后消失；done 时由 AppContext 把流式过程快照挂到消息上
+   */
+  steps?: NodeStatus[] | null
+}
+
+/** 节点执行状态（BE-041）：一个后端处理环节的展示条目 */
+export interface NodeStatus {
+  /** 节点名（如 hybrid_retriever_node），同一节点重跑时复用同一行 */
+  node: string
+  /** 中文展示标签（如「检索知识库」） */
+  label: string
+  /** 结束耗时（毫秒）；undefined 表示该环节仍在执行中 */
+  durationMs?: number
 }
 
 /** 参考文档来源：RAG 回答引用的一条知识库片段（数组顺序即展示序号） */
@@ -55,7 +70,8 @@ export interface ApiErrorBody {
 export type ChatStreamEvent =
   | { type: 'delta'; content: string } // 一小段增量回答文本
   | { type: 'sources'; sources: ReferenceSource[] } // RAG 检索命中：参考文档来源（先于当轮 delta）
-  | { type: 'plan'; sub_queries: string[] } // 规划器产出的问题拆解（BE-030，重规划时再次出现）
-  | { type: 'regenerating' } // 校验未通过，回答将清空重写（BE-030）
+  | { type: 'plan'; sub_queries: string[] } // 检索规划产出的全部查询（检索策略展示，重规划时再次出现）
+  | { type: 'regenerating' } // 校验未通过，回答将清空重写
+  | { type: 'status'; node: string; label: string; phase: 'start' | 'end'; duration_ms?: number } // 节点执行状态（BE-041，浅色过程展示）
   | { type: 'done'; conversation_id: string } // 回答正常结束
   | { type: 'error'; message: string } // 服务端处理出错

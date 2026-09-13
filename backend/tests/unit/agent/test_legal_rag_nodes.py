@@ -249,6 +249,33 @@ def test_hybrid_retriever_partial_failure_is_not_error():
 
 # ---- EvidenceRankingNode ----
 
+def test_evidence_ranking_pre_truncates_candidates_by_rrf_before_rerank():
+    """粗排→精排：超过 rerank_max_candidates 的候选按 RRF 分预截断（ADR-0004 补充）。"""
+    class CountingScorer:
+        def __init__(self) -> None:
+            self.docs_seen: list[str] = []
+
+        async def score(self, query: str, documents: list[str]) -> list[float]:
+            self.docs_seen = list(documents)
+            return [float(len(doc)) for doc in documents]
+
+    scorer = CountingScorer()
+    node = EvidenceRankingNode(RerankerService(scorer), CONFIG)
+    # 构造 30 个去重后的候选：rrf_score 从 0.30 递减到 0.01
+    candidates = [
+        {"chunk_id": f"c{i}", "content": f"内容{i}", "rrf_score": 0.3 - i * 0.01}
+        for i in range(30)
+    ]
+    result = asyncio.run(node(_state(retrieval_candidates=candidates)))
+    # 只有 RRF 前 20 进入 rerank（配置默认 rerank_max_candidates=20）
+    assert len(scorer.docs_seen) == CONFIG.rerank_max_candidates
+    # 预截断保留的是 RRF 高分档（c0..c19），低分档不占精排预算
+    assert scorer.docs_seen[0] == "内容0"
+    trace = result["rag_trace"][0]
+    assert trace["input_count"] == 30 and trace["pre_rerank_count"] == 20
+    assert len(result["ranked_evidence"]) <= CONFIG.rerank_top_k
+
+
 def test_evidence_ranking_dedups_and_reranks_with_original_query():
     scorer = FakeScorer([0.1, 0.9])
     node = EvidenceRankingNode(RerankerService(scorer), CONFIG)

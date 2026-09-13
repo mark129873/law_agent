@@ -28,6 +28,10 @@ class LegalRAGConfig:
     hybrid_top_k: int = 20
     # 统一重排保留条数（设计 §34；进入回答上下文与「参考文档」展示）
     rerank_top_k: int = 10
+    # 重排前按 RRF 分预截断的候选上限（粗排→精排：跨查询候选可达 8×20，
+    # 全量送 CPU CrossEncoder 不可行——本机实测约 15s/对；RRF 序与 rerank
+    # 序高度相关，预截断前 20 对最终排序质量影响有限）
+    rerank_max_candidates: int = 20
     # RRF 融合参数（与 Milvus RRFRanker 口径一致，勿单独调整）
     rrf_k: int = 60
     # 证据充分性置信度阈值（evidence_grader_agent 参考）

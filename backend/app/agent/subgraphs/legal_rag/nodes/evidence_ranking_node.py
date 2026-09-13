@@ -31,7 +31,13 @@ class EvidenceRankingNode:
         # 统一 rerank 用 original_query（约束 18）：SubQuery 用于召回，
         # 原始问题才代表用户真实意图的最终相关性
         original = state.get("normalized_query") or state.get("original_query") or ""
-        result = await self._reranker.rerank(original, candidates, top_n=self._config.rerank_top_k)
+        # 粗排→精排（ADR-0004 补充）：先按 RRF 分预截断到 rerank_max_candidates，
+        # 防止多查询候选全量进入 CPU CrossEncoder（本机实测约 15s/对不可行）；
+        # RRF 序与 rerank 序高度相关，预截断对最终 top-k 质量影响有限
+        pre_rerank = sorted(
+            candidates, key=lambda item: item.get("rrf_score") or 0.0, reverse=True
+        )[: self._config.rerank_max_candidates]
+        result = await self._reranker.rerank(original, pre_rerank, top_n=self._config.rerank_top_k)
         return {
             "ranked_evidence": result.items,
             "rag_trace": [
@@ -42,6 +48,7 @@ class EvidenceRankingNode:
                     extra={
                         "input_count": len(raw_candidates),
                         "dedup_count": len(candidates),
+                        "pre_rerank_count": len(pre_rerank),
                         "rerank_count": len(result.items),
                         "reranker_degraded": result.degraded,
                     },

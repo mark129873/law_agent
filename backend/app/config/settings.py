@@ -124,6 +124,9 @@ class Settings(BaseSettings):
     planner_model: str = ""  # 空串表示用所选 Provider 的默认对话模型
 
     # ---- Agent 服务（一期重写 BE-033，ADR-0004）----
+    # Rerank 总开关：默认开启（设计 §32 统一重排）。CPU 部署且无 CUDA 时
+    # 实测约 15s/对不可行，可置 false 走 RRF 降级序（degraded 可观测）。
+    rerank_enabled: bool = True
     # Rerank 模型：本地 Qwen3-Reranker-0.6B（CrossEncoder，CPU 推理）。
     # 可填 HF 模型 id（联网解析）或本地快照绝对路径（离线推荐）；
     # 加载失败时检索降级为 RRF 融合序，不阻断问答。

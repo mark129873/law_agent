@@ -39,10 +39,16 @@ class RerankerService:
     为什么 final rerank 用 original_query 而不是某个 SubQuery（设计 §32）：
     SubQuery 用于召回覆盖，Original Query 才代表用户真实意图的
     最终相关性——多路召回、单口径精排。
+
+    为什么有 enabled 开关（ADR-0004 补充）：本机实测 CPU 上 0.6B 因果
+    重排模型约 15s/对（无 CUDA），一次问答不可行——开关置 false 走
+    RRF 降级序（与加载失败同一降级语义，degraded=True 可观测），
+    GPU/更快的机器上恢复开启即得精排；功能本体与测试不依赖开关。
     """
 
-    def __init__(self, scorer: RerankScorer) -> None:
+    def __init__(self, scorer: RerankScorer, enabled: bool = True) -> None:
         self._scorer = scorer
+        self._enabled = enabled
 
     async def rerank(
         self,
@@ -53,6 +59,12 @@ class RerankerService:
         """重排并截断 top_n；任何打分异常都降级为原序（RRF 序）截断。"""
         if not documents:
             return RerankResult(items=[], degraded=False)
+        if not self._enabled:
+            return RerankResult(
+                items=documents[:top_n],
+                degraded=True,
+                error="rerank disabled by configuration (RERANK_ENABLED=false)",
+            )
         try:
             scores = await self._scorer.score(
                 query, [str(item.get("content") or "") for item in documents]

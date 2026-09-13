@@ -28,7 +28,10 @@ def _default_reranker() -> RerankerService:
     from app.config.settings import get_settings
 
     settings = get_settings()
-    return RerankerService(CrossEncoderScorer(settings.reranker_model_path, settings.reranker_device))
+    return RerankerService(
+        CrossEncoderScorer(settings.reranker_model_path, settings.reranker_device),
+        enabled=settings.rerank_enabled,
+    )
 
 
 def create_qa_workflow(

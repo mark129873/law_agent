@@ -22,6 +22,7 @@ export default function ChatPage() {
     streamError,
     clearStreamError,
     subQueries,
+    nodeStatuses,
     sendQuestion,
   } = useAppStore()
 
@@ -93,14 +94,19 @@ export default function ChatPage() {
             {loadingMessages && (
               <p className="text-center text-xs text-ink-faint">正在加载历史消息…</p>
             )}
-            {messages.map((message) => (
-              <MessageBlock
-                key={message.id}
-                message={message}
-                streaming={message.id.startsWith('streaming-')}
-                subQueries={message.id.startsWith('streaming-') ? subQueries : null}
-              />
-            ))}
+            {messages.map((message) => {
+              const isCurrent = message.id.startsWith('streaming-')
+              return (
+                <MessageBlock
+                  key={message.id}
+                  message={message}
+                  streaming={isCurrent}
+                  subQueries={isCurrent ? subQueries : null}
+                  // 过程记录：生成中用 Context 实时值；已完成的消息用快照（FE-015 保留显示）
+                  steps={isCurrent ? nodeStatuses : message.steps}
+                />
+              )
+            })}
           </div>
         )}
       </div>
