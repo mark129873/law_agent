@@ -105,6 +105,14 @@ class LLMService:
         """普通文本调用（透传 Provider）。"""
         return await self._provider.chat(messages, params)
 
+    def stream(self, messages: list[ChatMessage], params: LlmParams | None = None):
+        """流式调用（透传 Provider，逐增量产出）。
+
+        为什么定义为普通方法返回异步迭代器：与 LLMProvider.stream
+        同一书写约定，`async for chunk in service.stream(...)` 即用。
+        """
+        return self._provider.stream(messages, params)
+
     async def structured_invoke(
         self,
         messages: list[ChatMessage],
