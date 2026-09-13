@@ -1,13 +1,14 @@
-"""LangGraph 问答图可视化导出脚本（BE-031）。
+"""LangGraph 问答图可视化导出脚本（BE-031，BE-038 适配一期主图）。
 
-做什么：用桩依赖构建 QaGraphBuilder 的问答图，导出 Mermaid 文本
-（默认写入 docs/qa_graph.mmd，同时打印到 stdout）；加 --png 可再导出
-PNG 图片（依赖联网访问 mermaid.ink，失败时给出替代方案提示）。
+做什么：用桩依赖构建 AgentGraphBuilder 的主图（含 Local Legal RAG
+子图），导出 Mermaid 文本（默认写入 docs/qa_graph.mmd，同时打印到
+stdout）；加 --png 可再导出 PNG 图片（依赖联网访问 mermaid.ink，
+失败时给出替代方案提示）。
 
 为什么用桩依赖就能建图：build() 只是把节点实例注册进 StateGraph，
-不会执行任何节点——LLMProvider / RagService 仅需"能被实例化进
-构造函数"即可。桩模式让本脚本不依赖 Milvus / Ollama / GLM 等
-真实服务，随时可跑，这也是依赖倒置（DIP）带来的可测试性收益。
+不会执行任何节点——LLM/Embedding/向量库/Reranker 仅需"能被实例化
+进构造函数"即可。桩模式让本脚本不依赖 Milvus / Ollama / GLM /
+本地 rerank 模型，随时可跑，这也是依赖倒置（DIP）带来的可测试性收益。
 
 怎么查看结果：
 - 把 docs/qa_graph.mmd 内容粘到 https://mermaid.live 或 VS Code
@@ -27,7 +28,13 @@ _BACKEND_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 os.chdir(_BACKEND_ROOT)
 sys.path.insert(0, os.path.abspath(_BACKEND_ROOT))
 
-from app.agent._legacy.graph import QaGraphBuilder
+from app.agent.graph import AgentGraphBuilder
+from app.agent.services.llm_service import LLMService
+from app.agent.services.milvus_service import MilvusService
+from app.agent.services.reranker_service import RerankerService
+from app.domain.repositories.llm_provider import LLMProvider
+from app.domain.repositories.vector_store import VectorStore
+from app.domain.services.embedding import EmbeddingService
 
 # 导出文件统一落在仓库根的 docs/ 下，与文档内嵌图保持同源
 _REPO_ROOT = os.path.abspath(os.path.join(_BACKEND_ROOT, ".."))
@@ -35,23 +42,63 @@ _MMD_PATH = os.path.join(_REPO_ROOT, "docs", "qa_graph.mmd")
 _PNG_PATH = os.path.join(_REPO_ROOT, "docs", "qa_graph.png")
 
 
-class _StubLLM:
+class _StubLLM(LLMProvider):
     """LLMProvider 桩：仅供建图实例化节点，图不会真正调用它。"""
+
+    @property
+    def model_name(self) -> str:
+        return "stub-model"
 
     async def chat(self, *args, **kwargs):  # pragma: no cover - 不会被调用
         raise RuntimeError("导出图用途的桩 LLM 不应被调用")
 
+    async def stream(self, *args, **kwargs):  # pragma: no cover - 不会被调用
+        raise RuntimeError("导出图用途的桩 LLM 不应被调用")
+        yield  # noqa: unreachable——使本函数成为异步生成器以匹配端口签名
 
-class _StubRag:
-    """RagService 桩：仅供建图实例化 retrieve 节点，不会真正检索。"""
 
-    async def retrieve(self, *args, **kwargs):  # pragma: no cover - 不会被调用
-        raise RuntimeError("导出图用途的桩 RAG 不应被调用")
+class _StubEmbedding(EmbeddingService):
+    """Embedding 桩：仅供建图实例化检索节点，不会真正向量化。"""
+
+    async def embed_documents(self, texts):  # pragma: no cover - 不会被调用
+        raise RuntimeError("导出图用途的桩 Embedding 不应被调用")
+
+    async def embed_query(self, text):  # pragma: no cover - 不会被调用
+        raise RuntimeError("导出图用途的桩 Embedding 不应被调用")
+
+
+class _StubVectorStore(VectorStore):
+    """向量库桩：仅供建图实例化检索节点，不会真正连接 Milvus。"""
+
+    async def initialize(self) -> None: ...
+    async def close(self) -> None: ...
+
+    async def add_chunks(self, chunks, embeddings):  # pragma: no cover - 不会被调用
+        raise RuntimeError("导出图用途的桩向量库不应被调用")
+
+    async def hybrid_search(self, *args, **kwargs):  # pragma: no cover - 不会被调用
+        raise RuntimeError("导出图用途的桩向量库不应被调用")
+
+    async def delete_by_document(self, document_id):  # pragma: no cover - 不会被调用
+        raise RuntimeError("导出图用途的桩向量库不应被调用")
+
+
+class _StubScorer:
+    """Rerank 打分器桩：仅供建图实例化重排节点，不会加载模型。"""
+
+    async def score(self, query, documents):  # pragma: no cover - 不会被调用
+        raise RuntimeError("导出图用途的桩打分器不应被调用")
 
 
 def build_graph():
-    """用桩依赖构建问答图（装配逻辑与生产完全一致，仅依赖为桩）。"""
-    return QaGraphBuilder(llm=_StubLLM(), rag=_StubRag()).build()
+    """用桩依赖构建主图（装配逻辑与生产完全一致，仅依赖为桩）。"""
+    llm = LLMService(_StubLLM())
+    return AgentGraphBuilder(
+        llm=llm,
+        planner=LLMService(_StubLLM()),
+        milvus=MilvusService(_StubEmbedding(), _StubVectorStore()),
+        reranker=RerankerService(_StubScorer()),
+    ).build()
 
 
 def main() -> int:

@@ -11,7 +11,6 @@ from typing import AsyncIterator
 import pytest
 from fastapi.testclient import TestClient
 
-from app.application.services.rag_service import RagService
 from app.containers import create_container
 from app.config.settings import Settings
 from app.domain.entities.llm import ChatMessage, LlmParams
@@ -23,16 +22,24 @@ from app.main import create_app
 
 
 class ScriptedLLM(LLMProvider):
-    """脚本化 Fake LLM：按系统提示分流（规划/判分走 chat，生成走 stream）。
+    """脚本化 Fake LLM：按系统提示特征分流（BE-038 一期主图适配）。
 
-    生成答案可经 answer 属性按用例替换；规划默认输出空串
-    （节点侧解析失败 → 透传原问题），判分默认输出 pass。
+    - 顶层编排器：首次输出 local_rag（进检索），其后为空（默认 finish）；
+    - 其余 chat 节点（意图路由/检索规划/证据评估/grounding 判分）返回空串，
+      各节点走各自的安全默认（路由默认 legal_question、规划默认仅原始问题、
+      评估默认不充分、判分默认放行）；
+    - 生成节点走 stream，输出 answer 属性的文本（可按用例替换）。
     """
 
-    _JUDGE_PASS = '{"verdict": "pass", "feedback": "", "unsupported": []}'
+    _ORCHESTRATOR_MARKER = "顶层编排器"
+    _GRADER_SUFFICIENT = (
+        '{"sufficient": true, "confidence": 0.9, "local_recovery_possible": false, '
+        '"missing_evidence": [], "conflicts": [], "suggested_external_queries": [], "reason": "证据齐全"}'
+    )
 
     def __init__(self, answer: str = "知识库中暂无相关依据，建议咨询专业律师。") -> None:
         self._answer = answer
+        self._orchestrator_scripts = ['{"action": "local_rag", "reason": "需要知识库"}']
         self.received_messages: list[list[ChatMessage]] = []
 
     @property
@@ -42,11 +49,11 @@ class ScriptedLLM(LLMProvider):
     async def chat(self, messages: list[ChatMessage], params: LlmParams | None = None) -> str:
         self.received_messages.append(messages)
         system = messages[0].content
-        from app.agent._legacy.prompts import PLANNER_SYSTEM_PROMPT
-
-        if system == PLANNER_SYSTEM_PROMPT:
-            return ""  # 解析失败 → 规划节点透传原问题
-        return self._JUDGE_PASS  # 判分（verify 节点）：默认通过
+        if self._ORCHESTRATOR_MARKER in system:
+            return self._orchestrator_scripts.pop(0) if self._orchestrator_scripts else ""
+        if "证据评估器" in system:
+            return self._GRADER_SUFFICIENT  # 单轮检索即收尾（不触发恢复循环）
+        return ""  # 其余节点走安全默认
 
     async def stream(self, messages: list[ChatMessage], params: LlmParams | None = None) -> AsyncIterator[str]:
         self.received_messages.append(messages)
@@ -91,17 +98,13 @@ def client(tmp_path):
     container = app.state.container
     llm = ScriptedLLM()
     # 在启动前替换 LLM / Embedding / 向量库（避免测试触网与依赖外部 Milvus）：
-    # 入库（KnowledgeIngestionService）与检索（RagService）必须用同一个
-    # 确定性 embedding，否则向量维度不一致会导致检索报错（曾踩坑）
+    # 入库（KnowledgeIngestionService）与 Agent 检索（MilvusService）必须用
+    # 同一个确定性 embedding，否则向量维度不一致会导致检索报错（曾踩坑）
     embedding = DeterministicEmbedding()
     store = InMemoryVectorStore()
     container.register(LLMProvider, lambda c: llm)
     container.register(EmbeddingService, lambda c: embedding)
     container.register(VectorStore, lambda c: store)
-    container.register(
-        RagService,
-        lambda c: RagService(embedding, c.resolve(VectorStore)),
-    )
 
     with TestClient(app) as test_client:
         test_client.llm = llm  # type: ignore[attr-defined]

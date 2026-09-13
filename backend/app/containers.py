@@ -8,6 +8,9 @@
 from __future__ import annotations
 
 from app.agent import create_qa_workflow
+from app.agent.config import AgentConfig
+from app.agent.services.reranker_service import CrossEncoderScorer, RerankerService
+from app.agent.subgraphs.legal_rag.config import LegalRAGConfig
 from app.application.services.chat_service import ChatService
 from app.application.services.conversation_service import ConversationService
 from app.application.services.document_pipeline import DocumentParserFactory, DocumentPipeline
@@ -106,6 +109,15 @@ def _build_embedding_service(settings: Settings) -> EmbeddingService:
     return OllamaEmbeddingService(settings.ollama_base_url, settings.ollama_embedding_model)
 
 
+def _build_reranker(settings: Settings) -> RerankerService:
+    """构造统一重排服务（BE-033/ADR-0004）。
+
+    为什么构造时不加载模型：CrossEncoderScorer 懒加载——首次 rerank
+    才读本地模型，装配阶段零开销；加载失败在检索侧降级 RRF 序。
+    """
+    return RerankerService(CrossEncoderScorer(settings.reranker_model_path, settings.reranker_device))
+
+
 def create_container(settings: Settings | None = None) -> DIContainer:
     """创建并装配应用容器。
 
@@ -141,6 +153,8 @@ def create_container(settings: Settings | None = None) -> DIContainer:
         lambda c: RagService(c.resolve(EmbeddingService), c.resolve(VectorStore)),
         singleton=True,
     )
+    # 统一重排服务（BE-033/ADR-0004：本地 Qwen3-Reranker，懒加载）
+    container.register(RerankerService, lambda c: _build_reranker(settings), singleton=True)
     container.register(
         DocumentService,
         lambda c: DocumentService(
@@ -155,11 +169,16 @@ def create_container(settings: Settings | None = None) -> DIContainer:
         ChatService,
         lambda c: ChatService(
             conversation_service=c.resolve(ConversationService),
-            # 唯一的问答执行体：经 agent 包工厂构建，langgraph 类型不外泄
+            # 唯一的问答执行体：经 agent 包工厂构建，langgraph 类型不外泄；
+            # 一期重写后依赖端口组合（LLM + Embedding + VectorStore + Reranker）
             qa_graph=create_qa_workflow(
                 c.resolve(LLMProvider),
-                rag=c.resolve(RagService),
+                embedding=c.resolve(EmbeddingService),
+                vector_store=c.resolve(VectorStore),
                 planner=_build_planner(settings, c),
+                reranker=c.resolve(RerankerService),
+                agent_config=AgentConfig(),
+                rag_config=LegalRAGConfig(),
             ),
         ),
         singleton=True,

@@ -46,4 +46,4 @@ class QaWorkflow(Protocol):
         """执行一次问答，返回最终状态（含 answer）。"""
 
     def astream(self, input: dict[str, Any], **kwargs: Any) -> AsyncIterator[QaStreamEvent]:
-        """流式执行问答（stream_mode=custom 时逐事件产出 QaStreamEvent）。"""
+        """流式执行问答：逐事件产出 QaStreamEvent（实现方保证事件顺序即执行顺序）。"""

@@ -129,16 +129,25 @@ def _build_graph(scripts: dict[str, list[str]], store: FakeVectorStore | None = 
 
 
 def _collect_events(graph, input_state: dict) -> tuple[dict, list]:
-    """单次执行图，同时捕获 custom 事件流与最终状态（脚本化 LLM 只消费一次）。"""
+    """经生产同款事件机制（ContextVar 发射器）捕获事件与最终状态。
+
+    为什么不用 graph.astream(custom)：langgraph 1.2.11 的 stream writer
+    在多模式/子图边界上行为不可靠，生产路径已统一为 ContextVar 注入式
+    发射器（app/agent/events.py）——测试直接验证生产机制。
+    """
 
     async def _run():
-        events: list = []
-        final: dict = {}
-        async for mode, payload in graph.astream(input_state, stream_mode=["custom", "values"]):
-            if mode == "custom":
-                events.append(payload)
-            else:
-                final = payload
+        from app.agent.events import event_emitter_var
+
+        queue: asyncio.Queue = asyncio.Queue()
+        token = event_emitter_var.set(queue.put_nowait)
+        try:
+            final = await graph.ainvoke(input_state)
+        finally:
+            event_emitter_var.reset(token)
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
         return final, events
 
     return asyncio.run(_run())

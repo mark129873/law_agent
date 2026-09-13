@@ -5,19 +5,42 @@ config:
 ---
 graph TD;
 	__start__([<p>__start__</p>]):::first
-	plan(plan)
-	retrieve(retrieve)
-	generate(generate)
-	verify(verify)
+	query_router_agent(query_router_agent)
+	orchestrator_agent(orchestrator_agent)
+	action_router_node(action_router_node)
+	legal_rag_subgraph(legal_rag_subgraph)
+	plugin_entry_node(plugin_entry_node)
+	plugin_stub_node(plugin_stub_node)
+	web_search_entry_node(web_search_entry_node)
+	web_search_stub_node(web_search_stub_node)
+	observation_node(observation_node)
+	direct_answer_agent(direct_answer_agent)
+	answer_generator_agent(answer_generator_agent)
+	grounding_checker_agent(grounding_checker_agent)
+	fallback_generator_agent(fallback_generator_agent)
+	final_answer_node(final_answer_node)
 	__end__([<p>__end__</p>]):::last
-	__start__ --> plan;
-	generate --> verify;
-	plan --> retrieve;
-	retrieve -.-> generate;
-	retrieve -. &nbsp;replan&nbsp; .-> plan;
-	verify -. &nbsp;end&nbsp; .-> __end__;
-	verify -. &nbsp;regenerate&nbsp; .-> generate;
-	verify -. &nbsp;replan&nbsp; .-> plan;
+	__start__ --> query_router_agent;
+	action_router_node -.-> answer_generator_agent;
+	action_router_node -.-> direct_answer_agent;
+	action_router_node -.-> legal_rag_subgraph;
+	action_router_node -.-> plugin_entry_node;
+	action_router_node -.-> web_search_entry_node;
+	answer_generator_agent --> grounding_checker_agent;
+	direct_answer_agent --> observation_node;
+	fallback_generator_agent --> final_answer_node;
+	grounding_checker_agent -. &nbsp;fallback&nbsp; .-> fallback_generator_agent;
+	grounding_checker_agent -. &nbsp;final&nbsp; .-> final_answer_node;
+	grounding_checker_agent -. &nbsp;retry&nbsp; .-> orchestrator_agent;
+	legal_rag_subgraph --> observation_node;
+	observation_node --> orchestrator_agent;
+	orchestrator_agent --> action_router_node;
+	plugin_entry_node --> plugin_stub_node;
+	plugin_stub_node --> observation_node;
+	query_router_agent --> orchestrator_agent;
+	web_search_entry_node --> web_search_stub_node;
+	web_search_stub_node --> observation_node;
+	final_answer_node --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
 	classDef last fill:#bfb6fc

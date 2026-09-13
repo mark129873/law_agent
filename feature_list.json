@@ -192,8 +192,8 @@
       "id": "BE-030",
       "name": "统一 Plan-and-Execute 问答工作流（Plan→Retrieve→Generate→Verify 闭环）",
       "description": "LangGraph 图重构为统一规划闭环：plan 节点（PlannerProvider 可独立配置，默认跟随 LLM_PROVIDER）把问题拆解为子查询（单一明确问题退化为单子查询透传）；retrieve 节点逐子查询混合检索后按 chunk id 合并去重；generate 生成回答；verify 节点两档校验——规则档（引用来源存在性、BE-017 信息不足声明、退化检查）+ LLM judge 档（groundedness，列出无依据结论作为建议）。反馈环：依据不足带建议回 plan 重规划、表达契约失败回 generate 重生成、检索空命中回 plan；plan_runs≤2、generate_runs≤2 预算防死循环，超限输出当前答案并 WARN。SSE 新增 plan/regenerating 事件（向后兼容）。",
-      "status": "passing",
-      "evidence": "2026-09-12：统一 Plan-and-Execute 闭环（PlanNode/VerifyNode 三态判定、多子查询合并、条件边打回受双预算约束、PLANNER_* 配置、SSE plan/regenerating；修复 InvalidUpdateError 与空命中死循环）。pytest 139 passed；真实 E2E 触发一次 contract 打回后正确引用第四十二条。",
+      "status": "deprecated",
+      "evidence": "2026-09-12：统一 Plan-and-Execute 闭环（PlanNode/VerifyNode 三态判定、多子查询合并、条件边打回受双预算约束、PLANNER_* 配置、SSE plan/regenerating；修复 InvalidUpdateError 与空命中死循环）。pytest 139 passed；真实 E2E 触发一次 contract 打回后正确引用第四十二条。；2026-09-13 被 BE-032~041 一期 Agent 重写整体替代（主图+RAG 子图架构，见 ADR-0001），BE-038 切换装配后本功能退役，历史证据指向 git 81248d3 前后提交。",
       "testedAt": "2026-09-12"
     },
     {
@@ -258,7 +258,8 @@
       "id": "BE-038",
       "name": "主图组装与装配切换",
       "description": "agent/graph.py build_agent_graph 按设计 §3 拓扑组装主图（legal_rag 子图作为节点接入）；SSE 事件映射（plan=检索规划全部查询/sources=ranked evidence/delta=流式回答/regenerating=重生成）；create_qa_workflow 新签名；containers/settings 接线；删除旧 agent 文件（nodes.py/prompts.py/graph.py/state.py）并标记 BE-030 deprecated。",
-      "status": "planned"
+      "status": "passing",
+      "evidence": "2026-09-13：AgentGraphBuilder 按设计 §3 装配 15 节点主图（RAG 子图编译图节点接入、模型分工 planner=路由/编排/子图、主 LLM=回答/校验）；route_after_grounding 三态条件边（预算在条件边）；LangGraphQaWorkflow 适配器重写——发现 langgraph 1.2.11 子图 custom 事件不上浮父图（探针实测 PARENT custom events=[]），改为 ContextVar 注入式发射器（astream=ainvoke+队列排空，事件顺序=执行顺序，GeneratorExit 取消防泄漏）；create_qa_workflow 新签名（llm/embedding/vector_store/planner/reranker/双 config）；containers 注册 RerankerService；删 _legacy 四文件与旧测试 31 例；export_qa_graph/verify_ollama_stream 适配；test_api ScriptedLLM 标记分流。pytest 185 passed；导出脚本验证 15 节点图。"
     },
     {
       "id": "BE-041",
