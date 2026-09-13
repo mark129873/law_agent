@@ -13,12 +13,11 @@
   - Langfuse 打回率对比：RAG regenerating 2→0、闲聊 3→0；judge verdict 留档取证（时间线定位编排器重复决策）
   - 验证后已清理：law_chunks 集合 drop、backend/data 删除、后端进程停止
 
-## 本轮改动（Session 037：全文文档优化——沉降 + 冷存 + 去重复 + README）
-- **沉降**：Session 021~030 → docs/archive/progress-archive-021-030.md（热层 356→116 行，热层 Session 数 6）；一期设计稿 2699 行 git mv 入 docs/archive/（代码"设计 §XX"引用仍有效，两处"设计依据"引用已补路径）
-- **去重复**：ARCHITECTURE §0/§1 技术栈合并、§2 目录树注释压缩；RELIABILITY 埋点示例压缩；§9 测试表/§11 契约清单/mermaid 图保留不动
-- **README.md**：空文件补为 33 行极简版（启动 + 文档索引）
+## 本轮改动（Session 038：一期设计稿删除——30 条约束与 § 号速查并入 ARCHITECTURE §12）
+- **普查先行**：代码引用 57 个设计 § 号 + 30 处"约束 N"——ARCHITECTURE.md 新增 §12：30 条强制约束逐条保编号收录 + 设计 §号速查表（核心内容 + 权威现落点）
+- **删除**：docs/archive/legal_agent_phase1_technical_design.md（git rm）；ARCHITECTURE/agent/__init__ 引用改指 §12；设计 §XX/约束 N 语义自此由 §12 唯一承载
+- **上一轮（Session 037，ba871d1）**：全文文档优化——Session 021~030 沉降、设计稿曾入冷存、去重复、补 README
 - **上一轮（Session 036，f16a9ed）**：plan.md 悬空引用修复——硬约束清单迁 ARCHITECTURE §11、D1~D12 决策表迁 PRODUCT §6
-- **上一轮（Session 035，760cdf9）**：删除 glossary，34 文件 ADR 引用全量清理
 - **上一轮（Session 033 Langfuse，0a14ca9/8f6e0fb）**：RELIABILITY/ARCHITECTURE + trace_sink 端口 + infrastructure sink + ChatService/包装器/LLMService 采集 + .env 开关
 - **后端**：
   - `domain/services/trace_sink.py`：TraceSink/TraceSpan 协议 + trace_sink_var + current_trace_sink()

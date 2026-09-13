@@ -4,7 +4,7 @@
 -本文档只描述**架构与实现**（分层、数据流、配置、契约、测试体系）；用户可见的行为需求见 docs/PRODUCT.md
 -实现变更不得改变 PRODUCT.md 描述的用户可见行为；行为要变，先改 PRODUCT.md，再改实现
 -后端 Python 3.11（uv 管理环境，.venv 虚拟环境）+ FastAPI（接口全异步）+ LangGraph，LLM 支持 Ollama 本地部署与 GLM API（详细技术栈见 §1 末尾）
--Agent 模块一期重写（2026-09）：主图轻量编排 + 独立 Local Legal RAG 子图 + Web/Plugin Stub 入口，设计依据 docs/archive/legal_agent_phase1_technical_design.md；统一重排采用本地 Qwen3-Reranker-0.6B（CrossEncoder，失败/关闭时降级 RRF 序）
+-Agent 模块一期重写（2026-09）：主图轻量编排 + 独立 Local Legal RAG 子图 + Web/Plugin Stub 入口，设计依据一期技术稿核心内容已并入本文档 §12（30 条强制约束 + 设计 §号速查）；统一重排采用本地 Qwen3-Reranker-0.6B（CrossEncoder，失败/关闭时降级 RRF 序）
 -数据库此版本支持sqlite3, 后续版本支持mysql8.0根据配置进行切换, 做好数据库接口层抽象
 -数据库实现统一走 SQLAlchemy 2.0 async ORM（声明式模型 + Data Mapper 映射），SQLite 是当前唯一已启用的 Provider，MySQL 8.0 接入只需换 URL 与异步驱动
 -向量数据库使用 Milvus（standalone 部署，backend/docker-compose.yml 编排 etcd + minio + milvus），稠密向量与稀疏 BM25 混合检索由 Milvus 服务端 hybrid_search 完成（BE-029），业务代码经 VectorStore 端口访问，不感知具体实现
@@ -400,3 +400,39 @@ JSON 纪律（以 { 开始以 } 结束、禁 markdown 代码块）；JSON 示例
 
 ### think 事件节点→内容清单（BE-042）
 query_router=意图判定；orchestrator=编排决策；strategy_router=选中策略；hybrid_retriever=查询数与命中数；evidence_ranking=重排启用/降级与保留条数；evidence_grader=评估结论；recovery_planner=恢复计划；grounding_checker=校验判定+理由；finish 路由=兜底触发说明；web/plugin stub=未开通说明；final_answer=引用来源条数；observation / direct_answer / answer_generator 不发（避免与回答本体重复）。
+
+## 12. 一期设计约束与 § 号速查（原 legal_agent_phase1_technical_design.md 承载，该稿已删除，此处为唯一权威）
+
+代码注释按「设计 §XX」与「约束 N」引用一期技术设计稿；稿删后由本节承接其全部可引用语义。
+
+### 30 条强制实现约束（原设计 §53，逐条保留编号——代码按约束号引用）
+
+1. 所有模块都必须位于 `agent/` 目录。 2. 带 LLM 的 Node 用 `_agent` 后缀。 3. 确定性 Node 用 `_node` 后缀。 4. Main Graph 与 Local RAG 分别构建。 5. Local RAG 作为独立 Subgraph 接入 Main Graph。 6. Local RAG 不得调用 Web Search。 7. Local RAG 不得调用 Plugin。 8. Web Search 本期只能 Stub。 9. Plugin/Skill 本期只能 Stub。 10. 不实现 Relax Filter。 11. Dense+BM25+RRF 合并在 `hybrid_retriever_node`。 12. Evidence Aggregation+Reranker 合并在 `evidence_ranking_node`。 13. `evidence_grader_agent` 必须独立。 14. `strategy_router_node` 同时服务 Initial Retrieval 与 Recovery。 15. Retrieval Strategy 必须允许多选。 16. SubQuery 必须进入同一个 Hybrid Retrieval。 17. 多 Query 必须优先异步并发。 18. 最终 Rerank 必须使用 `original_query`。 19. RAG Recovery Loop 必须受 `max_retries` 控制。 20. Main Agent Loop 必须受 `max_global_steps` 控制。 21. LLM Planner/Grader 优先使用 Structured Output。 22. Prompt 与 Node 文件分离。 23. 外部依赖通过 `services/` 封装。 24. 不允许节点直接初始化多个重复 LLM Client。 25. 不允许业务节点直接访问底层 Milvus SDK。 26. 不允许将 Plugin/Web 实现偷偷加入一期。 27. 必须有 Unit/Integration/E2E Test。 28. 必须支持 Mock Service。 29. 必须统一记录 Node Trace。 30. 每个 Capability 必须返回统一 `CapabilityResult`。
+
+### 设计 §号速查（仅收录代码引用过的章节；「现落点」为权威实现位置）
+
+| § | 核心内容 | 现落点 |
+|---|---------|--------|
+| §2/2.1~2.4 | 架构原则：`_agent`/`_node` 命名、主图与子图分离、Web/Plugin 仅入口、顶层循环与恢复循环分离 | 本文档 §5 + 上表约束 2~9 |
+| §3/§4/§56 | 主图与 RAG 子图最终拓扑 | 本文档 §5（mermaid） |
+| §5 | 推荐目录结构 | 本文档 §2 |
+| §6/§7 | 主图/RAG State 字段定义 | `agent/state.py`、`subgraphs/legal_rag/state.py` |
+| §8/§9 | 结构化输出 Schema：QueryRouterOutput/OrchestratorDecision/GroundingCheck；RetrievalPlan/EvidenceGrade/RecoveryPlan | `agent/schemas.py`、`legal_rag/schemas.py` |
+| §10 | CapabilityResult 统一结构（capability/status/content/evidence/citations/metadata） | `agent/schemas.py` + observation_node |
+| §11~14 | query_router（安全默认 legal_question）/orchestrator（预算+强制 finish）/action_router（确定性映射）/observation（归一+步数+1） | `agent/nodes/` 同名文件 |
+| §15/§16 | Web/Plugin Stub：仅 NOT_IMPLEMENTED/DISABLED，无真实实现 | `agent/web/`、`agent/plugins/` |
+| §17~20 | direct_answer（唯一流式出口）/answer_generator（四情形）/grounding_checker（规则档+judge）/final_answer（Citation 编号） | `agent/nodes/` 同名文件 |
+| §21~26 | retrieval_planner 四类策略多选+target_evidence；strategy_router 归一；改写 ≤2/拆分 ≤5/扩展 ≤3；查询汇总去重排除已检索截断 ≤8 | `legal_rag/nodes/` + `config.py` |
+| §27~31 | hybrid_retriever（单查询重试 1 次）；多 Query asyncio.gather 并发；Milvus 服务端 Dense+BM25+RRF；dense/bm25/hybrid_top_k 参数 | `legal_rag/nodes/` + `services/milvus_service.py` |
+| §32~34 | evidence_ranking（RRF 预截断→以 original_query 统一 rerank top-10）；去重三级键 chunk_id > document_id:chunk_index > content_hash，多 Query 合并 matched_queries；Reranker 失败降级 RRF | `evidence_ranking_node` + `reranker_service` |
+| §35~38 | evidence_grader（安全默认=不充分）；recovery_planner（本地三动作，避免重复失败策略）；恢复循环受 max_retries 预算；rag_result（INSUFFICIENT 语义，已有证据照常返回） | `legal_rag/nodes/` + 子图 `graph.py` |
+| §39/§40 | LLMService 统一入口（结构化输出容错）；Prompt 与 Node 文件分离 | `services/llm_service.py`、`prompts/` |
+| §41/§42 | Citation 结构与按证据顺序编号；Evidence 溯源字段（chunk/document/query/score） | `agent/schemas.py`、`utils/evidence_utils.py` |
+| §43 | 配置默认值（max_retries=2 一期不超过 3、变体上限、检索参数） | `legal_rag/config.py`、`agent/config.py` |
+| §44~46 | 图构建骨架；路由函数放条件边（预算检查归路由不归节点） | `agent/graph.py`、`legal_rag/graph.py` |
+| §47 | 错误处理矩阵：Milvus 节点内重试 1 次→全失败置 RETRIEVAL_ERROR、禁无限 loop；Reranker 降级 RRF 序记 degraded；LLM 结构化输出解析重试 1 次→安全默认（Planner=original、Grader=insufficient 防误判充分） | 各节点/service 实现 + 测试锁定 |
+| §48 | 节点 Trace 统一字段（node/status/duration_ms + LLM model/latency + RAG query/candidate/dedup/rerank/retry 计数） | `utils/trace_utils.py` + Langfuse |
+| §49 | 性能约束：检索查询 ≤8、hybrid top-k=20、原始候选 ≈160、rerank top-10；不把全量候选直接送 Answer LLM | `legal_rag/config.py` |
+| §50 | 测试策略：主图 E2E 5 case（RAG 成功/直接回答/证据不足/Web DISABLED/Plugin NOT_IMPLEMENTED） | `tests/integration/agent/` |
+| §51 | Mock 要求：Fake 服务遵循领域端口，与生产实现互换验证同一契约 | `tests/fakes.py` |
+| §54/§55 | 完成标准（10 条路径全部可运行）；二期扩展=替换 Stub、主图零重构 | 本文档 §5/§10 |
