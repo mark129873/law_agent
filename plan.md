@@ -175,3 +175,32 @@
 - DDD 守护：langfuse 进 domain/application 禁入名单。
 - Smoke：LANGFUSE_ENABLED=false 与 =true（缺密钥）两种配置真实启动均健康。
 - 真实 Langfuse 服务端验证待密钥/自托管环境（外部依赖），由用户配置后补验——契约已由假客户端测试锁定。
+
+---
+
+# 四期增强：全量 Prompt 优化（BE-044）
+
+> 依据：2026-09-13 用户要求「优化一下所有的 prompt」。
+> 范围：主图 6 + RAG 子图 6 共 12 个 Prompt；行为契约（SSE/grounding 字面锚点/JSON Schema/角色标记词）零变更。
+
+## 硬约束（不可破坏的三方耦合）
+
+1. **角色标记词**（测试脚本化 LLM 按其分流）：意图路由器/顶层编排器/回答校验器/检索规划器/改写器/子查询生成器/扩展器/证据评估器/恢复规划器——必须原样保留在各 system prompt 中。
+2. **字面锚点**（BE-017/ADR-0006/grounding 规则档）：answer_generator 的「优先依据」「知识库中暂无相关依据（，建议咨询专业律师）」「禁止」「严禁虚构」；回答须含【来源：…】格式的约定（与 grounding_checker 的 _SOURCE_MARKER 联动）。
+3. **JSON 契约**：全部输出键与枚举值域不变（normalized_query/intent/request_type/extracted_conditions；action/reason；use_*/target_evidence；queries；sufficient/confidence/missing_evidence/conflicts/local_recovery_possible/suggested_external_queries；actions/missing_evidence/reason；passed/unsupported_claims/citation_issues/reason）。
+
+## 优化点（12 个 Prompt 统一）
+
+1. **统一五段结构**：角色定位 → 任务与输入说明 → 输出格式（JSON 示例）→ 判定/执行规则（编号）→ 输出纪律。
+2. **强化 JSON 输出纪律**：「只输出一个合法 JSON 对象：以 { 开始、以 } 结束，不要 markdown 代码块（如 ```json），不要任何解释文字」——减少容错解析与重试（省 LLM 调用）。
+3. **消除示例值锚定偏差**：所有 JSON 示例统一加「示例中的值仅为格式示意，必须按实际情况填写」；evidence_grader 额外强调「宁可判不充分，不可误判充分」（与代码安全默认同向）。
+4. **answer_generator 明确来源标注格式**：要求引用处以【来源：文件名】标注并给出格式示例——直接针对 Session 031 记录的"GLM 偶发首答缺【来源：被规则档打回"；同时补"简洁不重复、不堆砌无关条文"约束（E2E 实测回答存在重复句）。
+5. **direct_answer 明确避雷**：一般性对话不输出具体法条编号与精确法律数据（会触发校验打回）——针对 Session 033 记录的闲聊被打回 3 次。
+6. **grounding 校验器降误判**：RAG 档补「条文转述与来源实质一致即可，不要求逐字匹配」；GENERAL 档补「与法律权威无关的数字（序号、功能数量、日常数字）不算法律数据」——减少 judge 误判导致的重复生成。
+7. **量化引导**：retrieval_planner 的 target_evidence 补 1~6 条引导；其余措辞精简，删冗余重复句。
+
+## 验证口径
+
+- 全量 pytest 保持绿（脚本化 Fake 按 9 个标记词分流，锁契约不破）。
+- 真实 E2E（GLM）：verify_real_e2e.py 全断言；Langfuse 云端对比 regenerating 次数（优化前 RAG 2 次/闲聊 3 次打回为基线，观察打回是否下降）；闲聊一次通过。
+- 前端零改动。
