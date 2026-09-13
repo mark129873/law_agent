@@ -33,8 +33,9 @@ class DirectAnswerAgent:
         # 打回重答（grounding 失败后重走 direct）：清空旧增量前通知前端
         if state.get("answer_draft"):
             emit_event(QaStreamEvent(type="regenerating"))
-            # 思考内容（BE-042）：重写是关键流转，前端思考块可见
-            emit_think("direct_answer_agent", "回答未通过校验（不得编造法条），自动重写中")
+            # 思考内容（BE-042）：流转说明——文案必须与真实触发原因一致
+            # （answer_draft 非空 = 已有一版回答草稿被要求重新生成）
+            emit_think("direct_answer_agent", "已有一版回答草稿，按最新决策重新生成中")
 
         messages = build_direct_messages(
             state.get("original_query") or state["question"],

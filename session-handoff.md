@@ -2,17 +2,21 @@
 
 ## 当前已验证
 - 现在明确可用的部分：
-  - **Agent 模块一期重写 + 思考块 + Langfuse trace 全部 passing（BE-032~043 + FE-001~016；BE-030 deprecated）**：主图 15 节点 + RAG 子图 10 节点 + 服务层 + status/think 双事件 + 豆包式思考块 + Langfuse 三级追踪。
+  - **Agent 模块一期重写 + 思考块 + Langfuse trace + 全量 Prompt 优化全部 passing（BE-032~044 + FE-001~016；BE-030 deprecated）**：主图 15 节点 + RAG 子图 10 节点 + 服务层 + status/think 双事件 + 豆包式思考块 + Langfuse 三级追踪 + 12 个 Prompt 五段结构化。
+  - **全量 Prompt 优化（BE-044，本轮新增）**：12 个 Prompt 统一五段结构（角色/任务/格式/规则/纪律）+ JSON 纪律（禁 markdown 代码块）+ 示例值防锚定标注 + answer_generator 明确【来源：文件名】格式硬约束 + grounding 降误判（实质一致即可/无关数字不算法律数据/宁可放行）。**编排器"不 finish"误诊修正**（Langfuse 时间线取证：闲聊打回真凶是重复执行 direct_answer，非 judge）——regenerating：RAG 2→0、闲聊 3→0；RAG 回答从 65 字重复堆砌变一句精准+来源标注。
   - **Langfuse trace（BE-043，ADR-0010，本轮新增）**：domain TraceSink/TraceSpan 端口 + trace_sink_var（ContextVar，ADR-0008 同构）；infrastructure/trace/langfuse_sink.py（langfuse 4.15.2）；ChatService 记 trace 生命周期与流程事件、with_node_status 压/弹节点 span（子图嵌套）、LLMService 三路径记 generation；.env 开关 LANGFUSE_ENABLED（默认 false，缺密钥 WARN 降级，全方法吞异常）。
   - **真实云端验证通过**（jp.cloud.langfuse.com，用户 .env 预置密钥）：E2E trace 含 29 节点 span / 11 generation（model+Prompt+输出）/ 15 think + 2 regenerating 事件。
   - **测试体系**：自动化 225 个（unit 155 含 agent 98 / integration 70 含 agent 12 与 API 9）；test_milvus_vector_store.py 5 例需真实 Milvus（不可达自动跳过）。
-- 最近一轮实际跑过的验证（2026-09-13，Session 033 收尾）：
-  - 干净环境（删 data + reset_milvus）全量 `uv run pytest tests -q` → **225 passed**
-  - 启用态真实启动 + verify_real_e2e.py 全断言通过 + Langfuse 云端查询确认三级数据（用 trace.get 完整详情查，observations.get_many 不带 fields 不返回 IO 字段）
+- 最近一轮实际跑过的验证（2026-09-13，Session 034 收尾）：
+  - 干净环境（删 data + reset_milvus）全量 `uv run pytest tests -q` → **225 passed**（9 角色标记词分流全绿，Prompt 契约零破坏）
+  - 真实 E2E（GLM+Milvus）：verify_real_e2e.py 全断言通过，RAG 回答一句精准+【来源】一次通过；闲聊 curl 实测 0 regenerating
+  - Langfuse 打回率对比：RAG regenerating 2→0、闲聊 3→0；judge verdict 留档取证（时间线定位编排器重复决策）
   - 验证后已清理：law_chunks 集合 drop、backend/data 删除、后端进程停止
 
-## 本轮改动（Session 033：Langfuse trace，2 次提交）
-- **文档先行**（0a14ca9）：ADR-0010 + plan.md 三期增强节 + RELIABILITY（Langfuse 节）+ ARCHITECTURE §2/§6/§9 + glossary + .env.example + feature_list planned
+## 本轮改动（Session 034：全量 Prompt 优化，2 次提交）
+- **文档先行**（6053892）：plan.md 四期增强节（硬约束清单 + 7 项优化点 + 验证口径）+ feature_list planned
+- **Prompt 重写（12 个）**：五段结构 + JSON 纪律 + 防锚定 + 【来源：格式硬约束 + grounding 降误判 + 编排器 finish 总则（规则 3：最近能力有结果且无校验反馈 → finish，严禁重复执行）+ direct think 文案修正（answer_draft 重写 ≠ 校验打回）
+- **上一轮（Session 033 Langfuse，0a14ca9/8f6e0fb）**：ADR-0010 + RELIABILITY/ARCHITECTURE/glossary + trace_sink 端口 + infrastructure sink + ChatService/包装器/LLMService 采集 + .env 开关
 - **后端**：
   - `domain/services/trace_sink.py`：TraceSink/TraceSpan 协议 + trace_sink_var + current_trace_sink()
   - `agent/trace_context.py`：trace_span_var（当前节点 span，LLM generation 挂靠父 span）
@@ -34,7 +38,9 @@
   - **pymilvus load_dotenv 副作用升级**：.env 现含 LANGFUSE_ENABLED=true，会灌入测试进程环境——新增 API/集成测试时必须在 Settings 显式 `langfuse_enabled=False`（test_api 夹具已示范），否则测试触真实观测平台
   - **langfuse v4 查询口径**：验证/导出要用 `api.trace.get(id)` 完整详情或 observations.get_many 带 fields——get_many 裸调不返回 input/output/model，别误判为上报缺失
   - **SDK 后台批量上报**：网络受限时见 export timeout 日志（sink 吞异常不影响业务）；进程退出前如需强推可 `client.flush()`
-  - 既有风险不变：grounding judge 对 direct 路径过度敏感（闲聊被打回 3 次的观察）；每问题 LLM 调用 5~8 次；BE-017 字面锚点三方联动
+  - **编排器"不 finish"误诊已修正（BE-044）**：旧记录"judge 对 direct 路径过度敏感"实为编排器重复选 direct_answer（Langfuse 时间线取证）——若回归先查编排决策的 generation 留档（api.trace.get），不要想当然调 judge Prompt
+  - **Prompt 修改纪律**：9 个角色标记词（意图路由器/顶层编排器/回答校验器/检索规划器/改写器/子查询生成器/扩展器/证据评估器/恢复规划器）与 BE-017 字面锚点被测试断言，改 Prompt 前先查 tests 的 marker/锚点清单（plan.md BE-044 节有全列表）
+  - 既有风险不变：每问题 LLM 调用 5~8 次；BE-017 字面锚点三方联动
   - **Windows 端口清理**：停 uvicorn/npm 后子进程可能残留占端口，需 netstat 找 PID + taskkill //F
 - 下一步最佳动作（需用户决定）：可选产品增强（会话重命名/停止按钮/CORS 收敛）；MySQL 8.0 接入；Web Search 二期立项
 - 这一步中哪些东西不要动：后端 API 契约（§7 SSE）；领域层零技术依赖（langfuse 已入守护名单，只允许 infrastructure/trace）；**trace_sink_var 的注入时机（必须在图任务创建前 set）**；**LangfuseTraceSink 全方法吞异常原则**；双预算常量；BE-017 字面锚点联动

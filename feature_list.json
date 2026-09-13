@@ -321,8 +321,8 @@
       "id": "BE-044",
       "name": "全量 Prompt 优化（12 个）",
       "description": "主图 6 + RAG 子图 6 统一五段结构（角色/任务/格式/规则/纪律）；强化 JSON 输出纪律（禁 markdown 代码块）；消除示例值锚定偏差；answer_generator 明确【来源：文件名】格式硬约束；direct_answer 避雷法条编号与精确法律数据；grounding RAG 档实质一致即可 + GENERAL 档无关数字不算法律数据；retrieval_planner target_evidence 量化引导。硬约束：9 个角色标记词、BE-017 字面锚点、JSON 键与值域零变更。验证：全量 pytest + 真实 E2E + Langfuse regenerating 对比（打回率下降）。",
-      "status": "planned",
-      "evidence": ""
+      "status": "passing",
+      "evidence": "2026-09-13：12 个 Prompt 统一五段结构（角色/任务/格式/规则/纪律）+ JSON 纪律（禁 markdown 代码块）+ 示例值防锚定标注；answer_generator 明确【来源：文件名】格式；direct_answer 避雷法条编号；grounding RAG 档实质一致即可 + GENERAL 档无关数字不算法律数据；retrieval_planner target_evidence 1~6 条。9 角色标记词与字面锚点零变更，干净环境 225 passed。真实验证：RAG 回答从 65 字重复堆砌变一句精准+来源标注、一次通过；用 Langfuse trace 取证修正误诊——闲聊打回真凶是编排器该 finish 时重复选 direct_answer（非 judge），修编排规则后 regenerating：RAG 2→0、闲聊 3→0。"
     }
   ]
 }

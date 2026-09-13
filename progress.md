@@ -4,12 +4,30 @@
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`（当前分支 feature/auto_coder）
 - 标准启动路径：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 标准验证路径：`cd backend && uv run pytest tests -q`（全量 225 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
-- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016，ADR-0009）+ Langfuse trace（BE-043，ADR-0010）全部 passing：主图 + Local Legal RAG 子图 + Web/Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关，trace→节点 span→LLM generation 三级上云），架构决策见 docs/adr/0001~0010，术语表 docs/glossary.md
+- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016，ADR-0009）+ Langfuse trace（BE-043，ADR-0010）+ 全量 Prompt 优化（BE-044）全部 passing：主图 + Local Legal RAG 子图 + Web/Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化（打回率 RAG 2→0、闲聊 3→0），架构决策见 docs/adr/0001~0010，术语表 docs/glossary.md
 - 已知性能边界：本机 CPU（无 CUDA）上 Qwen3-Reranker-0.6B 约 15s/对，本地部署默认 `RERANK_ENABLED=false` 走 RRF 降级序（GPU 机器可开启精排）
-- 当前最高优先级未完成功能：无——BE-001~043 与 FE-001~016 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
+- 当前最高优先级未完成功能：无——BE-001~044 与 FE-001~016 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
 - 当前 blocker：无
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md（Session 001~020 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
 
+
+### Session 034（BE-044 全量 Prompt 优化：12 个 Prompt 五段结构化 + 编排器"不 finish"误诊修正）
+- 日期：2026-09-13
+- 本轮目标：应用户要求优化全部 Prompt（主图 6 + RAG 子图 6）。硬约束：9 个角色标记词（测试脚本化 Fake 分流依赖）、BE-017 字面锚点（优先依据/知识库中暂无相关依据/禁止/严禁虚构/【来源：）、JSON 键与值域零变更
+- 技术决策（详见 plan.md 四期增强节）：
+  - **统一五段结构**：角色 → 任务 → 输出格式 → 规则 → 纪律；JSON 纪律升级为"以 { 开始以 } 结束、禁 markdown 代码块"（减少容错解析重试）；所有 JSON 示例加"值仅为格式示意"（消除锚定偏差，evidence_grader 的 sufficient:true 示例曾与代码安全默认反向）
+  - **answer_generator**：明确【来源：文件名】格式硬约束+示例（grounding 规则档按该字面检查，此前只说"注明来源文件"致 GLM 偶发漏写被打回）；补"简洁不重复、不堆砌无关条文"（E2E 实测回答有重复句）
+  - **grounding 校验器降误判**：RAG 档补"实质一致即可不要求逐字匹配"+"信息不足声明判通过"；GENERAL 档补"无关数字不算法律数据"+"宁可放行不可误杀"
+  - **direct_answer 避雷**：禁输出法条编号与精确法律数据（会触发校验）
+  - **重大误诊修正（Langfuse trace 取证）**：旧记录"闲聊被 judge 打回 3 次、judge 对 direct 路径过度敏感"是**误诊**——时间线显示真凶是编排器在 direct 已有结果后仍反复选 direct_answer 而非 finish，direct_answer 因 answer_draft 非空发 regenerating（think 文案又误标为"未通过校验"）。修复：编排器规则 3 改为"【最近能力】已执行且无校验反馈 → finish（严禁重复执行已完成的能力）"；direct think 文案改为与真实触发一致
+- 运行过的验证：
+  - 干净环境全量 pytest **225 passed**（脚本化 Fake 按 9 个标记词分流全绿——契约零破坏）
+  - 真实 E2E（GLM+Milvus+Langfuse）：verify_real_e2e.py 全断言通过，RAG 回答从优化前 65 字重复堆砌变为一句精准 +【来源：中华人民共和国专利法.txt】一次通过；闲聊 curl 实测
+  - **Langfuse 打回率对比**：RAG regenerating 2→0；闲聊 regenerating 3→0（编排器修复后）；judge verdict 留档确认
+  - 验证后已清理：law_chunks 集合 drop、backend/data 删除、后端进程停止
+- 已记录证据：feature_list.json BE-044（passing）；对账 60=40 热层（36 passing+4 deprecated）+20 archived
+- 已知风险或未解决问题：无新增（既有：RERANK 关闭、Ollama 路径 E2E 未跑、MySQL/Web Search 未接入）
+- 下一步最佳动作：可选产品增强（会话重命名/停止按钮/CORS 收敛）、MySQL 8.0 接入、或 Web Search 二期
 
 ### Session 033（BE-043 Langfuse 全链路 trace：文档先行 → 实现 → 真实云端验证）
 - 日期：2026-09-13
