@@ -250,7 +250,7 @@ graph TD;
 	classDef last fill:#bfb6fc
 ```
 
-- **顶层循环**：query_router（规范化+意图+请求类型）→ orchestrator（决定下一能力，受 `max_global_steps=4` 预算，超限强制 finish）→ action_router（§46.1 确定性映射）→ Capability → observation（CapabilityResult 归一、步数+1）→ orchestrator；finish 后 answer_generator → grounding_checker → final_answer / fallback。
+- **顶层循环**：query_router（规范化+意图+请求类型）→ orchestrator（决定下一能力，受 `max_global_steps=2` 预算，超限强制 finish）→ action_router（§46.1 确定性映射）→ Capability → observation（CapabilityResult 归一、步数+1）→ orchestrator；finish 后 answer_generator → grounding_checker → final_answer / fallback。
 - **Capability**：legal_rag 子图（检索）；web_search / plugin（一期 Stub，仅 NOT_IMPLEMENTED/DISABLED，替换 Stub 即接入二期实现，主图零重构）；direct_answer（一般性对话直接流式回答，D2——法律事实型问题默认走检索）。
 - **回答收尾链**：answer_generator 是 finish 路径唯一流式出口（direct 已有完整草稿时透传）；grounding_checker 规则档先行（有依据必须【来源：…】、检索无命中必须声明信息不足、direct 路径只查编造引用）+ LLM judge 档；未通过且预算内回 orchestrator，预算耗尽走 fallback 谨慎回答。grounding 每次执行递增 global_step_count（防打回回路绕过预算）。
 
@@ -270,7 +270,7 @@ retrieval_planner_agent（检索计划，四类策略多选）
     以 original_query 统一 rerank → top-10；reranker 失败/关闭降级 RRF 序）
   → evidence_grader_agent（覆盖度/缺失/冲突/可恢复性；安全默认=不充分）
   → 路由：充分 → rag_result_node（SUCCESS，推 sources 事件）；
-          可恢复且 retry_count<max_retries=2 → recovery_planner_agent（本地三动作多选，
+          可恢复且 retry_count<max_retries=1 → recovery_planner_agent（本地三动作多选，
           避免重复失败策略）→ 回 strategy_router_node；
           否则 → rag_result_node（LOCAL_EVIDENCE_INSUFFICIENT，已有证据照常推送）
 ```
@@ -428,7 +428,7 @@ query_router=意图判定；orchestrator=编排决策；strategy_router=选中�
 | §35~38 | evidence_grader（安全默认=不充分）；recovery_planner（本地三动作，避免重复失败策略）；恢复循环受 max_retries 预算；rag_result（INSUFFICIENT 语义，已有证据照常返回） | `legal_rag/nodes/` + 子图 `graph.py` |
 | §39/§40 | LLMService 统一入口（结构化输出容错）；Prompt 与 Node 文件分离 | `services/llm_service.py`、`prompts/` |
 | §41/§42 | Citation 结构与按证据顺序编号；Evidence 溯源字段（chunk/document/query/score） | `agent/schemas.py`、`utils/evidence_utils.py` |
-| §43 | 配置默认值（max_retries=2 一期不超过 3、变体上限、检索参数） | `legal_rag/config.py`、`agent/config.py` |
+| §43 | 配置默认值（max_global_steps=2、max_retries=1、变体上限、检索参数） | `legal_rag/config.py`、`agent/config.py` |
 | §44~46 | 图构建骨架；路由函数放条件边（预算检查归路由不归节点） | `agent/graph.py`、`legal_rag/graph.py` |
 | §47 | 错误处理矩阵：Milvus 节点内重试 1 次→全失败置 RETRIEVAL_ERROR、禁无限 loop；Reranker 降级 RRF 序记 degraded；LLM 结构化输出解析重试 1 次→安全默认（Planner=original、Grader=insufficient 防误判充分） | 各节点/service 实现 + 测试锁定 |
 | §48 | 节点 Trace 统一字段（node/status/duration_ms + LLM model/latency + RAG query/candidate/dedup/rerank/retry 计数） | `utils/trace_utils.py` + Langfuse |

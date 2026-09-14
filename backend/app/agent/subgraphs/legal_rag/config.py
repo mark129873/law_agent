@@ -13,8 +13,8 @@ from dataclasses import dataclass
 class LegalRAGConfig:
     """子图检索与恢复参数（设计 §43/§49）。"""
 
-    # 恢复循环上限（设计约束 19：一期不超过 3）
-    max_retries: int = 2
+    # 恢复循环上限：首次无充分证据后最多再恢复检索一轮
+    max_retries: int = 1
     # 查询变体数量上限（设计 §23/§24/§25）
     max_subqueries: int = 5
     max_rewritten_queries: int = 2

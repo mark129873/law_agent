@@ -16,8 +16,8 @@ from dataclasses import dataclass
 class AgentConfig:
     """主图运行参数（设计 §43）。"""
 
-    # 顶层编排最大步数（防死循环，设计强制约束 20；超限强制 finish）
-    max_global_steps: int = 4
+    # 顶层编排最大步数（防死循环；超限强制 finish）
+    max_global_steps: int = 2
     # 用户 Web Search 开关默认值（一期 Stub：false 时 web entry 直接 DISABLED）
     web_search_enabled_default: bool = False
     # 插件能力开关（一期恒为 False，Stub 返回 NOT_IMPLEMENTED）

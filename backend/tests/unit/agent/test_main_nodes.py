@@ -103,7 +103,7 @@ def test_orchestrator_parses_decision_and_forces_finish_on_budget():
 
     # 预算耗尽：不调 LLM（无 chat 输出）强制 finish
     forced = asyncio.run(OrchestratorAgent(LLMService(StreamingFakeLLM([])), CONFIG)(
-        _state(global_step_count=4)))
+        _state(global_step_count=CONFIG.max_global_steps)))
     assert forced["current_action"] == "finish"
     assert "预算耗尽" in forced["action_reason"]
 

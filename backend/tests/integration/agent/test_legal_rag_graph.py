@@ -209,9 +209,9 @@ def test_evidence_insufficient_exhausts_budget():
     })
     final, events = _collect_events(graph, {"original_query": "冷门问题", "normalized_query": "冷门问题"})
     assert final["rag_status"] == "LOCAL_EVIDENCE_INSUFFICIENT"
-    # max_retries=2：恢复两轮后停止
-    assert llm.call_log.count(RECOVERY_MARKER) == 2
-    assert final["retry_count"] == 2
+    # max_retries=1：恢复一轮后停止
+    assert llm.call_log.count(RECOVERY_MARKER) == 1
+    assert final["retry_count"] == 1
     assert final["missing_evidence"] == ["赔偿金计算规则"]
     assert final["suggested_external_queries"] == ["外部检索词"]
     assert final["ranked_evidence"]  # 已有部分证据仍返回（谨慎回答用）

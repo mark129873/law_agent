@@ -238,14 +238,14 @@
       "name": "Legal RAG 子图组装",
       "description": "build_legal_rag_graph：按设计 §4 拓扑装配 + route_after_evidence_grade（max_retries 预算控制 recovery 回边）；子图可独立 ainvoke 运行（SUCCESS 与 LOCAL_EVIDENCE_INSUFFICIENT 两态输出）。",
       "status": "passing",
-      "evidence": "2026-09-13：build_legal_rag_graph 按 §4 拓扑装配 10 节点（依赖注入三服务+配置）；route_strategies 多选 fan-out 条件边（无变体直接进检索）；route_after_evidence_grade 恢复预算路由（sufficient→result；local_recovery_possible 且 retry_count<max_retries=2→recover 回 strategy_router）。集成测试 6 例（Fake 构建同一拓扑 + 单次执行 stream_mode=[custom,values] 捕事件与终态）：简单成功/复杂多变体+恢复一轮成功（两轮 plan 查询不相交、retry_count=1）/预算耗尽 LOCAL_EVIDENCE_INSUFFICIENT（missing_evidence+suggested_external_queries 透传）/不可恢复直出/检索故障 RETRIEVAL_ERROR（无 sources）/rag_trace 全节点覆盖。pytest 195 passed。"
+      "evidence": "2026-09-14：build_legal_rag_graph 保持原 10 节点拓扑，route_after_evidence_grade 使用 max_retries=1；集成测试覆盖成功、恢复、预算耗尽、不可恢复、检索故障与 trace，pytest 225 passed。"
     },
     {
       "id": "BE-036",
       "name": "主图节点",
       "description": "query_router_agent、orchestrator_agent（max_global_steps 预算+超限强制 finish）、action_router_node、observation_node（CapabilityResult 统一合并）、direct_answer_agent、answer_generator_agent、grounding_checker_agent（RAG/direct 双规则）、fallback_generator_agent、final_answer_node；prompts 6 文件。direct 路径只校验不编造法条；web/plugin 未开通生成说明性回答。",
       "status": "passing",
-      "evidence": "2026-09-13：9 节点——query_router（安全默认 legal_question 走检索 + web_search_enabled 配置注入）、orchestrator（预算双保险第二道：step>=max 强制 finish 不调 LLM）、action_router（§46.1 映射表模块级导出）、observation（RAG 子图回写键→CapabilityResult 归一 + evidence latest-wins + 步数+1）、direct_answer（流式唯一出口+打回先推 regenerating+反馈注入）、answer_generator（四情形：direct 透传/未开通说明/RAG 生成/无命中信息不足声明；重生成前必推 regenerating）、grounding_checker（规则档先行：来源标注/信息不足声明双规则 + LLM judge + 未开通跳过；本节点递增 global_step_count 防 grounding 回路绕过预算）、fallback（预算耗尽谨慎回答）、final_answer（Citation 编号+端口键 answer）。prompts 6 文件；LLMService 补 stream。直接回答路径双规则。pytest 211 passed（新增 16 例）。"
+      "evidence": "2026-09-14：主图保持原 15 节点拓扑，AgentConfig.max_global_steps=2，超限强制 finish；主图与全量测试通过，pytest 225 passed。"
     },
     {
       "id": "BE-037",

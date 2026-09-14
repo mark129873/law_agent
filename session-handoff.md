@@ -11,7 +11,15 @@
   - 干净环境（删 data + reset_milvus）全量 `uv run pytest tests -q` → **225 passed**（9 角色标记词分流全绿，Prompt 契约零破坏）
   - 真实 E2E（GLM+Milvus）：verify_real_e2e.py 全断言通过，RAG 回答一句精准+【来源】一次通过；闲聊 curl 实测 0 regenerating
   - Langfuse 打回率对比：RAG regenerating 2→0、闲聊 3→0；judge verdict 留档取证（时间线定位编排器重复决策）
-  - 验证后已清理：law_chunks 集合 drop、backend/data 删除、后端进程停止
+- 验证后已清理：law_chunks 集合 drop、backend/data 删除、后端进程停止
+
+## 本轮改动（Session 039：收紧失败路径重试预算）
+- 用户要求仅减少 RAG 无对应文档的恢复次数与主图总体重试预算，不改变架构、节点或 LangGraph 连线。
+- `backend/app/agent/subgraphs/legal_rag/config.py`：`max_retries` 从 2 调为 1，首次证据不足后最多恢复检索一轮。
+- `backend/app/agent/config.py`：`max_global_steps` 从 4 调为 2，grounding 失败更快进入现有 fallback。
+- 同步 `docs/ARCHITECTURE.md`、RAG 集成测试、主图预算单测和 `feature_list.json` 证据。
+- 验证：相关测试 22 passed；全量 pytest 225 passed、1 warning；前端 build 通过；`git diff --check` 通过。
+- 其他重试机制保持不变：Milvus 单查询异常重试 1 次、LLM 结构化输出解析重试 1 次。
 
 ## 本轮改动（Session 038：一期设计稿删除——30 条约束与 § 号速查并入 ARCHITECTURE §12）
 - **普查先行**：代码引用 57 个设计 § 号 + 30 处"约束 N"——ARCHITECTURE.md 新增 §12：30 条强制约束逐条保编号收录 + 设计 §号速查表（核心内容 + 权威现落点）

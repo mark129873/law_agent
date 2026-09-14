@@ -6,9 +6,17 @@
 - 标准验证路径：`cd backend && uv run pytest tests -q`（全量 225 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
 - Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）全部 passing：主图 + Local Legal RAG 子图 + Web/Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化（打回率 RAG 2→0、闲聊 3→0），架构决策见 docs/ARCHITECTURE.md
 - 已知性能边界：本机 CPU（无 CUDA）上 Qwen3-Reranker-0.6B 约 15s/对，本地部署默认 `RERANK_ENABLED=false` 走 RRF 降级序（GPU 机器可开启精排）
+- 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；仅收紧主图总预算与 RAG 无充分证据后的恢复轮次，图拓扑和其他重试机制不变
 - 当前最高优先级未完成功能：无——BE-001~044 与 FE-001~016 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
 - 当前 blocker：无
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md（Session 001~030 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
+
+### Session 039（收紧失败路径重试预算）
+- 日期：2026-09-14
+- 本轮目标：按用户要求减少 RAG 无对应文档时的恢复次数，以及主图总体重试预算；不改变架构、节点或 LangGraph 连线。
+- 改动：`LegalRAGConfig.max_retries` 从 2 调为 1；`AgentConfig.max_global_steps` 从 4 调为 2；同步 ARCHITECTURE、集成/单元测试和功能证据。
+- 验证：相关测试 22 passed；全量 `uv run pytest tests -q -rs` 为 225 passed、1 warning；`npm run build` 通过；`git diff --check` 通过。
+- 保持不变：Milvus 单查询异常重试 1 次、LLM 结构化输出解析重试 1 次；`max_global_steps=2` 下 grounding 失败会更快进入现有 fallback。
 
 
 ### Session 038（设计稿删除：核心约束并入 ARCHITECTURE §12）
