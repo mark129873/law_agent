@@ -33,8 +33,8 @@ Law Agent 意图构建法律助手, 目前第一版已完成知识库问答场�
 Agent 编排: LangGraph 主图 + Local Legal RAG 子图；
 - 主图负责意图路由、能力编排和收尾，实现“编排决策 → 执行 → 汇总观察结果 → 再次决策”, 实现受控、结构化的 ReAct 主循环, 通过 Grounding 校验反馈加入了 Reflection/自我纠错能力
 - RAG 子图SubAgent负责检索策略与证据处理, 实行Plan-and-Execute, Planner选择原始问题、查询改写、子问题拆分、术语扩展等strategy，通过条件边fan-out并发执行混合检索
-可观测性: Langfuse trace/span/generation结构化、JSON 日志、Request ID、节点耗时、LLM generation、 三级追踪
-工程边界: API → Application → Domain；Infrastructure 和 Agent 实现领域端口，统一由依赖装配点注入
+- 可观测性: Langfuse trace/span/generation结构化、JSON 日志、Request ID、节点耗时、LLM generation、 三级追踪
+- 工程边界: API → Application → Domain；Infrastructure 和 Agent 实现DDD领域端口，统一由依赖装配点注入
 
 
 ## 系统架构
@@ -51,7 +51,7 @@ Frontend (React)  --HTTP/SSE-->  FastAPI
 
 ### 主图流程
 
-![image](.github/images/main_graph.webp)
+![image](.github/images/main_graph2.webp)
 
 ### RAG 子图流程
 
