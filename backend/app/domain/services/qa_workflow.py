@@ -17,19 +17,34 @@ class QaStreamEvent:
     """流式问答的领域事件：工作流对外的统一输出单元。
 
     为什么用类型化事件而不是裸字符串：流式回答除增量文本外，
-    还需携带"参考来源"这类结构化数据（参考文档展示，FE-011）；
-    事件类型化后，服务层与引擎实现之间的契约明确可校验，
-    新增事件种类时只扩展本类，端口方法签名不变（开闭原则）。
+    还需携带"参考来源""问题拆解"这类结构化数据（参考文档展示 FE-011、
+    规划过程展示 BE-030）；事件类型化后，服务层与引擎实现之间的契约
+    明确可校验，新增事件种类时只扩展本类，端口方法签名不变（开闭原则）。
 
     DDD 说明：本类是领域层值对象（不可变、无身份、按值相等），
     零技术依赖，任何工作流引擎实现都必须以它为流式输出单位。
     """
 
-    # delta：一段增量回答文本；sources：本次回答的参考来源（检索顺序即序号）
-    type: Literal["delta", "sources"]
+    # delta：一段增量回答文本；sources：本轮检索的参考来源（检索顺序即序号）；
+    # plan：规划器产出的检索查询列表（重规划时再次出现）；regenerating：
+    # 校验未通过、回答将重新生成（前端据此清空已渲染增量）；
+    # status：图节点执行状态（BE-041，phase=start/end + 中文 label + 耗时，
+    # 前端以浅色小字展示工作过程——字段只增不改，旧消费方静默忽略）；
+    # think：节点内的思考内容行（BE-042：决策输出、运行细节、
+    # 流转说明，text 已由后端截断 ≤120 字——与 status 互补：
+    # status 表节点起止，think 表过程内容）
+    type: Literal["delta", "sources", "plan", "regenerating", "status", "think"]
     content: str = ""
     # 每项 {"source": 文件名, "content": 命中内容}；用 tuple 保持不可变
     sources: tuple[dict[str, str], ...] = ()
+    # plan 事件携带的检索查询列表（数组顺序即执行顺序）
+    sub_queries: tuple[str, ...] = ()
+    # ---- status / think 事件专用字段（其余事件为空串/None）----
+    node: str = ""          # 节点名（如 hybrid_retriever_node）
+    label: str = ""         # 中文展示标签（如「检索知识库」）
+    phase: str = ""         # start / end
+    duration_ms: int | None = None  # phase=end 时的节点耗时
+    text: str = ""          # think 事件的过程内容文本（已截断，契约保证 ≤120 字）
 
 
 # runtime_checkable：允许装配点与测试用 isinstance 校验实现方满足端口
@@ -42,4 +57,4 @@ class QaWorkflow(Protocol):
         """执行一次问答，返回最终状态（含 answer）。"""
 
     def astream(self, input: dict[str, Any], **kwargs: Any) -> AsyncIterator[QaStreamEvent]:
-        """流式执行问答（stream_mode=custom 时逐事件产出 QaStreamEvent）。"""
+        """流式执行问答：逐事件产出 QaStreamEvent（实现方保证事件顺序即执行顺序）。"""

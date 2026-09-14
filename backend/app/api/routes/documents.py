@@ -36,7 +36,7 @@ def _to_response(document) -> DocumentResponse:
 
 @router.post("", response_model=DocumentResponse, status_code=201)
 async def upload_document(request: Request, file: UploadFile) -> DocumentResponse:
-    """上传 PDF/TXT/MD 文档并完成知识库入库（解析→向量化→写入 Chroma）。
+    """上传 PDF/TXT/MD 文档并完成知识库入库（解析→向量化→写入向量库）。
 
     响应中的 status 已是终态（ready/failed），前端据此直接展示
     成功或失败，无需轮询处理进度。

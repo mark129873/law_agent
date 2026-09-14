@@ -37,9 +37,10 @@
 | service | 归属 |
 |---------|------|
 | `system` | 应用生命周期、健康检查、全局异常兜底 |
+| `agent` | Agent 图节点执行（一期重写：意图路由/编排/检索规划/查询变体/混合检索/重排/证据评估/恢复/回答/校验/确定性收尾）；每节点起止各一条 INFO（"Agent node started/completed"，data.node + data.duration_ms），节点状态同时以 status SSE 事件外推（前端浅色过程展示，BE-041）；LLM 节点 data 含 model 与业务计数；精排主动关闭记 INFO，模型加载/推理失败才记 WARN（"Agent reranker failed, degraded to RRF order"） |
 | `api` | API 层业务异常与未预期异常处理 |
 | `database` | 数据库连接与建表 |
-| `vector_store` | 向量库初始化与读写 |
+| `vector_store` | 向量库（Milvus）初始化与读写 |
 | `document` | 文档元数据状态机、上传与删除 |
 | `document_pipeline` | 解析 → 清洗 → 段落切分 Pipeline |
 | `knowledge` | 向量化与入库编排 |
@@ -80,30 +81,24 @@ LOG_LEVEL=ERROR  # 仅输出 ERROR
 - 取值优先级：进程环境变量 > `backend/.env` > 默认值。
 
 ### 各服务日志埋点规则
-根据实际需要, 在必要位置埋点, 记录重要业务事件、数据缺失但不影响主流程、程序运行失败等。示例:
-**文档服务(DocumentService)：**
-- 文档导入，记录文件大小与元数据
-- 文档删除并输出剩余文档数量
-- 文档元数据更新
-- 文件未找到类错误
-- 文件大小超限异常
-**问答服务(QaService)：**
-- 问答任务开始
-- 检索结果（命中数量与最高相似度）
-- 生成回答，记录首 token 延迟、总耗时与回答长度（推理模型首字延迟是本项目已知痛点，必须可度量）
-- 流式回答异常中断（记录失败原因，便于区分模型侧与网络侧）
-- 会话历史清空
-**等等**
+按上方级别表在必要位置埋点：重要业务事件记 INFO、数据缺失但不影响主流程记 WARN、程序运行失败记 ERROR（必须带堆栈）。示例——DocumentService：上传记录文件大小与元数据、大小超限异常、删除输出剩余数量、元数据更新、文件未找到类错误；QaService：问答任务开始、检索结果（命中数与最高相似度）、回答生成（首 token 延迟/总耗时/长度——推理模型首字延迟是已知痛点必须可度量）、流式异常中断（区分模型侧与网络侧）、会话历史清空。
 
+## Langfuse 链路追踪（BE-043）
 
+- **开关与配置**：`LANGFUSE_ENABLED`（默认 false）+ `LANGFUSE_BASE_URL` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`（密钥只经 .env/环境注入，禁止提交与落日志）。关闭时 langfuse 模块零导入、零开销；开启但密钥缺失 → 启动期 WARN 降级为关闭（可观测故障不阻断业务）。
+- **采集范围**：每问一条 trace（session_id=conversation_id，input=问题，output=完整回答）→ 节点 span（with_node_status 包装器统一压栈/弹栈，含子图嵌套与异常路径）→ LLM generation（LLMService 统一入口：model/messages/output/耗时/重试轮次）；plan/think/sources/regenerating 记为 trace 事件留档。
+- **失败降级**：LangfuseTraceSink 全部方法内部吞异常并记 WARN（`service=trace`）——Langfuse 不可达或上报失败绝不影响问答业务。
+- **与日志的分工**：结构化日志是"进程内排障事实"（必开、落盘）；Langfuse 是"跨请求 LLM 观测平台"（默认关、可选开）。两者共用同一计时源与节点名，不互相替代。
 
-## 测试干净环境管理
+## 测试干净环境管理 
 
 ### 作用
 干净环境管理保证测试从一个已知的空白状态启动，避免历史遗留数据干扰测试结果，引发未知异常。
 
-### 重置机制
-1. 删除本地数据库与向量库文件 `backend/data/`, 里面存放的均为测试遗留数据, 可以直接删除
+### 重置机制 (测试前需运行)
+1. 删除 sqlite数据库中的原先的测试数据
+2. 删除 Milvus 中的知识库集合：在 Milvus 服务运行的前提下执行 `cd backend && uv run python scripts/reset_milvus.py`（幂等删除 `law_chunks` 集合，下次启动/入库自动重建）
+3. 删除完成之后, 明确输出: 测试干净环境管理完成, 清理xxx文件, 删除xxx数据库内容
 
 ### 需要重置干净环境的场景
 - 开工测试之前

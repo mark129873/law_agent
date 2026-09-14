@@ -1,14 +1,15 @@
 # 干净收尾状态检查清单
 
 - 执行`init.md`的内容, 确保项目可正常构建或启动, 保证下一轮会话可以直接运行项目
-- 测试先根据 docs/RELIABILITY.md 进行测试干净环境管理, 再确认所有测试通过, 包括但不限于: 
+- 测试先根据 `docs/RELIABILITY.md` 进行测试干净环境管理, 再确认所有测试通过, 包括但不限于:
   - 单元测试
   - 集成测试
   - 接口测试
-  <!-- - 端到端测试  (暂时不执行) -->
+  - 端到端测试
 - progress.md 记录到当前会话的进度
 - feature_list.json 功能状态与实际开发进度一致, 真实反映 passing 和未验证的边界
 - session-handoff.md 确认记录当前会话的交接摘要
+- 冷热分层沉降检查（规则见 AGENTS.md）：progress.md Session 数 ≤ 15、feature_list.json passing 条目 ≤ 40；
 - 没有任何半成品步骤处于未记录状态
 
 - 检查代码仓库状态

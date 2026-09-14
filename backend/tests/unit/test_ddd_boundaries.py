@@ -15,13 +15,18 @@ APP_ROOT = pathlib.Path(__file__).resolve().parents[2] / "app"
 # 领域层/应用层禁止引入的技术库；pydantic 仅允许 API 层 DTO 使用
 # BE-024 起数据库技术栈为 SQLAlchemy（aiosqlite 仅作为其 SQLite 异步驱动，
 # 同样禁止在领域层/应用层直接导入），两者都在守护名单内
+# BE-029 起向量库技术栈为 pymilvus，只允许出现在 infrastructure
 _TECH_LIBS = {
-    "fastapi", "httpx", "chromadb", "sqlalchemy", "aiosqlite", "pypdf",
+    "fastapi", "httpx", "pymilvus", "sqlalchemy", "aiosqlite", "pypdf",
     "langgraph", "pydantic", "pydantic_settings", "uvicorn",
+    "langfuse",  # BE-043：Langfuse 可观测平台锁定在 infrastructure/trace/
 }
 
 # 全项目只允许在 app/agent/ 内导入 langgraph（工作流引擎隔离区）
 _LANGGRAPH_ALLOWED_PREFIX = "agent"
+
+# 重型本地推理库只允许在 app/agent/ 内导入（Reranker 服务隔离区，BE-033）
+_AGENT_ONLY_LIBS = {"sentence_transformers", "torch", "transformers", "accelerate"}
 
 
 def _imports_of(path: pathlib.Path) -> set[str]:
@@ -101,3 +106,14 @@ def test_langgraph_confined_to_agent_module() -> None:
         if "langgraph" in _imports_of(py) and not rel.startswith(_LANGGRAPH_ALLOWED_PREFIX):
             violations.append(rel)
     assert not violations, "langgraph 泄漏出 agent 隔离区：\n" + "\n".join(violations)
+
+
+def test_agent_heavy_libs_confined_to_agent_module() -> None:
+    """sentence_transformers/torch 等重型推理库只允许出现在 app/agent/ 内（BE-033）。"""
+    violations = []
+    for py in _iter_app_files():
+        rel = py.relative_to(APP_ROOT).as_posix()
+        hits = _imports_of(py) & _AGENT_ONLY_LIBS
+        if hits and not rel.startswith(_LANGGRAPH_ALLOWED_PREFIX):
+            violations.append(f"{rel}: {sorted(hits)}")
+    assert not violations, "重型推理库泄漏出 agent 隔离区：\n" + "\n".join(violations)

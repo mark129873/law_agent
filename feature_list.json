@@ -1,6 +1,6 @@
 {
   "project": "legal-knowledge-agent",
-  "description": "法律知识库与助手 Agent：基于 LangGraph 构建法律问答 Agent，支持 Ollama 本地模型和 GLM API，支持用户上传 PDF、TXT 等文档构建法律知识库，通过向量检索增强生成法律问题回答；支持多会话、历史消息、流式回答和对话删除。后端采用 Python 3.11.15 + FastAPI + SQLAlchemy 2.0 async（当前 SQLite）+ Chroma，并通过抽象接口为未来切换 MySQL 8.0、Milvus 和其他 LLM Provider 做好架构准备；前端采用 React + TypeScript + Vite + Tailwind CSS + Fetch + React Router，整体交互和视觉风格参考 Codex Web。",
+  "description": "法律知识库与助手 Agent：基于 LangGraph 一期重写的问答 Agent（主图编排 + Local Legal RAG 独立子图 + Web/Plugin Stub 入口），支持四类检索查询变体（原始/改写/子问题/术语扩展）fan-out 并发生成、Milvus 服务端混合检索（稠密+稀疏 BM25，RRF 融合）多 Query 并发召回、统一重排（cross-encoder/ms-marco-MiniLM-L-6-v2，可降级 RRF）、证据评估与本地恢复循环、grounding 双规则校验与确定性收尾；节点执行状态以 SSE status 事件流式展示（Codex 风格浅色过程行），检索策略全量展示；支持多会话、历史消息、流式回答、参考文档与对话删除。后端 Python 3.11.15 + FastAPI + SQLAlchemy 2.0 async（当前 SQLite）+ Milvus standalone + sentence-transformers；前端 React + TypeScript + Vite + Tailwind CSS，交互与视觉风格参考 Codex Web。架构决策见 docs/ARCHITECTURE.md。",
   "rules": {
     "single_active_feature": true,
     "passing_requires_evidence": true,
@@ -13,181 +13,27 @@
     "passing": "要求的验证已经通过，并且证据已经记录。",
     "deprecated": "功能已被废弃，或者已被替代"
   },
+  "archivedPassing": {
+    "count": 20,
+    "batch": 20,
+    "archive": "docs/archive/feature-archive-001-020.json",
+    "note": "冷数据分卷按起止序号命名；不在热层 features 中的功能均为 passing，完整条目见归档"
+  },
   "features": [
-    {
-      "id": "BE-001",
-      "name": "后端项目基础框架",
-      "description": "建立 Python 3.11.15 后端项目，使用 uv 管理依赖并使用 .venv 作为虚拟环境；引入 FastAPI，建立清晰的应用入口、模块目录和基础启动方式，为后续 Agent、数据库、向量库和 API 开发提供统一基础。",
-      "status": "passing",
-      "evidence": "2026-09-06：backend/ 独立项目（Python 3.11，uv 管理，.venv），FastAPI 入口 app/main.py（create_app 工厂 + lifespan 自动初始化 SQLite/Chroma + CORS + 全局异常处理）。标准启动 uv run uvicorn app.main:app 与验证 uv run pytest 多次会话复验可用，curl /api/health 返回 {\"status\":\"ok\"}。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-002",
-      "name": "后端配置管理",
-      "description": "建立统一配置系统，管理服务配置、SQLite/MySQL 数据库 Provider、Chroma/Milvus 向量数据库 Provider、Ollama/GLM LLM Provider、模型名称、服务地址和其他运行参数；相对数据路径锚定 backend/ 目录。敏感配置通过环境变量提供。",
-      "status": "passing",
-      "evidence": "2026-09-06：app/config/settings.py 基于 pydantic-settings 统一 Settings（get_settings() 单例，支持 .env 与环境变量），三个 Provider 开关枚举校验、非法取值启动即拒绝；敏感字段 GLM_API_KEY 仅环境注入并已在真实 GLM 调用中使用；相对路径经 resolved_sqlite_db_path/resolved_chroma_persist_dir 锚定 backend/（修复数据随启动目录漂移的真实缺陷）；提供 .env.example 模板。测试覆盖默认值/环境切换/非法拒绝。2026-09-06 增强：新增 LLM_ENABLE_THINKING 配置项（bool，默认 False 关闭思考模式，降低 qwen3.5/glm-4.5 等推理模型的首字延迟），默认值/环境变量覆盖均有测试。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-003",
-      "name": "后端分层与依赖注入架构",
-      "description": "建立 API、Service、Agent、Repository、VectorStore、LLM Provider、Document 等核心模块边界，并通过依赖注入或等价机制管理组件依赖，避免业务代码直接绑定具体基础设施。",
-      "status": "passing",
-      "evidence": "2026-09-06：app/common/di.py 轻量 DIContainer（接口注册工厂+单例，双重检查锁支持依赖链装配）；app/containers.py 全应用唯一装配点（Database/VectorStore/LLMProvider/QaWorkflow/各服务按配置注册）；app/agent/ 为 langgraph 唯一隔离区，对外仅暴露 create_qa_workflow 工厂。分层规则由 tests/unit/test_ddd_boundaries.py 以 AST 扫描在每次 pytest 机械校验（domain 零技术依赖、应用与 API 不连 infrastructure、langgraph 不出 agent）。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-004",
-      "name": "数据库抽象层",
-      "description": "设计统一数据库接口，包括 Repository、事务、CRUD 等基础能力，使业务层可以独立于具体数据库实现。当前实现 SQLite3，架构上预留 MySQL 8.0。",
-      "status": "passing",
-      "evidence": "2026-09-06：app/domain/repositories/database.py 定义 Database/TransactionContext 领域端口（connect/init_schema/close/transaction；DDD 整改中自 infrastructure 迁入，依赖方向归正）；实体与三个 Repository 端口契约齐备。测试用与 SQLite 无关的内存 Fake 跑通完整业务流程（test_database_abstraction.py 4 passed），证明业务层可整体替换数据库实现。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-005",
-      "name": "SQLite 数据库实现与数据模型",
-      "description": "实现当前版本 SQLite 数据库，建立 Conversation、Message、Document 等核心业务数据模型，并提供数据库初始化机制。",
-      "status": "passing",
-      "evidence": "2026-09-06：Database 端口实现（三表幂等建表、外键级联删除、事务深度计数守卫提交边界，数据路径经 settings 锚定）；容器按 DB_PROVIDER 注册并接入 main.py lifespan 自动建库。验证：test_sqlite_database.py 6 passed（跨连接持久化/级联删除/真实事务回滚/幂等）；删除 db 文件后真实启动自动重建并输出结构化日志 Database initialized。2026-09-10（BE-024）：实现载体由手写 SQL + aiosqlite 迁移为 SQLAlchemy 2.0 async（BE-025 后为声明式 ORM 模型 + AsyncSession），本功能要求（SQLite 可自动初始化、核心数据模型可持久化）不变；对应测试文件更新为 test_sqlalchemy_database.py（9 passed，含事务提交/先读后事务），并以迁移前版本生成的旧库启动新实现通过兼容复验。2026-09-10（BE-026）：本功能声称的\"删除 db 文件后真实启动自动重建\"在 BE-024 重写时一度失效（丢失父目录创建），已修复并加回归测试锁定（现为 11 passed）。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-006",
-      "name": "向量数据库抽象层",
-      "description": "设计统一 VectorStore 接口，定义文档向量写入、相似度检索、删除等核心能力，使 RAG 和 Agent 业务逻辑不直接依赖具体向量数据库。",
-      "status": "passing",
-      "evidence": "2026-09-06：backend/app/domain/entities/chunk.py 定义 DocumentChunk/RetrievedChunk 数据契约；backend/app/domain/repositories/vector_store.py 定义 VectorStore 抽象（initialize/close/add_chunks/search/delete_by_document），embedding 由调用方传入实现与向量库解耦。测试用与 Chroma 无关的内存 Fake（余弦相似度）跑通写入-检索-删除流程（test_vector_store_abstraction.py 3 passed），证明 RAG 业务代码只依赖抽象接口。",
-      "testedAt": "2026-09-06"
-    },
     {
       "id": "BE-007",
       "name": "Chroma 向量数据库实现",
       "description": "实现 Chroma VectorStore，负责保存文档 chunk、embedding 和 metadata，并支持根据用户问题进行相似度检索。",
-      "status": "passing",
-      "evidence": "2026-09-06：backend/app/infrastructure/vector_store/chroma.py 基于 chromadb PersistentClient 实现 VectorStore 抽象（law_chunks 集合、cosine 空间 score=1-distance、metadata 过滤按文档删除）；所有阻塞调用经 asyncio.to_thread 包装避免阻塞事件循环；不使用内置 embedding 函数，向量由调用方传入。验证：uv run pytest tests -q → 25 passed，其中 test_chroma_vector_store.py 4 passed 覆盖写入检索排序、按文档删除隔离、跨连接持久化、initialize 幂等。",
+      "status": "deprecated",
+      "evidence": "2026-09-06 首验通过（git 9aa3ece）；2026-09-12 BE-029 迁移 Milvus 后 Chroma 实现整体删除，本功能由 BE-029 替代。",
       "testedAt": "2026-09-06"
     },
     {
       "id": "BE-008",
       "name": "Milvus 扩展架构",
       "description": "基于 VectorStore 抽象层预留 Milvus 实现能力，并使向量数据库 Provider 可以通过配置进行选择。第一版不要求完整实现 Milvus。",
-      "status": "passing",
-      "evidence": "2026-09-06：backend/app/infrastructure/vector_store/milvus.py 提供 MilvusVectorStore 骨架（履行全部接口签名，调用时抛明确 NotImplementedError）；容器装配点按 VECTOR_STORE_PROVIDER 分支注册 chroma/milvus（backend/app/containers.py），并接入 main.py lifespan。验证：uv run pytest tests -q → 28 passed（test_vector_store_factory.py 3 passed：chroma 配置解析出可用单例、milvus 配置解析成功、milvus 调用报错明确）；真实启动日志 \"VectorStore initialized (provider: chroma)\"，curl /api/health 返回 ok。RAG 业务代码仅依赖 domain/repositories/vector_store.py 抽象，无 Chroma 强耦合。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-009",
-      "name": "LLM Provider 抽象层",
-      "description": "建立统一的大模型 Provider 接口，抽象同步调用、流式调用以及必要的模型参数，使 LangGraph Agent 不直接依赖具体模型服务。",
-      "status": "passing",
-      "evidence": "2026-09-06：domain/entities/llm.py 定义 ChatMessage/LlmParams 数据契约；domain/repositories/llm_provider.py 定义 LLMProvider 端口（chat 同步 + stream 异步流式 + model_name）。Agent 生成节点统一经 stream 消费；Fake Provider 测试证明上层可整体替换实现（test_llm_provider.py 3 passed）。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-010",
-      "name": "Ollama 与 GLM 实现",
-      "description": "实现 Ollama 本地模型和 GLM API 两种 LLM Provider，并支持通过配置选择当前使用的模型服务。",
-      "status": "passing",
-      "evidence": "2026-09-06：OllamaProvider（/api/chat，NDJSON 流式解析）与 GLMProvider（OpenAI 兼容端点，SSE 解析）均已实现，容器按 LLM_PROVIDER 注册（glm 缺密钥时装配即报错）。双 Provider 真实调用通过：Ollama qwen3.5:4b、GLM glm-4.5-air（密钥经 .env 注入）chat 与流式问答均正常；协议级测试 6 passed（请求构造/响应解析/流式拆包/错误抛出/参数透传）。2026-09-06 增强：两个 Provider 支持 thinking 开关注入——Ollama 请求体携带顶层 think 字段、GLM 请求体携带 thinking.type（协议级测试 2 例断言默认关闭/显式开启）；真实验证：Ollama think=false 0.54s vs think=true 2.30s（简单问题 4 倍差距，RAG 场景曾达 30~40s 首字延迟），GLM glm-4.5-air 真实流式调用 thinking=disabled 正常；经真实后端 SSE 实测整轮 RAG 回答 13.3s 完成（此前仅首字即需 30~40s）。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-011",
-      "name": "文档处理 Pipeline",
-      "description": "建立统一文档处理流程：文件接收、格式识别、文本解析、文本清洗、Chunk 切分（段落感知：法条完整入 chunk，单段超限退化为定长滑动窗口）、metadata 构建，为后续 Embedding 和向量存储提供标准输入。",
-      "status": "passing",
-      "evidence": "2026-09-06：domain/services/document_parser.py 解析器策略接口与 UnsupportedFormatError；application/services/document_pipeline.py 编排 识别→解析→清洗→切分→chunk（解析经 asyncio.to_thread 不阻塞事件循环，全程结构化日志）；chunk_text 为段落感知切分（修复定长切分把法条截断到两个 chunk 的真实缺陷）。验证：test_document_pipeline.py 5 passed（全流程/格式拒绝/清洗/overlap/归一化）。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-012",
-      "name": "PDF 、 TXT  MD 文档解析",
-      "description": "实现 PDF、TXT、MD 文档解析能力，并将不同格式统一转换为内部标准文档结构；处理常见解析失败和编码异常。",
-      "status": "passing",
-      "evidence": "2026-09-06 复验（真实数据，含 MD）：backend/tests/data_source/中华人民共和国专利法.txt（真实法律文本 1.2 万字）与其 MD 摘要（.md，TextParser 支持 txt/md/text 扩展名，utf-8/gb18030/big5 编码回退）通过 API 上传均入库 ready；发现并修复定长切分把法条从中间截断的真实缺陷——chunk_text 改为段落感知切分（法条完整入 chunk，单段超限才退化滑动窗口）；修复后真实 RAG 问答正确命中第四十二条（\"发明专利权的期限为二十年\"）并引用来源文件。测试：test_document_parsers.py 6 passed，全量 75 passed。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-013",
-      "name": "Embedding 与知识库入库",
-      "description": "对文档 chunks 生成 embedding，并通过 VectorStore 接口写入 Chroma，同时保存文档来源、chunk、文件名等 metadata。",
-      "status": "passing",
-      "evidence": "2026-09-06：domain/services/embedding.py 定义 EmbeddingService 抽象；infrastructure/embedding/ollama_embedding.py 实现 /api/embed 批量向量化（OLLAMA_EMBEDDING_MODEL=nomic-embed-text:latest，transport 可注入）；application/services/knowledge_service.py 编排 Pipeline→回填 document_id→Embedding→Chroma 入库（全程结构化日志），容器完成装配。验证：pytest 53 passed 全量通过；真实 Ollama 端到端通过——scripts/verify_real_embedding.py 以 nomic-embed-text:latest 生成真实向量写入真实 Chroma，用非原句问法（\"员工离职时公司要求赔偿怎么算\"）语义检索命中违约金条款（score 0.62，metadata 含文件名），并支持按 document_id 删除。此前本机 Ollama 报 does not support embeddings 为当时服务状态问题，现已确认 embedding 接口可用。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-014",
-      "name": "RAG 检索服务",
-      "description": "建立独立 RAG Service，根据用户问题生成查询向量并从 VectorStore 检索相关法律知识，将检索结果整理成 Agent 可使用的上下文。",
-      "status": "passing",
-      "evidence": "2026-09-06：backend/app/application/services/rag_service.py 实现 retrieve（embed_query→vector_store.search）与 build_context（含【来源：文件名】标注，空结果返回空串供上层走\"信息不足\"策略）。验证：test_rag_service.py 3 passed——真实 Chroma + 确定性 embedding 检索命中预置劳动法知识并带来源、上下文含来源标注、无命中时返回空串。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-015",
-      "name": "LangGraph Agent 基础工作流",
-      "description": "使用 LangGraph 建立 Agent 基础工作流，明确用户问题进入、上下文处理、模型调用和结果输出等节点，为后续 RAG 能力集成提供工作流基础。",
-      "status": "passing",
-      "evidence": "2026-09-06：app/agent/ 以 OOP 实现——AgentNode 抽象基类 + Retrieve/Generate 节点（命令模式）、QaGraphBuilder 建造者、LangGraphQaWorkflow 适配器显式实现 QaWorkflow 端口；基础拓扑 START→generate→END，create_qa_workflow 工厂为模块唯一入口。验证：test_agent_graph.py 基础工作流与端口用例通过；真实 Ollama qwen3.5:4b 端到端问答成功。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-016",
-      "name": "RAG Agent 工作流",
-      "description": "将 RAG 检索能力集成到 LangGraph Agent，在模型回答前获取相关知识库内容，并将检索上下文传递给 LLM。",
-      "status": "passing",
-      "evidence": "2026-09-06：QaGraphBuilder 传入 rag 即装配 retrieve→generate 拓扑；RagService 支持 min_score 相似度阈值过滤弱命中（弱命中视为无依据）。验证：test_agent_graph.py RAG 用例通过（知识库上下文注入 Prompt 含来源标注、空知识库走信息不足路径、min_score 过滤）；真实端到端（nomic-embed-text + Chroma + qwen3.5:4b）正确回答\"试用期不超过六个月\"并引用来源文件。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-017",
-      "name": "法律问答 Prompt 与回答策略",
-      "description": "建立法律问答 Prompt 和回答策略，要求模型优先依据知识库内容回答，在缺少依据时明确说明信息不足，并避免无依据虚构法律条文、案例或结论。",
-      "status": "passing",
-      "evidence": "2026-09-06：backend/app/agent/prompts.py 定义 LEGAL_SYSTEM_PROMPT（优先依据知识库并注明来源/无依据时明确声明\"知识库中暂无相关依据，建议咨询专业律师\"/严禁虚构法条）与 build_messages（有依据注入【参考依据】段，无依据透传原问题）。验证：test_answer_strategy.py 3 passed + test_agent_graph 策略断言；真实行为验证（qwen3.5:4b）：无知识库时回答\"知识库中暂无相关依据，建议咨询专业律师\"而非编造；检索到无关内容（量子力学问题）时模型明确声明该问题无相关依据且拒绝误用法律条文。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-018",
-      "name": "对话服务",
-      "description": "建立 Conversation/Message Service，实现创建对话、查询历史对话、查询消息、删除对话以及保存用户问题和 Agent 回答。",
-      "status": "passing",
-      "evidence": "2026-09-06：backend/app/application/services/conversation_service.py 实现会话生命周期管理（创建含默认标题/列表/消息查询/级联删除/追加问答消息），缺失会话统一抛 ConversationNotFoundError，依赖仅 Database 抽象，删除与创建输出结构化日志。验证：test_conversation_service.py 4 passed（真实 SQLite：默认标题、消息顺序恢复、缺失会话异常、级联删除）。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-019",
-      "name": "FastAPI 核心 API",
-      "description": "提供对话、消息、知识库文档等核心 REST API，所有 API 使用异步函数，并建立统一的请求、响应和错误处理结构。",
-      "status": "passing",
-      "evidence": "2026-09-06：app/api/routes/conversations.py 与 documents.py 提供全部异步 REST 端点（会话 CRUD、消息查询、文档列表/删除），业务逻辑全部下沉 Service 层，路由从容器解析依赖；统一错误结构 {code,message} 由全局异常处理器映射（app/api/errors.py）。验证：test_api.py 7 passed（含统一 404 错误结构）；真实 uvicorn 启动后 curl 验证创建会话/文档列表/404 形状均正确。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-020",
-      "name": "Chat 流式 API",
-      "description": "提供用户问题提交和 Agent 流式回答接口，将 LLM/Agent 的增量输出转换为前端可以持续消费的 HTTP 流。",
-      "status": "passing",
-      "evidence": "2026-09-06：POST /api/chat/stream（SSE，StreamingResponse）+ ChatService.stream_answer——流式与非流式统一经 LangGraph 图执行（generate 节点经 get_stream_writer 推送 token，astream stream_mode=custom 消费），完成才持久化完整回答，异常中断不落库；会话不存在时进入流之前返回 404。验证：test_api.py test_chat_stream_sse_protocol passed——delta 事件按序到达、done 收尾、完整回答已持久化；test_agent_graph 新增 astream custom 用例证明 token 经图产出（全量 77 passed）。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-021",
-      "name": "Document Upload API",
-      "description": "提供 PDF/TXT/MD 等文档上传 API，完成文件校验、解析、Chunk、Embedding、向量入库和处理结果返回。",
-      "status": "passing",
-      "evidence": "2026-09-06：POST /api/documents（multipart）+ DocumentService.upload_document——格式白名单前置校验（不支持→400/40001）、20MB 上限（超限→413）、元数据状态机 processing→ready/failed（失败落库不产生僵尸记录）、删除级联清理向量。验证：test_api.py 上传/删除/非法格式 3 用例 passed；真实服务器 curl 上传 TXT 经真实 Ollama embedding 入库返回 status=ready，bad.exe 返回 40001。",
-      "testedAt": "2026-09-06"
-    },
-    {
-      "id": "BE-022",
-      "name": "后端异常处理与测试",
-      "description": "完善模型调用失败、数据库异常、向量数据库异常、文档解析失败、非法文件等错误处理，并为核心 Service、Repository、RAG、Agent 和 API 建立自动化测试。",
-      "status": "passing",
-      "evidence": "2026-09-06：app/api/errors.py 统一 AppError 体系（40401 会话不存在/40402 文档不存在/40001 格式不支持/40002 参数非法/41301 超限/50000 兜底）；模型调用失败抛错、文档解析失败落库 failed、流式中断以 error 事件收尾。测试体系四层齐备：单元 37（含 DDD 边界守护）+ 集成 46（含接口 7）= 83 个自动化测试全部通过、无外部服务依赖；真实端到端由 scripts/ 三脚本覆盖（上传→入库→RAG 问答→持久化，2026-09-06 通过）。开发中曾发现并修复日志 extra 误用 LogRecord 保留字段导致 404 变 500 的缺陷。",
+      "status": "deprecated",
+      "evidence": "2026-09-06 骨架首验通过（git 664d8f4）；2026-09-12 BE-029 以完整 MilvusVectorStore 生产实现替代，本功能由 BE-029 替代。",
       "testedAt": "2026-09-06"
     },
     {
@@ -195,7 +41,7 @@
       "name": "前端项目基础框架",
       "description": "在 frontend/ 目录建立 React + TypeScript + Vite 前端项目，集成 Tailwind CSS、Fetch 和 React Router，建立基础目录结构、入口和开发配置。",
       "status": "passing",
-      "evidence": "2026-09-06：frontend/ 独立项目（React 19 + TypeScript 严格模式 + Vite 8 + Tailwind CSS v4 + React Router 7，npm 管理）；入口链 index.html→src/main.tsx（BrowserRouter）→App.tsx 集中路由表→pages/，预留 api/components/types 目录；vite.config.ts 将 /api 代理到 127.0.0.1:8000（开发期免 CORS，前端代码只用相对路径）；全源码详细中文注释；修复 TS7 对 CSS 副作用导入的类型检查（补 Vite 标准 vite-env.d.ts）。验证：npm run build 通过（tsc --noEmit + vite 打包 152ms）；npm run dev 292ms ready，curl / 返回 200 且标题/挂载点正确；启动真实后端后 curl /api/health 经代理返回 {\"status\":\"ok\"}（后端访问日志确认 200）；dist 产物 CSS 含按需生成的 Tailwind 工具类（min-h-screen 等）。",
+      "evidence": "2026-09-06：frontend/ 项目建立（React 19 + TS 严格模式 + Vite 8 + Tailwind v4 + React Router 7），/api 代理 8000。验证：npm run build 通过、dev 200、经代理 /api/health ok。",
       "testedAt": "2026-09-06"
     },
     {
@@ -203,7 +49,7 @@
       "name": "前端 API 与状态基础层",
       "description": "建立统一 Fetch API Service 与类型定义（会话/消息/文档、统一错误结构 {code,message}、SSE 事件），采用轻量状态管理（React hooks/Context，不引入重型状态库），为对话、历史记录、知识库等页面提供统一数据访问能力。",
       "status": "passing",
-      "evidence": "2026-09-06：src/types/index.ts 类型与后端契约一一对应（会话/消息/文档/统一错误/SSE 事件）；src/api/ 统一数据访问层五模块（client.ts request<T>+ApiError 解析 {code,message}，conversations/documents/health/chat），chat.ts 用 fetch 手动消费 SSE（EventSource 不支持 POST）；src/state/AppContext.tsx 轻量全局状态（React Context + useMemo，无重型状态库），会话/文档列表与 CRUD 动作集中于此。验证：npm run build 通过；fetch 机械校验仅存在于 src/api/ 3 处、UI 组件零散落；真实浏览器验证首页经统一层读到后端连接状态与 5 条历史会话（数据流贯通）。",
+      "evidence": "2026-09-06：types 与后端契约一一对应；api/ 统一数据访问层（client 解析 {code,message}，chat.ts fetch 消费 SSE）；AppContext 轻量全局状态。验证：build 通过、UI 组件零散落 fetch、真实浏览器读通后端数据。",
       "testedAt": "2026-09-06"
     },
     {
@@ -211,7 +57,7 @@
       "name": "Codex 风格应用 Shell",
       "description": "实现类似 Codex Web 的整体应用布局，包括左侧导航/会话区域、主内容区域、顶部区域和统一交互样式，重点保证简洁、高级和低干扰的视觉体验。",
       "status": "passing",
-      "evidence": "2026-09-06：components/AppShell.tsx（h-dvh 双栏布局：w-64 侧边栏 + 弹性主区）+ Sidebar.tsx（品牌区/新对话按钮/对话-知识库分段切换/列表区）+ index.css 语义化主题 token（stone 暖灰系 + 唯一 emerald 强调色，明暗双主题跟随系统自动切换）；圆角体系统一（控件 rounded-lg、气泡 rounded-2xl、状态点 rounded-full）；图标统一 @phosphor-icons/react。验证：npm run build 通过；真实浏览器截图验证布局与切换（对话视图 5 条历史会话、知识库视图 6 个文档、激活态样式正确、视图切换正常）。",
+      "evidence": "2026-09-06：AppShell 双栏布局 + Sidebar（品牌/新对话/对话-知识库分段切换）+ stone/emerald 明暗双主题 token + phosphor 图标统一。验证：build 通过，真实浏览器截图验证布局与视图切换。",
       "testedAt": "2026-09-06"
     },
     {
@@ -219,7 +65,7 @@
       "name": "对话页面与新建会话",
       "description": "实现核心聊天页面，包括新建对话、消息区域、输入框、发送按钮、空状态以及当前会话状态。",
       "status": "passing",
-      "evidence": "2026-09-06：pages/ChatPage.tsx（顶栏标题+生成状态、消息滚动区、自适应高度输入框、Enter 发送/Shift+Enter 换行、欢迎空状态带 3 个可点击建议问题、错误提示条）+ MessageBlock.tsx（用户右侧气泡/助手左侧平铺+流式光标）+ AppContext.sendQuestion（无会话先建会话 title=提问截短 20 字，乐观插入消息，SSE 增量写入）。验证：npm run build 通过；真实浏览器点击建议问题发送——新会话以提问为标题出现在侧边栏顶部，回答流式完成：「发明专利权的保护期限为二十年」引用专利法第四十二条与来源文件；后端 API 确认 user/assistant 消息已持久化。PRODUCT.md/ARCHITECTURE.md 已同步延迟建会话决策。2026-09-06 交互优化：点击「新对话」时若处于知识库视图自动跳回对话视图（切换收敛进 AppContext.startNewChat，受生成中守卫约束）；PRODUCT.md 已同步；真实浏览器验证知识库视图点击新对话后主区域回到对话欢迎页。",
+      "evidence": "2026-09-06：ChatPage（自适应输入框/Enter 发送/建议问题空态）+ MessageBlock 气泡 + sendQuestion 延迟建会话（title=提问截短 20 字）乐观插入。浏览器验证流式回答引用第四十二条且消息持久化；知识库视图点新对话自动跳回。",
       "testedAt": "2026-09-06"
     },
     {
@@ -227,7 +73,7 @@
       "name": "历史对话与会话切换",
       "description": "在侧边栏展示历史对话，支持在不同 conversation 之间切换，并加载对应历史消息。",
       "status": "passing",
-      "evidence": "2026-09-06：侧边栏列表渲染与切换动作在 FE-002/003/004 中实现（AppContext.openConversation 加载历史消息、ConversationList 渲染会话项与选中态）。本轮真实浏览器验证：切到旧会话「graph流式」其历史消息正确恢复且顶栏标题同步；再切回最新会话（以提问为标题）原问答对完整恢复；往返切换无串话。POST /api/chat/stream 生成期间切换由 FE-007 守卫（生成中禁切）。",
+      "evidence": "2026-09-06：会话切换经 AppContext.openConversation 加载历史消息（实现于 FE-002/003/004）。真实浏览器验证新旧会话往返切换历史正确恢复、无串话；生成中禁切由 FE-007 守卫。",
       "testedAt": "2026-09-06"
     },
     {
@@ -235,7 +81,7 @@
       "name": "删除对话",
       "description": "提供删除历史对话的交互，并在删除后同步更新前端状态和后端数据。",
       "status": "passing",
-      "evidence": "2026-09-06：ConversationList 增加删除交互——悬停条目显示删除图标（opacity 过渡）→ 点击展开二次确认态（删除该对话？+ 删除/取消，防误触）→ 确认后调 AppContext.removeConversation（DELETE /api/conversations/{id}，级联删消息）；index.css 新增 danger 语义色 token（明暗双主题），ChatPage 错误条同步迁移到 token。验证：npm run build 通过；真实浏览器实测——确认删除后条目 4→3 消失，刷新页面后仍为 3（后端已删不复活）；删除当前打开的会话后主区域自动回到「新对话」空状态。",
+      "evidence": "2026-09-06：删除交互（悬停图标→二次确认→DELETE 级联消息）+ danger 语义色 token。验证：build 通过；浏览器实测删除后条目消失且刷新不复活，删除当前会话回到新对话空态。",
       "testedAt": "2026-09-06"
     },
     {
@@ -243,7 +89,7 @@
       "name": "流式聊天交互",
       "description": "使用 Fetch 消费 Chat 流式 API，将 Agent 回复逐步渲染到消息区域，并处理发送中、生成中、完成和异常等状态。",
       "status": "passing",
-      "evidence": "2026-09-06：api/chat.ts fetch 读流按 SSE 拆分 delta/done/error；AppContext.sendQuestion 增量写 messages（乐观插入→onDelta 追加→done 收尾/移除光标→onError 移除空占位并提示）；UI 状态：顶栏「正在生成…」、流式光标（motion-reduce 静止）、发送中按钮禁用、错误条（danger token，可关闭）、streamingRef 守卫生成中禁止切换/新建会话。真实浏览器验证：采样序列 506(空占位)→681(生成中部分内容)→823(完整) 证明逐步渲染；生成中点击其他会话被阻止（主区域与标题不变）；停后端发送→「请求失败（HTTP 502）」错误条出现、重启后恢复；附带验证回答策略真实生效（无关领域问题明确声明知识库暂无依据）。",
+      "evidence": "2026-09-06：chat.ts 拆分 delta/done/error 增量写 messages；生成中守卫禁切会话、错误条、流式光标。浏览器验证逐步渲染、生成中切换被阻止、停后端出错误条恢复；无关问题正确声明无依据。",
       "testedAt": "2026-09-06"
     },
     {
@@ -251,7 +97,7 @@
       "name": "知识库管理页面",
       "description": "实现知识库管理入口（与对话历史同处侧边栏，点击知识库管理按钮切换）、已上传文档列表展示（文档名称、大小、处理状态）与文档删除，以及文档上传 UI：支持选择 PDF/TXT/MD 文件、上传、处理状态显示以及成功/失败反馈。",
       "status": "passing",
-      "evidence": "2026-09-06：pages/KnowledgePage.tsx（点击/拖拽上传面板 + accept 限制 + 前端预校验格式/大小即时反馈 + 成功/失败反馈条 + 文档卡片列表：名称/大小/日期/状态徽标/两步确认删除）+ utils/format.ts；侧边栏知识库列表显示文档名与语义状态点（统一主题 token）。真实浏览器验证：注入真实《劳动合同法（要点）.md》经真实 input change 路径上传→后端 201→真实 embedding 入库→列表出现「可检索」行且反馈「上传成功，已可用于问答」；bad.exe 立即被前端预校验拒绝（格式不支持提示）；两步确认删除 diag.txt 后 8→7 且向量级联清理反馈显示；侧边栏同步 7 个文档。2026-09-06 显示优化：侧边栏知识库视图不再罗列文件名（明细与操作已在右侧管理页，窄栏罗列属重复信息），改为文档数量与处理状态汇总卡（组件更名 KnowledgeSummary）；PRODUCT.md 已同步；真实浏览器验证侧边栏无文件名且主区域明细完整。",
+      "evidence": "2026-09-06：KnowledgePage 上传面板（前端预校验格式/大小）+ 文档卡片列表与两步确认删除 + 侧栏汇总卡。浏览器实测真实 md 上传 ready、bad.exe 被拒、删除级联清理且列表同步。",
       "testedAt": "2026-09-06"
     },
     {
@@ -259,7 +105,7 @@
       "name": "前后端完整联调",
       "description": "完成前端与后端核心功能联调，打通创建对话、发送问题、Agent 处理、流式回答、历史消息恢复、删除对话以及知识库上传、文档删除和 RAG 问答。",
       "status": "passing",
-      "evidence": "2026-09-06：真实浏览器操作完成两大业务闭环。对话闭环：新对话→提问「试用期最长不能超过几个月？」→流式回答引用《劳动合同法》条文（六个月，来自 FE-008 刚上传的文档）→刷新页面后会话历史从后端恢复→删除会话后条目消失且主区域回新对话。知识库闭环：UI 上传《消费者权益保护法（要点）.md》→真实 embedding 入库 ready→新会话提问「买到假货可以要求几倍赔偿？」→回答引用第五十五条（三倍赔偿+五百元兜底）并标注来源文件→删除测试会话与文档。全程经 Vite 代理访问后端，无 CORS 问题。",
+      "evidence": "2026-09-06：真实浏览器打通对话与知识库两大闭环——提问流式回答引用刚上传文档条文、刷新恢复历史、删除会话；UI 上传→入库→RAG 问答引用条文并标注来源。全程 Vite 代理无 CORS 问题。",
       "testedAt": "2026-09-06"
     },
     {
@@ -267,7 +113,7 @@
       "name": "最终体验优化与全链路测试",
       "description": "统一优化前端视觉、交互、加载状态、错误提示、空状态、滚动行为和异常场景，并进行前后端全链路测试和生产构建验证。",
       "status": "passing",
-      "evidence": "2026-09-06：助手回答接入 react-markdown 渲染（加粗/列表/标题/引用统一风格，默认不解析原始 HTML 无注入风险；修复模型输出 Markdown 按字面显示星号的缺陷）；ink-faint 弱化文字对比度提升至 WCAG AA ≥4.5:1（明暗两套 token）；流式光标支持 prefers-reduced-motion。状态覆盖完整：空状态（对话欢迎页/知识库空列表）、加载提示、错误条（网络/后端/格式拒绝）、两步确认删除、生成中禁切。全链路终验：npm run build 通过（tsc+vite）；后端 uv run pytest 83 passed；浏览器复验 Markdown 渲染效果与整体视觉一致性。前端 10 项功能全部 passing。",
+      "evidence": "2026-09-06：react-markdown 渲染回答（不解析原始 HTML）、对比度 WCAG AA、reduced-motion；空/加载/错误/确认状态全覆盖。终验 build 通过 + pytest 83 passed + 浏览器复验；前端 10 项功能全部 passing。",
       "testedAt": "2026-09-06"
     },
     {
@@ -275,7 +121,7 @@
       "name": "流式回答参考来源事件与持久化",
       "description": "Chat 流式协议新增 sources SSE 事件：RAG 检索有命中时在 delta 之前推送参考来源（文件名+命中内容，顺序即展示序号）；来源随回答一起持久化到 messages 表，GET 消息接口返回；基础工作流或检索无命中时不产生该事件。",
       "status": "passing",
-      "evidence": "2026-09-06：domain/services/qa_workflow.py 新增 QaStreamEvent 值对象（delta/sources 二态，零技术依赖）；RetrieveNode 检索命中时经 get_stream_writer 推送 sources（先于全部 delta，Prompt 依据与前端展示同源）；ChatService 收集来源随回答持久化（messages 表新增 sources JSON 列，init_schema 幂等 ALTER 迁移旧库且历史数据保留）；MessageResponse 返回 sources；SSE 协议新增 sources 事件。验证：uv run pytest → 92 passed——test_chat_stream_emits_sources_and_persists_them（上传文档→提问：sources 事件先于 delta、含文件名与命中内容、GET messages 回读一致）、test_rag_graph_astream_emits_sources_before_deltas 与 test_rag_graph_empty_knowledge_no_sources_event（图级事件契约：有命中推送/无命中不推）、test_schema_migration_adds_sources_column（旧库补列+数据保留+重复 init 幂等）、test_message_sources_roundtrip；scripts/verify_real_e2e.py 增加 sources 事件与持久化断言。附带修复：API 测试容器入库与检索统一注入确定性 embedding（此前入库侧仍走真实 Ollama embedding，768 维 vs 64 维不一致导致检索报错且测试悄悄触网）。",
+      "evidence": "2026-09-06：sources SSE 事件（检索命中先于 delta 推送）+ 来源随回答持久化（messages.sources JSON 列，旧库幂等 ALTER）+ GET 回读。pytest 92 passed；附带修复 API 测试 embedding 注入不一致触网问题。",
       "testedAt": "2026-09-06"
     },
     {
@@ -283,7 +129,7 @@
       "name": "回答参考文档展示",
       "description": "RAG 检索有命中的回答完成后显示「参考文档」按钮，点开按序号展示参考文档名称与命中内容；未使用检索或无命中的回答不显示按钮；历史恢复的消息同样支持（来源已随回答持久化）。",
       "status": "passing",
-      "evidence": "2026-09-06：浏览器端到端验证通过（headless Edge 经 playwright-core 驱动本机 :5173/:8000，脚本与截图存仓库外 Temp/opencode/fe011/，仓库零污染）。RAG 场景：新对话提问专利法期限，流式完成后「参考文档」按钮出现（计数 4），点开展示按序号列表（首项为专利法 txt 及第二十六条命中内容），截图 fe011-A-expanded.png；刷新后重进会话按钮仍在（fe011-A-after-reload.png）。空知识库场景（测前经 API 临时删除唯一文档、测后即用 tests/data_source 原文件重传恢复 ready）：无关提问完成后按钮数量为 0（fe011-B-no-button.png）。契约层：真实 SSE 验证 sources 事件先于全部 delta、持久化来源与流内一致、GET 回读一致；后端 uv run pytest 92 passed；前端 npm run build 通过；测试会话已清理。注意：清理时按标题前缀删除误删 1 条历史同名提问会话（测试数据，非用户数据）。",
+      "evidence": "2026-09-06：浏览器端到端验证（headless Edge）：RAG 回答完成后「参考文档 N」按钮出现、点开按序号展示、刷新后仍在；无命中回答不显示。pytest 92 passed、build 通过，截图存仓库外。",
       "testedAt": "2026-09-06"
     },
     {
@@ -291,7 +137,7 @@
       "name": "侧边栏历史对话按创建时间正序展示",
       "description": "侧边栏历史对话按创建时间从上到下排列：最早创建的在最上面，新创建的会话追加到最下面；刷新重进后顺序一致。",
       "status": "passing",
-      "evidence": "2026-09-06：后端会话列表 ORDER BY created_at ASC, rowid ASC（同秒稳定顺序）；前端 createConversation 改为追加到底部，初次加载沿用后端顺序。验证：uv run pytest 92 passed（test_api 正序断言已同步）；npm run build 通过；真实浏览器（headless Edge）验证 API 顺序与侧边栏从上到下完全一致（旧在上、新在下，新建会话出现在底部），截图 fe012-sidebar-order.png 存仓库外 Temp/opencode/fe011/；测试会话已清理。2026-09-10 机制变更（BE-024）：排序从仓储 SQL 上移到应用层 ConversationService.list_conversations（sorted by created_at，仅按时间判断，不再使用 SQLite 专有 rowid 兜底），用户可见顺序不变。复验：uv run pytest 98 passed（test_api 正序断言 + test_ordering_contract 乱序落库仍按时间正序）；真实启动读取迁移前旧库，GET /api/conversations 返回 4 条按 created_at 正序（2026-09-06 → 2026-09-08），侧边栏顺序逻辑不变。",
+      "evidence": "2026-09-06：会话列表正序展示（最早在最上）；2026-09-10 BE-024 排序上移应用层（去 SQLite 专有 rowid）。pytest 98 passed + 真实旧库复验正序不变。",
       "testedAt": "2026-09-06"
     },
     {
@@ -299,7 +145,7 @@
       "name": "数据库实现迁移到 SQLAlchemy async 并将列表排序职责上移应用层",
       "description": "把 app/infrastructure/database/sqlite 的手写 SQL + aiosqlite 实现替换为 SQLAlchemy 2.0 async Core 实现（方言无关表结构与 DML、表级外键 ON DELETE CASCADE、ISO-8601 时区无损时间列类型、旧库 sources 列幂等迁移；aiosqlite 保留为 SQLAlchemy 的 SQLite 异步驱动）；同时把列表排序职责从仓储 SQL 上移到应用服务层，仅按 created_at 判断（移除 SQLite 专有的 rowid 第二排序键），为后续接入 MySQL 8.0 消除方言障碍。",
       "status": "passing",
-      "evidence": "2026-09-10：新增 app/infrastructure/database/sqlalchemy/（schema.py 表元数据 / types.py IsoDateTime 时区无损列 / database.py 端口实现 + 三个 Core 仓储），删除手写 SQL 的 database/sqlite/ 与已无用的 mysql/ 空占位包；aiosqlite 从业务驱动降级为 SQLAlchemy 的 SQLite 异步驱动（sqlite+aiosqlite:///，经 sqlite_url() 统一拼装，Windows 路径转 POSIX）。方言无关设计：主键/外键用定长 VARCHAR（MySQL 的 TEXT 不能做主键/外键）、外键用表级 ForeignKey(ondelete=CASCADE)（列内联 REFERENCES 在 MySQL 被忽略）、SQLite 经 connect 事件开启 PRAGMA foreign_keys、旧库 sources 列迁移改用 SQLAlchemy inspect 反射（幂等）。排序职责上移：三个 Repository 的 list/list_by_conversation 去掉 ORDER BY（移除 SQLite 专有 rowid 第二排序键），ConversationService.list_conversations 与 get_messages 按 created_at 正序、DocumentService.list_documents 按 created_at 倒序，仓储端口文档同步声明\"不承诺顺序\"。事务语义保持：单连接 + 事务栈守卫提交边界，最外层复用 autobegin 事务（先读后开事务可用），嵌套用 SAVEPOINT。验证：uv run pytest → 98 passed（基线 92，新增事务一次性提交、先读后事务、排序契约 4 例等 6 例；test_sqlite_database.py 迁移为 test_sqlalchemy_database.py，同批行为断言在 SQLAlchemy 实现上全绿；DDD 守护名单加入 sqlalchemy/aiosqlite）；旧库兼容实测：用迁移前版本创建的 data/law_agent.db 直接走标准启动路径 uv run uvicorn app.main:app → /api/health ok，GET /api/conversations 返回 4 条会话按 created_at 正序、GET /api/documents 上传时间倒序、中文标题/文件名与 sources JSON 无损且时间戳带 +00:00，POST /api/conversations 201（4→5）、DELETE 204（回到 4，测试会话已清理），结构化日志正常。顺带修复 feature_list.json 缺逗号导致整体无法被 JSON 解析的缺陷。2026-09-10（BE-025）：其 Core 表达式写法已进一步改造为 ORM（声明式模型 + Data Mapper），本功能确立的方言无关表结构、表级外键级联、IsoDateTime 时区无损列、排序上移应用层、事务提交边界与\"仓储不排序\"等约定全部保持不变。",
+      "evidence": "2026-09-10：手写 SQL/aiosqlite 迁移 SQLAlchemy 2.0 async Core（方言无关表结构、表级外键级联、IsoDateTime 时区列、旧库 sources 幂等迁移），排序职责上移应用层。pytest 98 passed；迁移前旧库实测启动/读写无损。后续由 BE-025 改造为 ORM，本条约定保持。",
       "testedAt": "2026-09-10"
     },
     {
@@ -307,7 +153,7 @@
       "name": "数据库访问改造为 SQLAlchemy ORM（声明式模型 + Data Mapper）",
       "description": "把 infrastructure 内的 SQLAlchemy Core 表达式写法改造为 SQLAlchemy 2.0 async ORM：新增声明式模型 models.py（取代 Core 的 schema.py，表结构/索引/外键级联保持不变）与显式的领域实体↔ORM 模型映射层 mappers.py；用 async_sessionmaker + AsyncSession（expire_on_commit=False，不引入连接池）取代裸连接，事务栈守卫提交边界的契约不变；仓储改用 session.add/session.get/属性赋值更新，批量删除用 synchronize_session=\"fetch\" 防脏读；不定义 relationship（无聚合导航需求，规避异步懒加载风险）；仓储出口仍只返回领域实体。领域层、端口与应用服务层零改动。",
       "status": "passing",
-      "evidence": "2026-09-10：新增 models.py（DeclarativeBase + Conversation/Message/Document 三个声明式模型，表名/列/类型/索引/外键 ON DELETE CASCADE 与 BE-024 一致）与 mappers.py（Data Mapper：to_domain_*/to_model_* 双向映射，messages 的 sources JSON 编解码集中此处，ensure_ascii=False 保持中文可读），删除 Core 的 schema.py；database.py 改为 async_sessionmaker(expire_on_commit=False) + 单个 AsyncSession（等价于原来的进程级单连接，未引入连接池），事务栈守卫提交边界的契约不变（最外层优先复用 autobegin 事务、嵌套用 SAVEPOINT、异常回滚丢弃全部写入）；仓储改为 session.add/session.get/属性赋值更新；消息按会话删除保留批量 delete 并显式 synchronize_session=\"fetch\"（需要影响行数、避免 N+1 加载、防止 session 残留已删除对象）；刻意不定义 relationship（本项目无聚合导航需求，从而规避异步懒加载 MissingGreenlet 这一整类风险），级联删除由数据库外键保证。领域层、端口、应用服务层零改动（排序仍在应用层按 created_at 判断）。验证：uv run pytest → 104 passed（基线 98，新增 tests/integration/test_orm_contract.py 6 例全绿：仓储出口精确为领域 dataclass 且非 ORM 模型、expire_on_commit=False 下提交后仍可读属性（该访问在默认配置下会抛 MissingGreenlet）、文档状态属性级更新后同一会话回读不是过期值、批量删除后 session 无残留、事务回滚撤销属性级更新、整个数据库实例持有唯一会话）；BE-024 确立的全部行为断言（持久化/外键级联/事务提交与回滚/先读后事务/建表幂等/旧库补列迁移/来源往返/时间保留时区/乱序落库按时间排序）在新实现上原样通过。旧库兼容实测：迁移前版本创建的 data/law_agent.db 走标准启动路径 uv run uvicorn app.main:app → /api/health ok、会话列表 4 条按 created_at 正序、文档列表 4 条按上传时间倒序、首条会话消息角色为 user→assistant、POST /api/conversations 201（4→5）→ DELETE 204（回到 4，测试会话已清理）；旧库零破坏复核（只读 sqlite_master/PRAGMA 检查）：三张表定义未变、messages 仍含 sources 列、外键仍为 conversation_id→conversations.id ON DELETE CASCADE、索引 idx_messages_conversation 仍在、行数 4/8/4 与验证前一致。",
+      "evidence": "2026-09-10：Core 改造为声明式 ORM（models.py + mappers.py Data Mapper、expire_on_commit=False 单会话、无 relationship 防异步懒加载、批量删除 fetch 防脏读）；领域/端口/应用层零改动。pytest 104 passed（新增 ORM 契约 6 例）；旧库零破坏实测通过。",
       "testedAt": "2026-09-10"
     },
     {
@@ -315,7 +161,7 @@
       "name": "修复数据目录缺失时首次启动无法建库（回归修复）",
       "description": "按测试干净环境管理删除 backend/data/ 后，SQLite 报 unable to open database file 导致标准启动路径失败：BE-024 把手写 SQL + aiosqlite 实现重写为 SQLAlchemy 时丢失了原 connect() 中的父目录创建逻辑。修复方式为在数据库实现的 connect() 中对文件型 SQLite URL 幂等创建数据库文件父目录（内存库与 MySQL 跳过；路径经 make_url 解析以兼容相对路径与 Windows 绝对路径），并新增回归测试锁定该行为；Chroma 侧本就有 mkdir，不受影响。",
       "status": "passing",
-      "evidence": "2026-09-10：app/infrastructure/database/sqlalchemy/database.py 新增 _ensure_sqlite_parent_dir() 并在 connect() 首行调用——只对 sqlite 方言且非 :memory: 生效，用 make_url(url).database 解析路径（实测 Windows 绝对路径解析为 C:/... 形式、相对路径为 data/law_agent.db、:memory: 原样返回，MySQL URL 因方言判断直接跳过），mkdir(parents=True, exist_ok=True) 幂等，且仅在目录真的不存在时输出一条结构化 INFO 日志 Database directory created。新增 2 个回归测试：test_connect_creates_missing_data_directory（数据库文件位于多层都不存在的目录 → connect+init_schema 成功建库、可写入回读，重复连接同一路径仍可用）、test_clean_environment_reset_then_start_again（模拟 RELIABILITY.md 的干净环境流程：建库写入→删除整个 data 目录→再次启动得到可用空库）。验证：uv run pytest → 106 passed（基线 104，既有断言一行未改）；修复前复现证据：data 目录缺失时 connect 抛 sqlite3.OperationalError: unable to open database file；修复后真实启动两轮：删除 backend/data（确认不存在）→ uv run uvicorn app.main:app → 自动创建 data/ 与 law_agent.db（32768 字节）及 data/chroma/，日志出现 Database directory created + Database initialized + VectorStore initialized，/api/health ok、/api/conversations 与 /api/documents 均为 0（空库），POST /api/conversations 201 → DELETE 204（回到 0）；随后再次删除 data 目录重启，第二轮同样自愈成功（证明可重复，不是一次性巧合）。",
+      "evidence": "2026-09-10：修复删 data/ 后启动报 unable to open database file——connect() 幂等创建 SQLite 父目录（内存库/MySQL 跳过）。pytest 106 passed（含干净环境重置回归 2 例）；真实启动两轮自愈验证。",
       "testedAt": "2026-09-10"
     },
     {
@@ -323,8 +169,181 @@
       "name": "结构化日志落盘与日志规则强化",
       "description": "按更新后的 docs/RELIABILITY.md 落地日志规则：日志同时输出 stdout 与 backend/log/app.log（按天轮转、默认保留 30 天、UTF-8）；日志目录相对路径锚定 backend/ 且不存在时幂等自愈，写盘不可用时静默降级为仅 stdout（绝不影响业务）；setup_logging(settings) 统一经配置读取并幂等（先关闭旧 handler）；时间戳统一为 UTC 毫秒 + Z；logging 的 WARNING 归一为 WARN；service 采用受控清单；新增 request_id 请求链路字段（纯 ASGI 中间件 + ContextVar 注入，兼容 SSE）与敏感键脱敏兜底；日志等级默认由 ERROR 调整为 INFO。",
       "status": "passing",
-      "evidence": "2026-09-10：改造 backend/app/common/logging.py（stdout + TimedRotatingFileHandler(when=midnight, utc=True, backupCount 可配, encoding=utf-8, delay=True) 双 sink + 日志目录幂等自愈 + OSError 静默降级 + 幂等关闭旧 handler + UTC 毫秒 Z 时间戳 + WARNING→WARN + 敏感键黑名单脱敏 + RequestContextFilter/ContextVar request_id）；新增 backend/app/api/middleware.py（纯 ASGI RequestIdMiddleware：读/生成 x-request-id 并回写响应头，刻意不用 BaseHTTPMiddleware 以免缓冲破坏 SSE 流）；settings.py 新增 log_dir/log_file_name/log_backup_count + resolved_log_dir，log_level 默认改 INFO；main.py 在 create_app 首行 setup_logging(settings) 并注册中间件；新增 backend/tests/conftest.py 把测试日志隔离到系统临时目录；.env.example 与 .gitignore（backend/log/）同步。验证：uv run pytest → 117 passed（基线 106；新增 tests/unit/test_logging.py 9 例：单行 JSON 必需字段/UTC 毫秒 Z/WARNING 归一/service 不重复进 data/敏感键脱敏/request_id 注入与还原/落盘 UTF-8 中文/轮转参数(midnight+backupCount=7+utf-8)/非法日志目录降级为仅 stdout 不抛异常/幂等不叠加 handler；test_settings 新增日志默认值与 resolved_log_dir 锚定；test_api 新增 x-request-id 生成与透传）。真实启动实测（干净环境）：删除 backend/log → uv run uvicorn app.main:app（端口 8011）→ 自动创建 backend/log/app.log，内容为标准单行 JSON（timestamp 形如 2026-09-10T09:37:50.369Z）；带 X-Request-ID: verify-001 请求 /api/health 后，'Health check requested' 与 'uvicorn.access' 两条日志均带 request_id=verify-001；验证后进程已清理、8011 端口已释放。",
+      "evidence": "2026-09-10：日志落盘 backend/log（按天轮转保留 30 天）+ 目录自愈 + 失败降级仅 stdout + UTC 毫秒时间戳 + 脱敏 + request_id 纯 ASGI 中间件（兼容 SSE）；默认等级 INFO。pytest 117 passed（新增日志 9 例）；真实启动实测落盘与链路字段。",
       "testedAt": "2026-09-10"
+    },
+    {
+      "id": "BE-028",
+      "name": "RAG 混合检索（BM25 关键词 + 向量，RRF 融合）",
+      "description": "把 RAG 检索从单一向量检索升级为混合检索：新增 KeywordIndex 领域端口与 Bm25KeywordIndex 基础设施实现（jieba 中文分词 + rank_bm25，语料快照 JSON 持久化于 backend/data/）；文档入库时向量库与关键词索引双写、删除时双清；RagService 同时走向量通道与关键词通道，用 Reciprocal Rank Fusion（RRF，k=60）融合两路排序输出最终 top_k；min_score 相似度阈值语义保持不变（仅过滤向量通道弱命中）；HYBRID_SEARCH_ENABLED=false 时可整体回退纯向量检索。",
+      "status": "deprecated",
+      "evidence": "2026-09-12 首验通过（134 测试 + 真实 E2E，git 81248d3 / Session 026）；同日 BE-029 迁移 Milvus 服务端 hybrid_search 后整体废弃（KeywordIndex/自研 RRF/jieba 等随之删除），由 BE-029 替代。",
+      "testedAt": "2026-09-12"
+    },
+    {
+      "id": "BE-029",
+      "name": "向量库全面迁移到 Milvus hybrid_search（稠密 + 稀疏 BM25，服务端 RRF 融合）",
+      "description": "把向量库从 Chroma 与自研 BM25 关键词索引整体迁移到 Milvus standalone：单一集合同时持有稠密向量（FLOAT_VECTOR/COSINE，Ollama embedding 传入）与稀疏 BM25 向量（content 字段启用 jieba 分词器 + BM25 Function，服务端自动生成）；检索经 VectorStore.hybrid_search 一次调用发起稠密+稀疏两路请求，由 Milvus 服务端 RRFRanker(k=60) 融合返回 top_k；min_score 语义保持（稠密通道 range 过滤）；集合按实际 embedding 维度懒建；双写双清编排、JSON 快照、自研 RRF 融合与 jieba/rank-bm25/chromadb 依赖全部移除；部署由 backend/docker-compose.yml（etcd+minio+milvus v3.0.0）承载，干净环境重置新增 scripts/reset_milvus.py。",
+      "status": "passing",
+      "evidence": "2026-09-12：MilvusVectorStore 完整实现（单集合 dense+sparse、服务端 RRFRanker(60) 融合、Strong 一致性、min_score 稠密 range 过滤、集合懒建）；删 Chroma/自研 BM25 与依赖；reset_milvus.py。pytest 119 passed（含真实 Milvus 5 例）；真实 E2E 引用第四十二条。",
+      "testedAt": "2026-09-12"
+    },
+    {
+      "id": "BE-030",
+      "name": "统一 Plan-and-Execute 问答工作流（Plan→Retrieve→Generate→Verify 闭环）",
+      "description": "LangGraph 图重构为统一规划闭环：plan 节点（PlannerProvider 可独立配置，默认跟随 LLM_PROVIDER）把问题拆解为子查询（单一明确问题退化为单子查询透传）；retrieve 节点逐子查询混合检索后按 chunk id 合并去重；generate 生成回答；verify 节点两档校验——规则档（引用来源存在性、BE-017 信息不足声明、退化检查）+ LLM judge 档（groundedness，列出无依据结论作为建议）。反馈环：依据不足带建议回 plan 重规划、表达契约失败回 generate 重生成、检索空命中回 plan；plan_runs≤2、generate_runs≤2 预算防死循环，超限输出当前答案并 WARN。SSE 新增 plan/regenerating 事件（向后兼容）。",
+      "status": "deprecated",
+      "evidence": "2026-09-12：统一 Plan-and-Execute 闭环（PlanNode/VerifyNode 三态判定、多子查询合并、条件边打回受双预算约束、PLANNER_* 配置、SSE plan/regenerating；修复 InvalidUpdateError 与空命中死循环）。pytest 139 passed；真实 E2E 触发一次 contract 打回后正确引用第四十二条。；2026-09-13 被 BE-032~041 一期 Agent 重写整体替代（主图+RAG 子图架构），BE-038 切换装配后本功能退役，历史证据指向 git 81248d3 前后提交。",
+      "testedAt": "2026-09-12"
+    },
+    {
+      "id": "FE-013",
+      "name": "前端规划过程与重生成适配",
+      "description": "ChatStreamEvent 类型扩展 plan（携带子查询列表）与 regenerating；api/chat.ts 分发新增 onPlan/onRegenerating 可选回调；AppContext 生成中展示问题拆解列表；regenerating 到达时清空当前 assistant 增量内容避免两版回答拼接。",
+      "status": "passing",
+      "evidence": "2026-09-12：前端适配 plan/regenerating 事件——AppContext subQueries 状态、生成中「问题拆解」折叠列表、regenerating 清空增量防拼接。build 通过；真实 E2E 事件序列 plan→sources→delta→regenerating→sources→delta→done 消费正确。",
+      "testedAt": "2026-09-12"
+    },
+    {
+      "id": "BE-031",
+      "name": "LangGraph 问答图可视化导出脚本",
+      "description": "新增 backend/scripts/export_qa_graph.py：用桩 LLMProvider/RagService 依赖构建 QaGraphBuilder 问答图（build 只装配不执行，桩即可），调用 langgraph 内置 draw_mermaid() 导出 Mermaid 文本——默认打印并写入 docs/qa_graph.mmd；--png 可选导出 PNG（draw_mermaid_png 需联网访问 mermaid.ink，失败时提示改用 mermaid.live 离线渲染）。docs/ARCHITECTURE.md §5 内嵌同源 Mermaid 图并注明重生成命令。",
+      "status": "passing",
+      "evidence": "2026-09-12：export_qa_graph.py 桩依赖建图导出 Mermaid（docs/qa_graph.mmd，--png 可选）；ARCHITECTURE §5 内嵌同源图。运行验证六节点与全部条件边标签与 graph.py 路由一致。",
+      "testedAt": "2026-09-12"
+    },
+    {
+      "id": "BE-032",
+      "name": "Agent 模块一期重写骨架（基础类型）",
+      "description": "按 legal_agent_phase1_technical_design.md 重建 agent/ 目录结构：主图 state/config/schemas/constants（含节点中文 label 映射表）、legal_rag 子图 state/config/schemas，utils（query 去重汇总/evidence 转换/dedup/trace/timing）。新旧模块并存不接装配点。",
+      "status": "passing",
+      "evidence": "2026-09-13：完成 AgentState、AgentConfig、主图/RAG Schema、状态常量和 5 个 utils；列表归约器防 fan-out 并发写冲突，子图 trace 独立命名。pytest 154 passed。"
+    },
+    {
+      "id": "BE-033",
+      "name": "Agent 服务层（LLM/Milvus/Reranker/Citation）",
+      "description": "LLMService 适配 LLMProvider（structured_invoke=chat+JSON 容错+重试 1 次+安全默认）；MilvusService 适配 VectorStore 端口（不直连 SDK）；RerankerService 使用 cross-encoder/ms-marco-MiniLM-L-6-v2 CrossEncoder、可配置设备、懒加载单例、失败降级 RRF 序 + reranker_degraded；CitationService 引用构建。Settings 新增 RERANKER_* 字段 + .env.example 同步。",
+      "status": "passing",
+      "evidence": "2026-09-14：LLMService（structured_invoke=chat+JSON 容错提取+重试 1 次附修正指令+安全默认）；MilvusService 适配 VectorStore 端口；RerankerService 依赖注入打分器 + CrossEncoderScorer 懒加载单例（asyncio.Lock 双重检查 + to_thread，失败降级 RRF 序 + degraded 标记）；统一默认模型改为 cross-encoder/ms-marco-MiniLM-L-6-v2；Settings 与 .env.example 同步。"
+    },
+    {
+      "id": "BE-034",
+      "name": "Local Legal RAG 核心节点",
+      "description": "retrieval_planner_agent、strategy_router_node（多选策略 fan-out）、query_rewrite_agent、subquery_generator_agent、query_expansion_agent、hybrid_retriever_node（asyncio.gather 多 Query 并发混合检索）、evidence_ranking_node（合并去重 + original_query 统一 rerank）、evidence_grader_agent、recovery_planner_agent、rag_result_node；legal_rag/prompts 6 文件。",
+      "status": "passing",
+      "evidence": "2026-09-13：Local Legal RAG 10 节点完成，覆盖多策略 fan-out、多 Query 并发召回、去重统一 rerank、证据评估、有限恢复和三态结果；Prompts 6 个，事件图外安全丢弃。pytest 189 passed。"
+    },
+    {
+      "id": "BE-035",
+      "name": "Legal RAG 子图组装",
+      "description": "build_legal_rag_graph：按设计 §4 拓扑装配 + route_after_evidence_grade（max_retries 预算控制 recovery 回边）；子图可独立 ainvoke 运行（SUCCESS 与 LOCAL_EVIDENCE_INSUFFICIENT 两态输出）。",
+      "status": "passing",
+      "evidence": "2026-09-14：build_legal_rag_graph 保持原 10 节点拓扑，route_after_evidence_grade 使用 max_retries=1；集成测试覆盖成功、恢复、预算耗尽、不可恢复、检索故障与 trace，pytest 225 passed。"
+    },
+    {
+      "id": "BE-036",
+      "name": "主图节点",
+      "description": "query_router_agent、orchestrator_agent（max_global_steps 预算+超限强制 finish）、action_router_node、observation_node（CapabilityResult 统一合并）、direct_answer_agent、answer_generator_agent、grounding_checker_agent（RAG/direct 双规则）、final_answer_node；prompts 6 文件。grounding 未通过且预算耗尽时直接进入确定性收尾，不再追加低质量兜底 LLM；direct 路径只校验不编造法条；web/plugin 未开通生成能力说明。",
+      "status": "passing",
+      "evidence": "2026-09-14：主图调整为 14 节点，AgentConfig.max_global_steps=2；grounding 预算耗尽直接进入 final_answer_node，不再追加 LLM；路由、主图与全量测试通过，pytest 226 passed。"
+    },
+    {
+      "id": "BE-037",
+      "name": "Web Search 与 Plugin Stub",
+      "description": "web_search_entry_node（web_search_enabled 开关检查，false→DISABLED）、web_search_stub_node（NOT_IMPLEMENTED）、plugin_entry_node、plugin_stub_node（NOT_IMPLEMENTED）；禁止实际访问 Web、禁止动态加载外部代码。",
+      "status": "passing",
+      "evidence": "2026-09-13：web_search_entry（web_search_enabled=false→DISABLED 结果，true→继续）、web_search_stub（NOT_IMPLEMENTED，DISABLED 结果显式透传不覆盖，零网络访问）、plugin_entry（保留稳定接口，不解析不动态加载）、plugin_stub（NOT_IMPLEMENTED，禁 import/exec/外部代码）。约束 8/9/26 全部满足，二期替换 Stub 主图零重构。pytest 216 passed（新增 5 例）。"
+    },
+    {
+      "id": "BE-038",
+      "name": "主图组装与装配切换",
+      "description": "agent/graph.py build_agent_graph 按设计 §3 拓扑组装主图（legal_rag 子图作为节点接入）；SSE 事件映射（plan=检索规划全部查询/sources=ranked evidence/delta=流式回答/regenerating=重生成）；create_qa_workflow 新签名；containers/settings 接线；删除旧 agent 文件（nodes.py/prompts.py/graph.py/state.py）并标记 BE-030 deprecated。",
+      "status": "passing",
+      "evidence": "2026-09-13：AgentGraphBuilder 装配 15 节点主图与 RAG 子图；ContextVar 事件适配子图事件不上浮问题；工厂、容器、导出和真实验证脚本同步。pytest 185 passed，15 节点图导出通过。"
+    },
+    {
+      "id": "BE-041",
+      "name": "节点运行状态流式事件（Codex 风格）",
+      "description": "图构建器统一节点包装器：节点起止计时 + trace 写入 + status SSE 事件推送（phase=start/end、duration_ms、中文 label）；QaStreamEvent 值对象扩展 status 类型与 node/label/phase/duration_ms 字段（只增不改）；ChatService 增 status 分支仅转发不聚合；子图节点事件向主图 astream 传播的专项验证（不传播则降级为注入式发射器）。",
+      "status": "passing",
+      "evidence": "2026-09-13：status 事件、节点起止计时与统一日志包装器覆盖主图 15 节点和 RAG 子图 10 节点；ContextVar 事件流与 SSE 转发契约锁定，主图 E2E 5 case 通过。pytest 195 passed。"
+    },
+    {
+      "id": "BE-039",
+      "name": "Agent 重写测试体系重建",
+      "description": "backend/tests/{unit,integration}/agent/：各节点单测（脚本化 Fake LLM/Reranker/向量库，覆盖 JSON 容错回退）、RAG 子图集成 7 场景（简单/复杂/子查询/改写/扩展/恢复/证据不足）、主图 E2E 5 case（设计 §50）、SSE 序列（含 status 交织，过滤 status 后原序不变）、direct 路径与 web/plugin stub；fakes 扩展；test_ddd_boundaries 增加 sentence_transformers/torch 隔离；删除旧 test_agent_graph/test_agent_parsing。",
+      "status": "passing",
+      "evidence": "2026-09-13：重建 Agent 单元/集成测试与 Fake 体系，共 88 个 Agent 测试；覆盖 RAG 7 场景、主图 E2E、SSE 序列和 DDD 重型依赖隔离。干净环境全量 pytest 195 passed。"
+    },
+    {
+      "id": "FE-014",
+      "name": "前端检索策略展示与直接回答适配",
+      "description": "生成中的「问题拆解」改为「检索策略（N 条查询）」展示全部检索查询；AppContext.sendQuestion 发起新提问时清空 subQueries（direct 路径无 plan 事件，防残留上一轮列表）；npm run build + 浏览器回归验证。",
+      "status": "passing",
+      "evidence": "2026-09-13：「问题拆解」改「检索策略（N 条查询）」展示全部检索查询；sendQuestion 已有 subQueries 清空逻辑（复用 FE-013）。npm run build（tsc+vite）通过；真实浏览器实操：法律问题显示检索策略面板（plan 事件驱动），闲聊直接回答无面板、无残留。"
+    },
+    {
+      "id": "FE-015",
+      "name": "前端节点运行状态浅色展示",
+      "description": "types 扩展 status SSE 事件类型；api/chat.ts 增 onStatus 回调；AppContext nodeStatuses 状态（新提问清空、regenerating 跨轮累加）；MessageBlock 生成中以浅色小字实时渲染节点状态行（开始=「正在{label}…」、结束补耗时、done 后保留在消息上方）；npm run build + 浏览器回归验证。",
+      "status": "passing",
+      "evidence": "2026-09-13：types 增 status 事件与 NodeStatus；chat.ts onStatus 回调；AppContext nodeStatuses 实时聚合（同节点复用一行，start→正在…，end→耗时）、done 后快照挂到消息 steps 保留显示、新提问清空、出错清空；MessageBlock StepsList 浅色小字（text-ink-faint 11px）。build 通过；浏览器实操：法律问题 16 节点状态（含子图）实时滚动+完成后保留，闲聊仅主图节点，跨提问重新记录。"
+    },
+    {
+      "id": "BE-040",
+      "name": "Agent 重写文档/可视化/真实 E2E 收尾",
+      "description": "ARCHITECTURE §2/§3/§5/§7/§9 重写（新目录/端口/图拓扑/协议/测试数）；PRODUCT.md 行为变更定稿（D1~D5 + 行为规则 1~7）；RELIABILITY service 清单与日志规则补充；scripts/export_qa_graph.py 适配新图重导出 docs/qa_graph.mmd；verify_real_e2e.py 适配 + 真实运行（GLM+真实 Milvus+rerank 模型：上传→流式问答引用条文→sources/检索策略契约→status 事件序列→闲聊直接回答）；progress/session-handoff/clean-state-checklist 收尾与冷热沉降对账。",
+      "status": "passing",
+      "evidence": "2026-09-13：同步架构、可靠性、15 节点 Mermaid 图和真实 E2E 脚本；GLM+Milvus 验证通过检索计划、status、来源引用和持久化一致性，浏览器三场景通过。干净环境 197 passed。"
+    },
+    {
+      "id": "BE-042",
+      "name": "思考事件（think）流式输出",
+      "description": "agent/utils 增 truncate_text(120)；QaStreamEvent 扩展 type=think（node/label/text，text 发事件前统一截断、JSON 决策拼句）；各节点按节点→内容清单（docs/ARCHITECTURE.md §11）经 emit_event 发思考内容（意图判定/编排决策/选中策略/命中数/重排降级/评估结论/恢复计划/校验判定+理由/预算收尾/未开通说明/来源条数）；ChatService 与 SSE 路由增 think 分支（仅转发不进 delta 聚合）；单测+集成事件序+test_api 断言放宽（过滤 status 与 think 后原序不变）。",
+      "status": "passing",
+      "evidence": "2026-09-13：新增 think 事件、统一 120 字截断和 13 个节点内容；ChatService/SSE 仅转发不聚合，主图契约与 API 序列断言通过。干净环境 pytest 203 passed。"
+    },
+    {
+      "id": "FE-016",
+      "name": "前端思考块（Thinking Panel）",
+      "description": "types/chat.ts 增 think 事件与 onThink；AppContext 将 nodeStatuses 升级为统一思考行列表（status 同节点合并 + think 追加；新提问清空；出错保留——D12 行为变更）；MessageBlock 思考块容器：聚合状态行/检索策略（plan 并入）/think 内容行，浅色小字，生成中默认展开，完成后自动收起为「已完成思考 · Ns」一行（D7），点击展开/收起，done 后快照挂消息（D10 刷新不保留）；闲聊路径同样展示（D11）；npm run build + 浏览器回归。",
+      "status": "passing",
+      "evidence": "2026-09-13：MessageBlock 思考块（豆包式）——标题行（思考中…/已完成思考 · Ns+箭头）点击展开收起，manualOpen 跟随默认（生成中展开、完成自动收起）；AppContext nodeStatuses 升级 ThoughtLine 统一列表（status 合并+think 追加）；检索策略并入思考块；出错保留快照（D12）；闲聊同样展示（D11）。build 通过；浏览器实操：RAG 生成中实时滚动（意图判定/编排决策/命中数/重排降级），完成后收起一行，点开展示恢复循环与校验打回全程，闲聊 10.6s 思考块独立保留；截图确认左线缩进样式。"
+    },
+    {
+      "id": "BE-043",
+      "name": "Langfuse 全链路 trace（.env 开关）",
+      "description": "domain/services/trace_sink.py 定义 TraceSink/TraceSpan 端口 + trace_sink_var ContextVar；infrastructure/trace/langfuse_sink.py 实现（懒初始化客户端、全方法吞异常 WARN 降级、缺密钥降级关闭）；ChatService 记 trace 生命周期与 plan/think/sources/regenerating 事件；with_node_status 压/弹节点 span（子图嵌套、异常也 end）；LLMService 三路径记 generation（model/messages/output/耗时/attempt）；containers 按 LANGFUSE_ENABLED 注入工厂；Settings 增 LANGFUSE_ENABLED/HOST/PUBLIC_KEY/SECRET_KEY + .env.example；DDD 守护加 langfuse；假客户端单测锁契约 + 关闭/缺密钥 smoke。",
+      "status": "passing",
+      "evidence": "2026-09-13：TraceSink/TraceSpan、ContextVar、节点 span、LLM generation 和流程事件全部接入；云端真实 trace 含 29 个节点 span、11 个 generation、15 think 与 2 regenerating 事件。干净环境 pytest 225 passed。"
+    },
+    {
+      "id": "BE-044",
+      "name": "全量 Prompt 优化（12 个）",
+      "description": "主图 6 + RAG 子图 6 统一五段结构（角色/任务/格式/规则/纪律）；强化 JSON 输出纪律（禁 markdown 代码块）；消除示例值锚定偏差；answer_generator 明确【来源：文件名】格式硬约束；direct_answer 避雷法条编号与精确法律数据；grounding RAG 档实质一致即可 + GENERAL 档无关数字不算法律数据；retrieval_planner target_evidence 量化引导。硬约束：9 个角色标记词、BE-017 字面锚点、JSON 键与值域零变更。验证：全量 pytest + 真实 E2E + Langfuse regenerating 对比（打回率下降）。",
+      "status": "passing",
+      "evidence": "2026-09-13：12 个 Prompt 统一五段结构与 JSON 纪律，保留 9 个角色标记和 BE-017 锚点；真实 RAG/闲聊验证完成，regenerating 分别降为 0。干净环境 pytest 225 passed。"
+    },
+    {
+      "id": "BE-045",
+      "name": "区分精排主动关闭与模型故障降级",
+      "description": "RERANK_ENABLED=false 时继续使用 RRF 融合序，但以 disabled 状态和“精排已关闭”思考文案展示；CrossEncoder 加载/推理异常仍以 degraded 状态、WARN 日志和故障文案展示；启动日志记录生效开关与设备。",
+      "status": "passing",
+      "evidence": "2026-09-14：RerankResult 增 disabled 状态，EvidenceRankingNode 区分关闭/失败文案与 trace；启动日志记录开关和设备；37 个相关单测通过，真实模型快照可加载并返回分数。"
+    },
+    {
+      "id": "BE-046",
+      "name": "统一 Reranker 模型与本地下载启动",
+      "description": "全项目统一使用 check_rerank_local.py 中的 cross-encoder/ms-marco-MiniLM-L-6-v2；脚本首次运行下载到仓库根目录 .model 并执行 CPU 打分自检；Settings、.env.example、生产装配和 README 的下载/启动说明保持一致。",
+      "status": "passing",
+      "evidence": "2026-09-14：默认配置、脚本、本地 .env、README 与架构文档统一为 MiniLM 模型；脚本复用本地目录完成加载和样本打分；全量 pytest 226 passed（1 warning）。"
+    },
+    {
+      "id": "BE-047",
+      "name": "删除低质量兜底生成 Agent",
+      "description": "删除 FallbackGeneratorAgent 及其独立主图节点和 Prompt；grounding 预算耗尽直接进入确定性 final_answer_node；Web/Plugin 未开通说明改用能力说明 Prompt，避免删除兜底 Agent 时误伤能力边界提示。",
+      "status": "passing",
+      "evidence": "2026-09-14：主图由 15 节点调整为 14 节点，预算耗尽不再调用额外 LLM；导出图、主图路由测试与全量 pytest 226 passed（1 warning）通过。"
     }
   ]
 }

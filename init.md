@@ -1,8 +1,12 @@
 # init.md -- 开始工作前，请验证项目可以正常无报错构建。
 
 1. 如果此次更新后端项目, 则验证后端项目可以正常构建与运行:
+  - 启动 Milvus：
+    `cd backend && docker compose up -d`
+    （若容器已存在但已停止，容器名会冲突，改用：`docker start milvus-etcd milvus-minio milvus-standalone`）
+    就绪确认：`curl http://127.0.0.1:9091/healthz` 返回 OK
   - 启动：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-  - 验证：`cd backend && uv run pytest`（全量自动化测试）；启动后 `curl http://127.0.0.1:8000/api/health`
+
 2. 如果此次更新前端项目, 则验证前端项目可以正常构建与运行:
   - 构建：`cd frontend && npm install && npm run build`
   - 启动：`cd frontend && npm run dev`（http://localhost:5173，/api 代理到后端 8000；联调需先启动后端）

@@ -1,6 +1,6 @@
 """统一配置管理。
 
-为什么这么做：BE-002 的目标是让 SQLite/MySQL、Chroma/Milvus、Ollama/GLM
+为什么这么做：BE-002 的目标是让 SQLite/MySQL、Milvus、Ollama/GLM
 等 Provider 全部通过配置切换，业务代码不出现任何具体实现的名字；
 用 pydantic-settings 统一读取环境变量与 .env，同时获得类型校验，
 避免错误配置在运行中段才暴露。
@@ -15,7 +15,7 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 项目根锚点：backend/ 目录（本文件位于 backend/app/config/）。
-# 为什么需要锚定：sqlite/chroma 的路径默认是相对路径，若直接按
+# 为什么需要锚定：sqlite 的路径默认是相对路径，若直接按
 # 进程工作目录解析，启动方式不同（如在仓库根启动）会把数据写到
 # 错误位置；统一锚定到 backend/ 保证数据位置只由配置决定。
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -39,15 +39,31 @@ class DbProvider(str, Enum):
 
 
 class VectorStoreProvider(str, Enum):
-    """向量数据库 Provider 枚举。"""
+    """向量数据库 Provider 枚举。
 
-    CHROMA = "chroma"
+    BE-029 起向量库为 Milvus（稠密 + 稀疏 BM25 混合检索）；
+    Chroma 已随迁移删除，枚举保留仅为未来扩展 Provider 预留。
+    """
+
     MILVUS = "milvus"
 
 
 class LlmProvider(str, Enum):
     """大模型 Provider 枚举。"""
 
+    OLLAMA = "ollama"
+    GLM = "glm"
+
+
+class PlannerProvider(str, Enum):
+    """规划器 Provider 枚举（BE-030）。
+
+    FOLLOW 表示跟随 LLM_PROVIDER 使用同一个模型实例；
+    任务分解对模型能力最敏感，本地小模型规划质量不稳，
+    可显式指定 glm 用强模型规划、本地模型执行。
+    """
+
+    FOLLOW = "follow"
     OLLAMA = "ollama"
     GLM = "glm"
 
@@ -82,10 +98,9 @@ class Settings(BaseSettings):
     sqlite_db_path: str = "data/law_agent.db"
     mysql_url: str = ""  # 仅 db_provider=mysql 时使用
 
-    # ---- 向量数据库 Provider ----
-    vector_store_provider: VectorStoreProvider = VectorStoreProvider.CHROMA
-    chroma_persist_dir: str = "data/chroma"
-    milvus_uri: str = ""  # 仅 vector_store_provider=milvus 时使用
+    # ---- 向量数据库 Provider（Milvus，见 backend/docker-compose.yml）----
+    vector_store_provider: VectorStoreProvider = VectorStoreProvider.MILVUS
+    milvus_uri: str = "http://127.0.0.1:19530"
 
     # ---- 大模型 Provider ----
     llm_provider: LlmProvider = LlmProvider.OLLAMA
@@ -101,15 +116,38 @@ class Settings(BaseSettings):
     # 显著拉长首字延迟（真实环境曾达 30~40s）；默认关闭以获得即时流式输出
     llm_enable_thinking: bool = False
 
+    # ---- 规划器 Provider（BE-030 统一规划工作流）----
+    # 规划节点把问题拆解为子查询，对模型能力最敏感；
+    # follow=复用主 LLM Provider 实例，ollama/glm=按主 Provider 的
+    # 连接配置构造独立实例（模型名可用 planner_model 单独覆盖）
+    planner_provider: PlannerProvider = PlannerProvider.FOLLOW
+    planner_model: str = ""  # 空串表示用所选 Provider 的默认对话模型
+
+    # ---- Agent 服务（一期重写 BE-033）----
+    # Rerank 总开关：默认开启（设计 §32 统一重排）。如果部署环境暂时
+    # 不需要精排，可置 false 使用 RRF；服务仍会把“主动关闭”单独记录。
+    rerank_enabled: bool = True
+    # Rerank 模型与 scripts/check_rerank_model/check_rerank_local.py 保持一致：
+    # 默认使用 Hugging Face 模型 id；也可改为脚本下载后的本地快照路径。
+    # 加载失败时检索降级为 RRF 融合序，不阻断问答。
+    reranker_model_path: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    reranker_device: str = "cpu"
+
+    # ---- Langfuse 链路追踪（BE-043）----
+    # 总开关：默认关闭——关闭时 langfuse 模块零导入、零开销，纯本地运行；
+    # 开启但密钥缺失时装配点 WARN 降级为关闭（可观测故障不阻断业务）。
+    langfuse_enabled: bool = False
+    # Langfuse 服务地址：云版或自托管实例（如 http://localhost:3000）；
+    # 变量名与 langfuse SDK 自身的 LANGFUSE_BASE_URL 口径一致
+    langfuse_base_url: str = "https://cloud.langfuse.com"
+    # 项目密钥：敏感配置，只经 .env/环境变量注入，禁止提交仓库与写入日志
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+
     @property
     def resolved_sqlite_db_path(self) -> str:
         """SQLite 数据库文件的实际路径（相对路径锚定到 backend/）。"""
         return _anchor_path(self.sqlite_db_path)
-
-    @property
-    def resolved_chroma_persist_dir(self) -> str:
-        """Chroma 持久化目录的实际路径（相对路径锚定到 backend/）。"""
-        return _anchor_path(self.chroma_persist_dir)
 
     @property
     def resolved_log_dir(self) -> str:

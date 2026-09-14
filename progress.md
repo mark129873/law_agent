@@ -1,424 +1,182 @@
 # progress.md -- 会话进度日志
 
 ## 当前已验证状态
-- 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`
-- 标准启动路径：`cd backend && uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 117 个自动化测试）；启动后 `curl http://127.0.0.1:8000/api/health`
-- 当前最高优先级未完成功能：无——BE-001~027 与 FE-001~012 全部 passing
+- 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`（当前分支 feature/auto_coder）
+- 标准启动路径：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
+- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 226 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
+- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ Reranker 模型统一（BE-046）+ 低质量兜底 Agent 删除（BE-047）全部 passing：主图 + Local Legal RAG 子图 + Web/Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
+- 当前 Reranker：全项目统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；`check_rerank_local.py` 首次下载到根目录 `.model/cross-encoder/ms-marco-MiniLM-L-6-v2` 并执行 CPU 样本打分。本地 `.env` 已切换为该模型并开启 `RERANK_ENABLED=true`；无法使用时仍按既有故障降级契约记录 WARN。
+- 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；grounding 未通过且预算耗尽时直接进入 `final_answer_node`，不再调用额外兜底 LLM；其他重试机制不变
+- 当前最高优先级未完成功能：无——BE-001~047 与 FE-001~016 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
 - 当前 blocker：无
+- 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md（Session 001~030 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
 
-### Session 024（BE-027 结构化日志落盘 backend/log + 日志规则强化）
-- 日期：2026-09-10
-- 本轮目标：用户要求"分析 RELIABILITY.md 日志规则可优化点"并"将日志落盘到 backend/log"；先改文档（RELIABILITY.md 已完成强化），再落地代码
-- 技术决策：
-  - 双 sink 复用同一 `JsonFormatter`：stdout 供开发/容器采集，`backend/log/app.log` 供事后追溯，避免两处格式漂移
-  - 落盘用标准库 `TimedRotatingFileHandler`（when=midnight、utc=True、backupCount 可配、encoding=utf-8、delay=True），不引入第三方依赖；按天轮转便于"找某天的日志"
-  - 目录锚定复用 `settings._anchor_path`，新增 `resolved_log_dir`（与 data/ 同一套机制，不随启动目录漂移）；目录不存在时 `mkdir(parents=True, exist_ok=True)` 幂等自愈
-  - **失败降级为硬要求**：`mkdir`/建 handler 抛 `OSError` 时只保留 stdout，绝不向上抛——日志故障不得把业务变成 5xx（同类于历史 extra 保留字段 404→500 事故）
-  - `setup_logging(settings)` 统一经配置读取（消除三处不一致：logging.py 直接 os.getenv、`.env` 的 LOG_LEVEL 实际不生效、settings.log_level 是死字段）；重复调用先 close+remove 旧 handler（Windows 下不关闭会占用文件句柄）
-  - 时间戳统一 UTC 毫秒 + `Z`（原实现是微秒 + `+00:00`，与文档示例不符）；`WARNING` 归一为 `WARN`；`service` 采用受控清单
-  - request_id 用**纯 ASGI 中间件 + ContextVar**：刻意不用 `@app.middleware("http")`（BaseHTTPMiddleware 会缓冲响应体、破坏 SSE 流式）；响应头回写 `x-request-id`，请求头传入则沿用
-  - 敏感键脱敏作为"密钥禁止进日志"的机械兜底；默认等级 ERROR→INFO（解决"INFO 用于重要业务事件却默认不可见"的矛盾）
-  - 测试产物隔离：新增 `tests/conftest.py`，在导入应用代码前把 `LOG_DIR` 指向系统临时目录，避免 pytest 往仓库写日志
-- 运行过的验证：
-  - `uv run pytest -q` → **117 passed**（基线 106；新增 `tests/unit/test_logging.py` 9 例 + test_settings 日志默认值与 resolved_log_dir 锚定 + test_api x-request-id 生成与透传）
-  - 干净环境（先删 `backend/data`）跑全量，分层：unit 48、integration（除 API）60、API 9
-  - 真实启动实测（8011 端口）：删 `backend/log` → 启动自动创建 `backend/log/app.log`；日志为标准单行 JSON（`timestamp` 形如 `2026-09-10T09:37:50.369Z`）；带 `X-Request-ID: verify-001` 请求 `/api/health` 后，`Health check requested` 与 `uvicorn.access` 两条日志均带 `request_id=verify-001`；验证后进程与 8011 端口已清理
-- 已记录证据：feature_list.json BE-027（passing）；RELIABILITY / ARCHITECTURE / .env.example / .gitignore / init.md / clean-state-checklist 同步
-- 提交记录：本轮提交
-- 已知风险或未解决问题：
-  - 默认等级改为 INFO 会增加输出量（属行为变化，已按分析建议确定，需要时可经 `LOG_LEVEL` 调回）
-  - 多 worker 部署时按天轮转会竞争同一文件，文档已注明需改按 PID 分文件或集中采集（当前单进程，不触发）
-  - 既有遗留项不变：MySQL 未启用、无连接池、同一 created_at 无第二排序键、Ollama 偶发上传后提问 500
-- 下一步最佳动作：可选产品增强（会话重命名 / 停止按钮 / 深色主题开关 / CORS 收敛 / OllamaProvider 重试）或 MySQL 8.0 接入
+### Session 044（添加 MIT 开源协议）
+- 日期：2026-09-14
+- 本轮目标：为仓库添加标准 MIT 开源协议并在 README 中声明。
+- 改动：新增根目录 `LICENSE`，版权主体标注为 `law_agent contributors`；README 增加 MIT License 链接。
+- 验证：许可证文件、README 链接和工作区状态检查通过；本轮未修改运行时代码，沿用上一轮全量 pytest 226 passed、1 warning。
 
-### Session 023（文档整理：PRODUCT.md 只留产品描述，架构内容归 ARCHITECTURE.md）
-- 日期：2026-09-10
-- 本轮目标：用户要求"整理 PRODUCT.md，将与产品描述无关的内容去除，架构方面的整理到 ARCHITECTURE.md 中"
+### Session 043（删除低质量 fallback_generator_agent）
+- 日期：2026-09-14
+- 本轮目标：删除实际效果不佳的 `fallback_generator_agent`，避免 grounding 预算耗尽后再次调用 LLM 覆盖已有回答。
+- 改动：删除 `FallbackGeneratorAgent`、独立 fallback Prompt、主图节点、节点标签及 fallback 条件边；预算耗尽直接进入确定性 `final_answer_node`；Web/Plugin 未开通说明迁移到 `capability_notice.py`。
+- 验证：Milvus 集合重置后，代码变更后的定向测试 22 passed、全量 pytest 226 passed、1 warning；后端启动与健康检查通过，路由和 Mermaid 图同步完成。SQLite 文件删除命令受执行环境破坏性操作策略拦截，未绕过该限制。
+- 风险/交接：预算耗尽时不再自动重写，收尾使用 `answer_generator_agent` 已生成的最后草稿；若需改善答案质量，应优化主回答/grounding Prompt 或预算策略，而不是恢复低质量兜底 Agent。
+
+### Session 042（统一 MiniLM Reranker 与本地下载启动）
+- 日期：2026-09-14
+- 本轮目标：将全项目 Reranker 切换为 `check_rerank_local.py` 中的 `cross-encoder/ms-marco-MiniLM-L-6-v2`，并补齐模型下载、配置和启动说明。
+- 改动：Settings、装配点、`.env.example`、测试默认值、架构/产品文档和 README 全部同步；检查脚本统一负责下载到 `.model`、本地加载和样本打分；本机忽略配置切换到新模型并开启精排；新增 BE-046。
+- 验证：Milvus 健康检查通过；模型检查脚本复用本地目录并完成打分；后端全量测试 226 passed、1 warning；`git diff --check` 通过。
+- 风险/交接：首次下载需要访问 Hugging Face；CPU/GPU 设备由 `RERANKER_DEVICE` 配置，模型加载或推理异常仍会按既有契约降级为 RRF。
+
+### Session 041（修复精排状态误报）
+- 日期：2026-09-14
+- 本轮目标：排查“证据重排降级（精排不可用）”是否由 reranker 故障导致，并修复主动关闭精排时的误导性思考文案。
+- 根因与决策：工作区 `.env` 曾显式设置 `RERANK_ENABLED=false`，不是模型加载失败；本地 Qwen3-Reranker 快照实测可加载并返回分数，但 CPU 对 20 条候选超过 180s，因此恢复安全的 CPU 默认关闭，不把它改成会卡死请求的强制开启。
+- 改动：`RerankResult` 增 `disabled` 状态；EvidenceRankingNode 区分“精排已关闭”和“模型失败降级”；主动关闭记 INFO，模型失败仍记 WARN；启动日志增加 `rerank_enabled`/`reranker_device`；同步 PRODUCT/ARCHITECTURE/RELIABILITY 与 BE-045。
+- 验证：Milvus 集合重置；相关单测 37 passed；全量 `uv run pytest tests -q -rs` 为 **226 passed, 1 warning**；`frontend/npm run build` 通过；真实启动日志确认 `rerank_enabled=false`；上传专利法后提问“发明专利权的保护期限是多少年？”返回“二十年”、第四十二条来源 10 条，SSE 思考显示“证据按融合排序完成（精排已关闭）”。
+- 风险/交接：若要真实精排，请在 GPU 或可接受长延迟的机器设置 `RERANK_ENABLED=true`；当前 CPU 配置无需再把“精排已关闭”误判为项目故障。
+
+### Session 040（GitHub 发布版 README）
+- 日期：2026-09-14
+- 本轮目标：为仓库提供适合 GitHub 项目首页的中文 README，仅陈述当前代码与文档已经实现或明确标注的能力。
+- 改动：重写 `README.md`，补齐项目定位、技术亮点、两张 Mermaid 架构图、RAG/SSE 说明、真实仓库克隆地址、跨平台启动步骤、配置/API/目录结构、验证方式、已知边界、贡献说明与 License 状态；明确 Web/Plugin 仍为 Stub、MySQL 尚未接入以及法律免责声明。
+- 验证：逐项对照 `docs/ARCHITECTURE.md`、`docs/PRODUCT.md`、代码配置和 API 路由；本地链接 5 个均有效、2 个 Mermaid 代码块闭合；Milvus 集合重置后全量 pytest `225 passed, 1 warning`，前端 `npm run build` 通过，`git diff --check` 通过。
+- 状态：纯发布文档改进，不新增产品功能，`feature_list.json` 状态与证据无需变更；热层 Session 10 个、passing 条目 36 个，均未触发冷热沉降。
+
+### Session 039（收紧失败路径重试预算）
+- 日期：2026-09-14
+- 本轮目标：按用户要求减少 RAG 无对应文档时的恢复次数，以及主图总体重试预算；不改变架构、节点或 LangGraph 连线。
+- 改动：`LegalRAGConfig.max_retries` 从 2 调为 1；`AgentConfig.max_global_steps` 从 4 调为 2；同步 ARCHITECTURE、集成/单元测试和功能证据。
+- 验证：相关测试 22 passed；全量 `uv run pytest tests -q -rs` 为 225 passed、1 warning；`npm run build` 通过；`git diff --check` 通过。
+- 保持不变：Milvus 单查询异常重试 1 次、LLM 结构化输出解析重试 1 次；`max_global_steps=2` 下 grounding 失败会更快进入现有 fallback。
+
+
+### Session 038（设计稿删除：核心约束并入 ARCHITECTURE §12）
+- 日期：2026-09-14
+- 本轮目标：应用户要求把 docs/archive/legal_agent_phase1_technical_design.md（2699 行）最核心内容按需并入 ARCHITECTURE.md 后删除该稿
+- 技术决策：删除前先普查代码引用——57 个不同设计 § 号（最高频 §47 错误处理 16 次）+ 约束 3~25 共 30 处"约束 N"引用；据此 ARCHITECTURE.md 新增 **§12「一期设计约束与 § 号速查」**：①原 §53 的 30 条强制实现约束逐条保编号收录（代码按约束号引用，编号不可变）；②设计 §号速查表（仅收录被引用章节，每行核心内容一句话 + 权威现落点：实现文件或本文档小节）；§52 实现顺序/未引用章节不收录
+- 运行过的验证：grep 全仓库设计稿引用仅剩 3 处有意保留（§12 标题出处说明 + feature_list/progress 各 1 处历史记录）；本轮纯文档+1 行注释改动，测试沿用 Session 034 基线（225）
+- 已记录证据：本轮为文档迁移，feature_list.json 无功能状态变化；设计稿自此无落地文件，"设计 §XX/约束 N"语义由 ARCHITECTURE §12 唯一承载
+- 已知风险或未解决问题：无新增
+- 下一步最佳动作：失败查询链路优化（方案已备）；OllamaProvider 重试/降级（Session 028 遗留）
+
+### Session 037（全文文档优化：冷热沉降 + 设计稿入冷存 + 去重复 + 补 README）
+- 日期：2026-09-14
+- 本轮目标：应用户要求"对全文文档优化，保留核心信息、去除冗余信息"
 - 做了什么：
-  - **PRODUCT.md 重写为纯产品描述**：新增开头的文档职责声明（本文件只写用户可见行为；实现/架构见 ARCHITECTURE.md；行为要变先改本文件），并把原有条目按功能域重组为 5 节——1 产品定位、2 知识库（文档）、3 对话、4 参考文档（回答依据展示）、5 视觉与交互风格
-  - **移除 3 条架构/实现内容**（这些内容在 ARCHITECTURE.md 已有或已补对应位置）：
-    ① "三处排序统一由应用服务层按 created_at 决定、与数据库实现无关" → ARCHITECTURE §3「排序职责（BE-024）」并新增"产品要求出处"一条做交叉引用
-    ② "后端数据库访问使用 SQLAlchemy ORM（声明式模型 + 领域实体映射）" → ARCHITECTURE §3「ORM 使用约定（BE-025）」
-    ③ "清空数据目录后首次启动自动重建目录与数据库文件" → ARCHITECTURE §6「数据目录自动创建」与 §8「首次启动自愈（BE-026）」
-  - **顺手去实现化措辞**（不改变用户可见语义）：上传条目的"会被解析为向量并存储到向量数据库中"改为"会被解析并纳入知识库，供问答检索使用"；参考文档条目的"参考来源随回答一起持久化"改为用户可感知的"刷新或重新打开会话后仍可查看"
-  - **ARCHITECTURE.md §0 新增文档职责声明**：本文档只描述架构与实现，用户可见行为需求见 PRODUCT.md；实现变更不得改变 PRODUCT.md 描述的行为——从制度上防止两份文档再次互相渗透
-- 逐条核对：原 PRODUCT.md 的 22 行里，除上述 3 条实现说明外，其余产品要求**全部保留**（上传格式/知识库视图/文档明细与删除/新建与切换会话/首问定标题/新建回跳/流式回复/删除会话/三处排序/参考文档显示与不显示/视觉风格），无遗漏
-- 运行过的验证：
-  - 文档改动未触及代码；按 RELIABILITY.md 干净环境（`backend/data` 不存在）跑 `uv run pytest` → **106 passed**
-  - 确认 ARCHITECTURE.md 覆盖被移除的三条内容（§3、§6、§8 均有对应小节），并已用交叉引用指明出处
-- 已记录证据：本轮为文档整理，feature_list.json 无功能状态变化（BE-001~026 与 FE-001~012 保持 passing）
-- 提交记录：本轮提交
-- 已知风险或未解决问题：无新增；数据库方向的遗留项（MySQL 未启用、连接池未引入）与 ORM 维护面同前
-- 下一步最佳动作：可选产品增强（会话重命名 / 停止按钮 / 深色主题开关 / CORS 收敛 / OllamaProvider 重试）或 MySQL 8.0 接入，均需先立项
+  - **沉降（规则强制，Session 数 17>15）**：Session 021~030 整体搬入 docs/archive/progress-archive-021-030.md（行切割保证逐字不差，整条原样）；progress.md 356→116 行，热层归档指针同步，热层 Session 数 6
+  - **一期设计稿（2699 行）移入 docs/archive/**（git mv 保留历史）：as-built 已由 ARCHITECTURE.md 承载，但代码注释按"设计 §XX"引用故不删；ARCHITECTURE/agent/__init__ 两处"设计依据"引用补全路径
+  - **ARCHITECTURE.md 去重复**：§0 三条技术栈 bullet 与 §1 末尾详细栈合并；§2 目录树 database 长注释压缩（细节归 §3）；§9 测试表/§11 契约清单/§5 mermaid 图（用户明确要求固化）全部保留
+  - **RELIABILITY.md**：埋点示例块与级别表语义重复，压缩为一段（埋点清单语义零丢失）；121→108 行
+  - **README.md 原为空文件**：补 33 行极简版（简介 + 快速启动 + 文档索引）
+- 运行过的验证：冷分卷序号连续（001-010/011-020/021-030）；grep 设计稿引用无悬空；热层文档总量 3804→883 行；本轮纯文档改动，测试沿用 Session 034 基线（225）
+- 已记录证据：本轮为文档优化，feature_list.json 无功能状态变化；对账：Session 总数 36 = 热 6 + 冷 30
+- 已知风险或未解决问题：无新增（既有：失败查询链路优化待立项、OllamaProvider 重试遗留）
+- 下一步最佳动作：失败查询链路优化（方案已备）；OllamaProvider 重试/降级（Session 028 遗留）
 
-### Session 022（BE-026 修复数据目录缺失时首次启动无法建库）
-- 日期：2026-09-10
-- 本轮目标：用户按新的开工流程清空 `backend/data/`（见 RELIABILITY.md 的"测试干净环境管理"）后发现标准启动路径失败，定位并修复该回归
-- 问题与根因：
-  - 现象：`SQLAlchemyDatabase.connect()` + `init_schema()` 抛 `sqlite3.OperationalError: unable to open database file`
-  - 根因：BE-024 把手写 SQL + aiosqlite 实现重写为 SQLAlchemy 时，丢失了原 `connect()` 里的 `self._db_path.parent.mkdir(parents=True, exist_ok=True)`；SQLite 不会自行创建父目录
-  - 为什么既有测试没抓到：106 个测试全部使用 pytest `tmp_path`（目录必然存在），没有任何用例覆盖"父目录不存在"；Chroma 侧本来就有 `mkdir`，所以只有数据库这一侧受影响
-  - 影响面：按 RELIABILITY.md 的流程，每次开工/收尾测试前都会删 `backend/data/`，等于每次都命中，属必须先修的基础状态问题
+### Session 036（文档修复：plan.md 悬空引用清理 + 契约/决策归档）
+- 日期：2026-09-14
+- 本轮目标：plan.md 被删除后（ce56bf8）遗留两类问题修复——①progress/session-handoff/feature_list 共 6 处 "详见 plan.md" 死指针；②plan.md 承载的三类内容无归档去处（BE-044 硬约束清单、D1~D12 决策表、Langfuse 设计摘要）
 - 技术决策：
-  - 修复放在**数据库实现内部**（`_ensure_sqlite_parent_dir()` + `connect()` 首行调用），而不是启动脚本或容器工厂：数据目录属存储细节，放实现里则任何入口（uvicorn、测试、将来的 CLI）都自动获得自愈能力，不需各自记得建目录
-  - 只处理文件型 SQLite：`make_url(url).get_backend_name() == "sqlite"` 且非 `:memory:`；MySQL 的 URL 里是库名不是路径，目录由部署负责
-  - 路径用 `make_url(url).database` 解析（只读实测：Windows 绝对路径 → `C:/.../law_agent.db`、相对路径 → `data/law_agent.db`、`:memory:` 原样、MySQL 跳过），因此锚定到 `backend/` 的相对路径与绝对路径都正确
-  - `mkdir(parents=True, exist_ok=True)` 幂等（与 `init_schema()` 幂等建表同一思路）；只在目录真的不存在时打一条结构化 INFO 日志 `Database directory created`，避免每次启动刷屏
-- 已完成：`database.py` 修复 + 2 个回归测试 + 文档同步（ARCHITECTURE §6/§8/§9、PRODUCT 实现说明、feature_list BE-026 与 BE-005 说明、init.md 测试数量）
+  - 只增小节不新增文件：**ARCHITECTURE.md 新增 §11「Prompt 与事件硬约束契约」**（9 角色标记词全列表 + 字面锚点 + JSON 契约键值域 + BE-044 优化要点 + think 节点→内容清单，注明为唯一权威清单）；**PRODUCT.md 新增 §6「已确认的产品决策记录（D1~D12）」**（决策留档防实现漂移）
+  - Langfuse 设计摘要经逐条比对确认 RELIABILITY.md「Langfuse 链路追踪」节已完整承载，不重复新增，引用改指该处
+- 运行过的验证：grep 热层文件 plan.md 引用仅剩 §11 标题中的出处说明（有意保留）；feature_list.json JSON 校验通过；本轮纯文档改动，测试沿用 Session 034 基线（225）
+- 已记录证据：本轮为文档修复，feature_list.json 无功能状态变化
+- 已知风险或未解决问题：**热层 Session 数 17 > 15，冷热分层沉降条件已触发待执行**（按规则沉 10 个最旧 Session 到 docs/archive/progress-archive-021-030.md，passing 条目 36+4 未超 40 暂不触发 feature_list 沉降）
+- 下一步最佳动作：执行 Session 沉降；失败查询链路优化（方案已备）；OllamaProvider 重试/降级（Session 028 遗留）
+
+### Session 035（文档清理：删除 ADR 目录与 glossary 术语表 + 全量引用清理）
+- 日期：2026-09-14
+- 本轮目标：应用户要求删除 docs/adr/（0001~0010，工作区先前已删未提交）与 docs/glossary.md，并全量清理仓库内引用（用户确认删除是有意的文档重组；ADR 承载的设计实质——双预算、SSE 契约、事件机制、grounding 双规则等——已由 docs/ARCHITECTURE.md 完整承载）
+- 做了什么：手动逐处清理 34 个文件——文档层 6 个（ARCHITECTURE/RELIABILITY/plan/progress/session-handoff/feature_list.json，失效路径指针改指 docs/ARCHITECTURE.md）+ 后端源码 20 个 + 测试 7 个 + backend/.env.example；"ADR-XXXX" 标签全量剥离，解释性正文（为什么这么做）一律保留；冷分卷 docs/archive/ 确认无引用，按只读约定未动
 - 运行过的验证：
-  - `uv run pytest` → **106 passed**（基线 104，既有断言一行未改）；分层：unit 38、integration 60（28.21s）、api 8
-  - 新增回归测试：`test_connect_creates_missing_data_directory`（多层目录都不存在 → 建库成功且可读写；重复连接同路径仍可用）、`test_clean_environment_reset_then_start_again`（建库写入 → 删除整个 data 目录 → 再次启动得到可用空库）
-  - 真实启动两轮（干净环境流程复现）：删除 `backend/data`（确认不存在）→ `uv run uvicorn app.main:app` → 自动创建 `data/`、`law_agent.db`（32768 字节）与 `data/chroma/`；日志 `Database directory created` → `Database initialized` → `VectorStore initialized`；`/api/health` ok、`/api/conversations` 与 `/api/documents` 均为 0；`POST /api/conversations` 201 → `DELETE` 204（回到 0）。**再删一次 data 目录重启，第二轮同样自愈**（证明可重复）
-- 已记录证据：feature_list.json BE-026（passing，含修复前复现与修复后两轮实测数据）；BE-005 evidence 补充说明
-- 提交记录：本轮提交
-- 顺带说明：数据存放位置**保持不变**（仍为 `backend/data/law_agent.db` 与 `backend/data/chroma`）——用户明确要求本轮不改位置；关于"改到仓库根 `data/`"的两种方案（`.env` 覆盖 / 改 `_PROJECT_ROOT` 锚点为 `parents[3]`）已在会话中给过评估，未实施
+  - grep 全仓库（排除 archive/.git/.venv/node_modules）ADR/glossary 引用 = 0
+  - feature_list.json JSON 语法校验通过（node JSON.parse）
+  - **测试按用户指示本轮跳过**（纯文档/注释改动，未触任何运行时逻辑与断言；上一基线 2026-09-13 Session 034：225 passed）
+- 已记录证据：本轮为文档清理，feature_list.json 无功能状态变化（仅 description 与 BE-040/BE-033/BE-036/BE-043 条目内的引用文本清理）
+- 已知风险或未解决问题：ADR 编号自此无落地文件（git 历史提交信息中的 ADR 引用随历史保留）；后续文档/注释不得再新增 ADR-XXXX 引用
+- 下一步最佳动作：失败查询链路优化（本轮已完成量化评估未实施：最坏路径 20 次 LLM 调用/24 次 Milvus 检索/3 次重排，正常成功查询约 9 次 LLM；候选方案=恢复轮经济模式+零新增早退+同能力防重入护栏+预算参数 .env 可配）；或既有可选产品增强/MySQL/Web Search
+
+### Session 034（BE-044 全量 Prompt 优化：12 个 Prompt 五段结构化 + 编排器"不 finish"误诊修正）
+- 日期：2026-09-13
+- 本轮目标：应用户要求优化全部 Prompt（主图 6 + RAG 子图 6）。硬约束：9 个角色标记词（测试脚本化 Fake 分流依赖）、BE-017 字面锚点（优先依据/知识库中暂无相关依据/禁止/严禁虚构/【来源：）、JSON 键与值域零变更
+- 技术决策（Prompt 硬约束契约全列表见 docs/ARCHITECTURE.md §11）：
+  - **统一五段结构**：角色 → 任务 → 输出格式 → 规则 → 纪律；JSON 纪律升级为"以 { 开始以 } 结束、禁 markdown 代码块"（减少容错解析重试）；所有 JSON 示例加"值仅为格式示意"（消除锚定偏差，evidence_grader 的 sufficient:true 示例曾与代码安全默认反向）
+  - **answer_generator**：明确【来源：文件名】格式硬约束+示例（grounding 规则档按该字面检查，此前只说"注明来源文件"致 GLM 偶发漏写被打回）；补"简洁不重复、不堆砌无关条文"（E2E 实测回答有重复句）
+  - **grounding 校验器降误判**：RAG 档补"实质一致即可不要求逐字匹配"+"信息不足声明判通过"；GENERAL 档补"无关数字不算法律数据"+"宁可放行不可误杀"
+  - **direct_answer 避雷**：禁输出法条编号与精确法律数据（会触发校验）
+  - **重大误诊修正（Langfuse trace 取证）**：旧记录"闲聊被 judge 打回 3 次、judge 对 direct 路径过度敏感"是**误诊**——时间线显示真凶是编排器在 direct 已有结果后仍反复选 direct_answer 而非 finish，direct_answer 因 answer_draft 非空发 regenerating（think 文案又误标为"未通过校验"）。修复：编排器规则 3 改为"【最近能力】已执行且无校验反馈 → finish（严禁重复执行已完成的能力）"；direct think 文案改为与真实触发一致
+- 运行过的验证：
+  - 干净环境全量 pytest **225 passed**（脚本化 Fake 按 9 个标记词分流全绿——契约零破坏）
+  - 真实 E2E（GLM+Milvus+Langfuse）：verify_real_e2e.py 全断言通过，RAG 回答从优化前 65 字重复堆砌变为一句精准 +【来源：中华人民共和国专利法.txt】一次通过；闲聊 curl 实测
+  - **Langfuse 打回率对比**：RAG regenerating 2→0；闲聊 regenerating 3→0（编排器修复后）；judge verdict 留档确认
+  - 验证后已清理：law_chunks 集合 drop、backend/data 删除、后端进程停止
+- 已记录证据：feature_list.json BE-044（passing）；对账 60=40 热层（36 passing+4 deprecated）+20 archived
+- 已知风险或未解决问题：无新增（既有：RERANK 关闭、Ollama 路径 E2E 未跑、MySQL/Web Search 未接入）
+- 下一步最佳动作：可选产品增强（会话重命名/停止按钮/CORS 收敛）、MySQL 8.0 接入、或 Web Search 二期
+
+### Session 033（BE-043 Langfuse 全链路 trace：文档先行 → 实现 → 真实云端验证）
+- 日期：2026-09-13
+- 本轮目标：应用户要求接入 Langfuse 做 trace，开关作为配置放 .env 中（文档先行，随后实现与真实云端验证）
+- 技术决策（Langfuse 设计决策见 docs/RELIABILITY.md「Langfuse 链路追踪」节）：
+  - **可观测汇走领域端口**：domain/services/trace_sink.py 定义 TraceSink/TraceSpan 协议 + trace_sink_var（ContextVar，与既有事件机制同构）；langfuse 4.15.2 锁在 infrastructure/trace/（DDD 守护名单加 langfuse，domain/application 禁入）
+  - **三级采集各归其位**：trace 生命周期（start/end + plan/think/sources/regenerating 事件）归 ChatService（应用层唯一全景点）；节点 span 归 with_node_status 包装器（start_span 压栈/finally end 弹栈，子图复合节点天然父子嵌套，异常也 end）；LLM generation 归 LLMService（invoke/structured_invoke 含重试轮次/stream 三路径全覆盖，generation 挂当前节点 span）
+  - **配置与降级**：Settings 增 LANGFUSE_ENABLED（默认 false）/LANGFUSE_BASE_URL（命名与用户 .env 预置及 SDK 口径一致）/LANGFUSE_PUBLIC_KEY/SECRET_KEY；关闭=工厂 None 零导入零开销；开启但缺密钥=WARN 降级恒 None；sink 全方法吞异常 WARN（可观测故障不阻断业务）
+  - **踩坑记录**：①工厂实例注入但 ChatService 按可调用对象调用 → 工厂加 `__call__ = create` 别名；②pymilvus load_dotenv 把 .env 的 LANGFUSE_ENABLED=true 灌进测试环境 → test_api 夹具显式 `langfuse_enabled=False` 隔离；③langfuse v2 observations 查询 API 不带 fields 不返回 IO 字段——**数据其实一直在云端**，验证要用 trace.get 完整详情
+- 运行过的验证：
+  - 文档先行提交（0a14ca9）后实现；干净环境全量 pytest **225 passed**（+22 例：假客户端锁 sink 契约与降级、ChatService 生命周期序、LLMService 三路径 generation、包装器 span 压弹栈、Settings 默认值/开关、DDD 守护）
+  - **真实 Langfuse 云端验证通过**（用户 .env 预置密钥，jp.cloud.langfuse.com，server v4.35.0）：服务启用启动健康 → verify_real_e2e.py 全断言通过（回答引用第四十二条）→ 云端查询确认：1 条 trace（name=chat，input=问题原文，output=完整回答）、29 个节点 span（主图编排循环 + RAG 子图嵌套）、11 个 generation（model=glm-4.5-air，含 Prompt 消息与输出，metadata 带 attempt/schema/duration_ms）、15 条 flow:think + 2 条 flow:regenerating（本轮真实触发 2 次校验打回）
+  - 验证后已清理：law_chunks 集合 drop、backend/data 删除、后端进程停止
+- 已记录证据：feature_list.json BE-043（passing）；对账 59=39 热层（35 passing+4 deprecated）+20 archived
 - 已知风险或未解决问题：
-  - 同一 `created_at` 无第二排序键（用户指定"仅按时间判断"，沿用）；MySQL 未启用、连接池未引入（同前）
-  - ORM 维护面（两套模型 + 映射层、session 状态语义）同前，已有 6 个契约测试锁定
-- 下一步最佳动作：可选产品增强（会话重命名 / 停止按钮 / 深色主题开关 / CORS 收敛 / OllamaProvider 重试）或 MySQL 8.0 接入，均需先立项
+  - Langfuse SDK 后台批量上报（OTel exporter）：沙箱内曾见 export timeout 日志（网络受限场景），不影响业务（sink 吞异常）；网络通畅时无感
+  - session 归组目前放在 trace metadata（session_id 字段），未用 SDK propagate_attributes 跨任务传播——Langfuse UI 的 Sessions 视图暂不聚合，属可选增强
+  - 自托管 Langfuse 未验证（用户用云版）；MySQL/Web Search 等既有未验证项不变
+- 下一步最佳动作：可选产品增强（会话重命名/停止按钮/CORS 收敛）、MySQL 8.0 接入、或 Web Search 二期
 
-### Session 021（BE-025 数据库访问改造为 SQLAlchemy ORM）
-- 日期：2026-09-10
-- 本轮目标：用户询问"用 SQLAlchemy ORM 是不是更好"，在评估结论为"本项目不划算"后仍选定**改成 ORM（最小代价路径）**
-- 技术决策：
-  - 最小代价路径 = 不动领域层、不动 `Database`/三个 Repository 端口、不动应用服务层（排序仍在应用层按 created_at 判断），只替换 infrastructure 内部实现
-  - 新增 `models.py`（DeclarativeBase + 三个声明式模型，取代 Core 的 `schema.py`）与 `mappers.py`（Data Mapper：`to_domain_*` / `to_model_*` 双向映射，sources 的 JSON 编解码集中此处）
-  - `async_sessionmaker(expire_on_commit=False)` + 单个 `AsyncSession` 取代裸连接：仍是"进程级单连接"语义，**不引入连接池**（池化会改端口形状，属独立改造）。`expire_on_commit=False` 是异步 ORM 的必要设置，否则 commit 后访问属性会抛 `MissingGreenlet`
-  - 事务栈守卫提交边界的契约完全保留：最外层优先复用 autobegin 事务（"先读后开事务"可用）、嵌套 SAVEPOINT、异常回滚丢弃全部写入
-  - 仓储写法：`session.add` / `session.get` / 属性赋值更新（文档状态），消息按会话删除保留批量 `delete` 并显式 `synchronize_session="fetch"`（需要影响行数、避免 N+1、防止 session 残留已删除对象）
-  - **刻意不定义 relationship**：本项目无聚合内导航需求（消息永远按 conversation_id 显式查询），不定义关系就没有异步懒加载风险；级联删除由表级 `ON DELETE CASCADE` 保证
-  - 明确接受的一处取舍：文档状态更新从 Core 的批量 UPDATE 改为"取出模型→改属性"，多一次 SELECT，换来 identity map 与数据库始终一致（否则"更新后回读"会拿到过期状态）
+### Session 032（全面测试基线 + 思考块 BE-042/FE-016：全面测试→用户样式反馈→当日实现与验证）
+- 日期：2026-09-13
+- 本轮目标：①按开工流程做全面测试（干净环境全量 pytest/前端 build/真实启动 smoke/真实 E2E）；②用户在浏览器看到 FE-015 平铺状态行后反馈"思考的样式不对，要豆包式可点开收起"→ 按 grilling 定稿（D6~D12）实现思考块并验证
+- 技术决策（决策 D6~D12 见 docs/PRODUCT.md §6）：
+  - think 事件：QaStreamEvent 扩展 type=think（node/label/text），text 后端 `truncate_text(120)` 统一截断（契约生产端保证）；`emit_think` 统一发射（label 复用 NODE_LABELS，DRY）
+  - 13 个节点接入：意图判定/编排决策（JSON 拼句）/选中检索与恢复策略/并发检索命中数/重排降级/证据评估结论/恢复计划/校验判定+理由（_verdict 统一出口）/兜底与重写流转（regenerating 同源）/Web+Plugin 未开通说明/引用来源条数
+  - 前端思考块（豆包式）：标题行「思考中…/已完成思考 · Ns」+ 箭头点击切换；manualOpen=null 跟随默认（生成中展开、完成自动收起，消息 id 换名触发重挂载实现自动收起）；AppContext nodeStatuses 升级为 ThoughtLine 统一列表（status 按节点合并 + think 追加）；检索策略面板并入思考块；出错保留思考快照（D12，onError 不再清空并给半截消息挂快照+固定 id）；闲聊同展示（D11）
 - 运行过的验证：
-  - `uv run pytest -q` → **104 passed**（基线 98；新增 `tests/integration/test_orm_contract.py` 6 例）；分层：unit 38（~2s）、integration 58（25.63s）、api 8
-  - ORM 特有契约（新增测试锁定）：仓储出口精确为领域 dataclass 且非 ORM 模型、`expire_on_commit=False` 下提交后仍可读属性（默认配置下该访问会抛 `MissingGreenlet`）、状态属性级更新后同一会话回读非过期值、批量删除后 session 无残留、事务回滚能撤销属性级更新、数据库实例持有唯一会话
-  - BE-024 全部行为断言原样通过（持久化/外键级联/事务提交与回滚/先读后事务/建表幂等/旧库补列迁移/来源往返/时间保留时区/乱序落库按时间排序）
-  - 旧库兼容实测（迁移前版本创建的 `backend/data/law_agent.db`）：标准启动 `/api/health` ok、会话 4 条按 created_at 正序、文档 4 条按上传时间倒序、首条会话消息 user→assistant、`POST` 201（4→5）→ `DELETE` 204（回到 4，测试会话已清理）
-  - 旧库零破坏复核（只读 sqlite_master/PRAGMA）：三表定义未变、`sources` 列在、外键 `ON DELETE CASCADE` 在、`idx_messages_conversation` 在、行数 4/8/4 与验证前一致 → ORM 的 `create_all` 对既有表零改动
-- 已记录证据：feature_list.json BE-025（passing）、BE-024 与 BE-005 evidence 补充"实现载体已改造为 ORM"的说明；NEW_FEATURE.md 记录本轮功能与实测结果；ARCHITECTURE.md 新增"ORM 使用约定"小节
-- 提交记录：本轮提交
+  - 全面测试基线（实现前）：干净环境（data 不存在+reset_milvus）197 passed；前端 build 通过；真实启动 smoke（health/空列表/日志初始化序列含 BE-026 自愈）；真实 E2E 全断言通过（201 ready/plan 检索策略/16 节点 status/引用第四十二条/sources 持久化一致）；浏览器 RAG 路径 + grounding 打回→兜底路径真实触发
+  - 实现后：干净环境 203 passed（+6 例 think 单测：截断规则/契约拼装）；前端 build 通过；浏览器实操：RAG 生成中思考块默认展开（思考中…+意图判定/编排决策/选中检索策略/命中数实时滚动）→完成后自动收起「已完成思考 · 45.8s」→点击展开显示恢复循环全程（改写/拆解/扩展+校验打回理由+预算耗尽+兜底触发）→点击收回；闲聊路径思考块 10.6s 独立保留；截图确认左线缩进浅色样式
+  - 验证后已清理：law_chunks 集合 drop、backend/data 删除、前后端进程停止（vite 残留子进程 taskkill 清理）
+- 已记录证据：feature_list.json BE-042/FE-016（passing）；对账 58=38 热层（34 passing+4 deprecated）+20 archived
 - 已知风险或未解决问题：
-  - ORM 带来的固有复杂度已确认并记录在案：多一层实体↔模型映射（字段增删需同时改 models/mappers）、session 状态语义（identity map、过期对象）、批量操作需显式同步策略。本轮用 6 个契约测试把这些点锁住，但它们是新引入的维护面
-  - 仍未引入连接池（单会话/单连接）；MySQL 仍未启用（容器对 `DB_PROVIDER=mysql` 显式 NotImplementedError），接入只剩装 aiomysql + URL 分支 + 真实实例验证
-  - 同一 `created_at` 仍无第二排序键（沿用用户指定口径：仅按时间判断）
-- 下一步最佳动作：MySQL 8.0 接入（驱动 + URL 分支 + 真实实例集成验证 + Alembic autogenerate 可直接消费现有声明式模型），或 session-handoff 中列出的可选产品增强
+  - grounding judge 模型方差新增观察：闲聊"你能做什么"的能力介绍回答被 direct 规则档打回 3 次才通过（对"不得编造法条"过度敏感），预算耗尽强制收尾兜住——最终行为正确但 LLM 调用增多，建议后续调 direct 路径 judge Prompt 措辞
+  - IAB 自动化点击在该标签页系统性超时（fill/evaluate 正常），用 evaluate 程序化点击走 React 合成事件完成验证——自动化工具性问题，非产品缺陷
+  - 既有风险不变：每问题 LLM 调用 5~8 次；RERANK_ENABLED=false 降级；Ollama 真实 E2E 未跑
+- 下一步最佳动作：可选产品增强（会话重命名/停止按钮/CORS 收敛）、MySQL 8.0 接入、或 Web Search 二期（替换 Stub 即可）
 
-### Session 020（BE-024 数据库实现迁移到 SQLAlchemy + 排序职责上移应用层）
-- 日期：2026-09-10
-- 本轮目标：用户提问"数据库的代码可以改为 sqlalchemy 么"并选定方案——改用 SQLAlchemy Core（async）替换手写 SQL + aiosqlite，同时**排序逻辑放到 application 层且仅按时间判断**
-- 技术决策：
-  - 选 SQLAlchemy 2.0 **async Core** 而非 ORM：本项目查询全是简单 CRUD，领域实体已是干净 dataclass，引入 ORM 会多一层 Row↔实体映射并带来 AsyncSession/expire_on_commit/异步懒加载等与"每次写入即提交"模型冲突的复杂度；Core 恰好解决真正的问题——方言差异（为 MySQL 8.0 接入清障）
-  - 新增 `app/infrastructure/database/sqlalchemy/`（schema.py 表元数据 / types.py IsoDateTime / database.py 端口实现 + 三个仓储），删除 `database/sqlite/` 与已无用的 `mysql/` 空占位包；**aiosqlite 保留**（降级为 SQLAlchemy 的 SQLite 异步驱动，业务代码不再直接导入）
-  - 时区无损：SQLAlchemy 默认 DateTime 在 SQLite 会丢 tzinfo、MySQL DATETIME 无时区概念，会让既有断言"读回 tzinfo 必须存在"失败；故用 TypeDecorator 继续以 ISO-8601 字符串存取（与旧实现逐字节一致，旧库零迁移）
-  - 写进表级的方言无关细节：主键/外键用定长 VARCHAR（MySQL 的 TEXT 不能做主键/外键）、ForeignKey(ondelete="CASCADE") 生成表级约束（列内联 REFERENCES 在 MySQL 会被忽略）、SQLite 用 connect 事件开 `PRAGMA foreign_keys`
-  - 排序上移：三个 Repository 去掉 ORDER BY（移除 SQLite 专有 rowid 第二排序键），ConversationService.list_conversations/get_messages 按 created_at 正序、DocumentService.list_documents 按 created_at 倒序；仓储端口文档改写为"不承诺顺序"。顺带修掉内存 Fake（倒序）与真实实现（正序）此前的排序不一致
-  - 事务语义保持：单连接 + 事务栈守卫提交边界；最外层优先复用 SQLAlchemy 的 autobegin 事务（否则"先读后开事务"会抛 already begun），嵌套用 SAVEPOINT
+### Session 031（一期 Agent 模块重写：BE-032~041 + FE-014/015 + BE-040 全部落地）
+- 日期：2026-09-13
+- 本轮目标：按 legal_agent_phase1_technical_design.md 对 agent 模块整体重写（主图 + 独立 Local Legal RAG 子图 + Web/Plugin Stub + 服务层），并按用户决策 D1~D5 实现检索策略全量展示、直接回答路径、节点状态流式展示（Codex 风格浅色小字）、rerank top-10
+- 技术决策（产品决策 D1~D5 见 docs/PRODUCT.md §6）：
+  - 主图 15 节点（意图路由/编排/动作路由/RAG 子图/Web+Plugin Stub/观察/直接回答/回答生成/grounding/兜底/收尾）+ 子图 10 节点（检索规划/策略路由/三查询变体/并发混合检索/证据重排/评估/恢复规划/结果）；预算 max_global_steps=4 与 max_retries=2 相互独立
+  - 服务层适配领域端口：MilvusService→VectorStore（不直连 SDK）、LLMService 结构化输出=JSON 容错+重试 1 次+安全默认、RerankerService=CrossEncoderScorer 懒加载+失败降级
+  - **重大实测发现：langgraph 1.2.11 子图节点 custom 事件不上浮父图 astream**（探针证实）→ 事件机制改为 ContextVar 注入式发射器，适配器 astream=ainvoke+队列排空
+  - **重大实测发现：本机 CPU（无 CUDA，8 线程）Qwen3-Reranker-0.6B 约 15s/对，一轮 20 对约 5 分钟**→ 粗排预截断 rerank_max_candidates=20 + RERANK_ENABLED 开关（默认 true 忠实设计；本机 .env 置 false 走 RRF 降级序，GPU 机器可开启）
+  - grounding 双规则：检索路径要求【来源：…】/信息不足声明；直接回答路径只查编造法条；Web/Plugin 未开通跳过校验
+  - SSE 契约向后兼容：新增 status 事件（node/label/phase/duration_ms，中文标签映射 constants.NODE_LABELS）；ChatService/SSE 路由补显式分支（status 不进 delta 聚合）
+  - 旧实现机械搬迁 _legacy/ 规避同名冲突（graph/nodes/prompts/state 四文件），BE-038 切换装配时删除；BE-030 置 deprecated
 - 运行过的验证：
-  - `uv run pytest -q` → **98 passed**（迁移前基线 92；新增事务一次性提交、先读后事务、排序契约 4 例等共 6 例）；分层：unit 38（1.84s）、integration 52（21.97s）、api 8
-  - 旧库兼容实测：用**迁移前版本创建**的 `backend/data/law_agent.db` 走标准启动路径 → `/api/health` ok；`GET /api/conversations` 4 条按 created_at 正序、`GET /api/documents` 上传时间倒序、中文与 sources JSON 无损（时间戳带 +00:00）；`POST /api/conversations` 201（4→5）→ `DELETE` 204（回到 4，测试会话已清理）；结构化 JSON 日志正常
-  - 旧 schema 迁移：test_schema_migration_adds_sources_column 用同步引擎造 FE-023 之前的旧表 + 历史数据，验证幂等补列、数据保留、迁移后可写带来源消息
-  - DDD 守护更新：`test_ddd_boundaries.py` 的技术库名单加入 sqlalchemy（aiosqlite 保留），sqlalchemy 只出现在 infrastructure
-- 已记录证据：feature_list.json BE-024（passing）、BE-005 与 FE-012 evidence 同步更新；NEW_FEATURE.md 记录本轮功能与实测结果
-- 提交记录：本轮提交
-- 顺带修复：`feature_list.json` 在 FE-012 条目处缺逗号，导致整个文件无法被 JSON 解析（已修复并校验）
+  - 每功能全量 pytest 保持绿：154→168→189→195→216→185（删旧 31 例）→197；干净环境重置后终验 **197 passed**（unit 127 含 agent 76 / integration 70 含 agent 12 / api 9；真实 Milvus 5 例不可达时跳过）
+  - 前端 npm run build 通过；浏览器实操（GLM+真实 Milvus+专利法）：法律问题生成中浅色状态行实时滚动（含"正在检索知识库…"与子图节点）+「检索策略（N 条查询）」面板→done 后 16 节点状态保留+「参考文档 10」；第二个法律问题一次成功引用第七十一条赔偿规则并标注来源；闲聊直接回答（无检索策略、无"暂无依据"声明、仅主图节点状态）；grounding 双打回→兜底谨慎回答路径真实触发一次
+  - 真实 E2E（verify_real_e2e.py，GLM+Milvus，RERANK 关闭）：上传 TXT/MD 均 201 ready→plan 携带检索策略→15 节点 status 贯通→回答正确引用第四十二条"二十年"并标注【来源】→sources 与持久化一致→事件序 plan<sources<delta
+  - 图可视化：export_qa_graph.py 桩依赖重导出 15 节点 Mermaid（docs/qa_graph.mmd，内嵌 ARCHITECTURE §5）
+  - 验证后已清理：law_chunks 集合 drop、backend/data 删除、前后端进程停止
+- 已记录证据：feature_list.json BE-032~041、FE-014/015、BE-040（passing）+ BE-030（deprecated）；对账 56=36 热层（32 passing+4 deprecated）+20 archived
 - 已知风险或未解决问题：
-  - 同一 `created_at`（微秒级相同）时不再有第二排序键：顺序由底层返回顺序决定，`sorted` 稳定性保证重复查询一致，但"插入先后"不再被保证（本轮用户明确要求仅按时间判断；实际写入均间隔一次 IO，同微秒概率极低）
-  - MySQL 仍未启用：容器对 `DB_PROVIDER=mysql` 显式抛 NotImplementedError（接入只剩装 aiomysql + URL 分支 + 真实实例验证）；连接池化事务模型（每请求一连接）与当前 `transaction()` 端口形状不兼容，属独立改造
-- 下一步最佳动作：MySQL 8.0 接入（驱动 + URL 分支 + 真实实例集成验证 + 迁移方案如 Alembic），或 session-handoff 中列出的可选产品增强
+  - Rerank 精排在 CPU 机器默认关闭（RERANK_ENABLED=false 降级 RRF 序）——功能已验证可跑通，GPU 机器开启即得精排
+  - grounding LLM judge 存在模型行为方差（GLM 偶发首答缺【来源】被规则档打回；重生成+兜底路径已验证兜住）
+  - 每问题 LLM 调用 5~8 次（忠实设计 D3），本地 Ollama 部署首字延迟明显（PLANNER_PROVIDER=glm 缓解规划环节）
+  - Ollama LLM 路径的真实模型 E2E 未跑（本轮 E2E 走 GLM 配置；图闭环行为由集成测试锁定）
+- 下一步最佳动作：可选产品增强（会话重命名/停止按钮/CORS 收敛）、MySQL 8.0 接入、或 Web Search 二期（替换 Stub 即可，suggested_external_queries 已透传备用）
 
-### Session 019（FE-012 侧边栏历史对话正序）
-- 日期：2026-09-06
-- 本轮目标：用户要求侧边栏历史对话按创建时间从上到下；经确认方向为旧在上、新在下（此前为最新在上）
-- 技术决策：
-  - 先更新文档再写代码：PRODUCT.md 加排序行为条目；ARCHITECTURE.md 第 7 节对话列表倒序→正序；feature_list.json 新增 FE-012（in_progress 起步，FE-005 的 passing 记录不动）
-  - 后端 SQLite 会话列表 `ORDER BY created_at ASC, rowid ASC`（rowid 兜底同秒稳定的顺序）；前端 createConversation 由顶部插入改为底部追加；文档列表保持倒序不动（用户未要求，窄范围）
-  - 同步更新 test_api.py 正序断言（原倒序期望）；其余测试无顺序依赖
-- 运行过的验证：
-  - uv run pytest → 92 passed；npm run build 通过
-  - 重启后端生效后真实浏览器验证：API 顺序与侧边栏从上到下完全一致（旧→新，新建会话在底部），测试会话已清理
-  - 运维备注：Git Bash 无 Stop-Process，用 powershell.exe -Command 停旧 uvicorn；nohup 后台启动新后端
-- 提交记录：本轮提交
-- 下一步最佳动作：可选增强（会话重命名/停止按钮/深色主题手动开关/部署收敛/OllamaProvider 重试），需用户决定
-
-### Session 018（FE-011 浏览器端到端验证收尾）
-- 日期：2026-09-06
-- 本轮目标：按 AGENTS.md 启动流程接续，完成 FE-011 最后一项验证并置 passing
-- 按流程执行：pwd 确认目录；重读 ARCHITECTURE/PRODUCT/RELIABILITY/progress/handoff/feature_list/init/NEW_FEATURE（NEW_FEATURE 与 PRODUCT/feature_list 已同步，无需再改）；init 文件存在性全部通过；后端 uv run pytest → 92 passed；前端 npm run build 通过；后端 :8000 与前端 :5173 均为运行中（health ok/200）
-- 技术决策：
-  - 本机无 Chrome，用 playwright-core + 本机 Edge（executablePath 直指 msedge.exe，headless）做真实浏览器验证；脚本与截图放在仓库外 Temp/opencode/fe011/（verify-fe011.cjs + 3 张截图），仓库零污染，不改 package.json
-  - 空知识库场景需清空向量库：经 API 临时删除唯一文档（专利法 txt），测后即用 tests/data_source 原文件重传恢复 ready；向量由同内容重建，测试会话事后按标题清理
-- 运行过的验证（真实浏览器）：
-  - A1 RAG 提问专利法期限：流式完成后「参考文档」按钮出现（计数 4）
-  - A2 点击展开：按序号列表，首项为专利法 txt 及第二十六条命中内容
-  - A3 刷新后重进会话：按钮仍在（持久化恢复链路贯通）
-  - B 空知识库无关提问：参考文档按钮数量为 0
-  - 契约层复验：真实 SSE sources 事件先于全部 delta，持久化来源与流内一致，GET 回读一致
-  - 收尾复检：文档恢复为 1 个 ready；后端 pytest 92 passed
-- 附带问题：清理测试会话时按标题前缀删除，误删 1 条历史同名专利法提问会话（属测试数据；用户保留的 2 条历史会话未动）
-- 提交记录：本轮提交
-- 下一步最佳动作：可选增强方向（需用户决定）：会话重命名、回答停止按钮、深色主题手动开关、部署收敛 CORS；或 OllamaProvider 加重试解决上传后立即提问偶发 500 的已知风险
-
-### Session 017（参考文档功能 BE-023/FE-011）
-- 日期：2026-09-06
-- 本轮目标：NEW_FEATURE.md——RAG 回答后显示「参考文档」按钮，点开按序号展示参考文档与内容；未使用检索或无命中不显示
-- 技术决策：
-  - 后端 BE-023：domain/services/qa_workflow.py 新增 QaStreamEvent 值对象（delta/sources 二态）；RetrieveNode 检索命中时经 get_stream_writer 推送 sources（先于全部 delta，数组顺序即展示序号；Prompt 依据与前端展示同源）；ChatService 收集来源随回答一起持久化；messages 表新增 sources JSON 列（init_schema 幂等 ALTER 迁移旧库，历史数据保留）；MessageResponse/消息接口返回 sources；SSE 协议新增 sources 事件
-  - 前端 FE-011：types 新增 ReferenceSource；chat.ts 增加 onSources 回调；AppContext 在 done 时挂载 sources（生成中不挂载，回答完成后按钮才出现）；MessageBlock 参考文档折叠按钮（Phosphor Books 图标 + 计数徽标 + 按序号列表，来源内容纯文本渲染不进 Markdown，ref-panel-in 入场动画 respects prefers-reduced-motion，aria-expanded 无障碍属性）
-  - RagService 拆出纯函数 format_context：检索节点同一批 chunk 既组装 Prompt 上下文又组装参考来源，二者天然同源不漂移
-- 运行过的验证：
-  - 后端 uv run pytest → 92 passed（新增 6 例：sources 事件先于 delta 且持久化回读、图级有命中推送/无命中不推、旧库迁移幂等、消息来源往返）
-  - 前端 npm run build（tsc 类型检查 + vite）通过
-  - 测试夹具修复：API 测试容器入库与检索必须注入同一确定性 embedding（此前只替换检索侧，入库仍走真实 Ollama embedding，维度 768 vs 64 不一致导致检索报错且测试悄悄触网）
-  - scripts/verify_real_e2e.py 增加 sources 事件与持久化断言
-  - 浏览器端到端验证：本轮最后一步执行（空知识库无按钮 / RAG 有按钮可展开 / 刷新恢复）
-- 提交记录：本轮提交
-- 下一步最佳动作：浏览器端到端验证后 FE-011 置 passing
-
-### Session 016（全项目全面测试轮）
-- 日期：2026-09-06
-- 本轮目标：按用户要求做全项目全面测试（单元/集成/接口/端到端/前端界面）
-- 测试结果：
-  - 后端单元 tests/unit → 38 passed
-  - 后端集成+接口 tests/integration（含 test_api.py 7 例接口测试）→ 48 passed
-  - 后端全量 uv run pytest → 86 passed
-  - 端到端 scripts/verify_real_e2e.py：干净环境通过（上传 201 ready ×2 → RAG 回答逐字引用第四十二条并标注来源 → user/assistant 持久化）
-  - 前端 npm run build（tsc+vite）通过；浏览器 GUI 黑盒走查 T1~T9 全部通过（截图证据归档 gui-test-screenshots/，已 gitignore）：加载渲染/空输入禁用/建议填充启用/流式生成中状态/回答引用/会话往返恢复/知识库汇总与明细/跨视图新对话跳转/删除确认取消与删除两路径/超长输入 160px 封顶
-- 本轮发现并处理的问题：
-  - 【已处理】测试数据污染：专利法文档被历次测试重复上传 3+ 份，向量库重复 chunk 导致检索退化（回答上下文错引第二十六/二十七条）。按 RELIABILITY.md 干净环境规则重置 backend/data 后重跑，检索质量恢复
-  - 【已记录】瞬态缺陷：Ollama 0.32.0 在"上传触发 embedding 批处理后立即提问"的模型切换窗口偶发对 /api/chat 返回 500（复现 1/2 次）；后端按设计转为 SSE error 事件，前端错误条正常展示。属 Ollama 侧健壮性问题，可在后端加重试，暂记录为已知风险
-- 运维备注：taskkill 在本机偶发超时，PowerShell Stop-Process 可靠；测试期间多次遇到 IAB 点击抖动，改用 CUA 坐标点击 + 只读几何定位（getBoundingClientRect）后稳定
-- 提交记录：本轮提交
-
-### Session 015（LLM 思考模式开关）
-- 日期：2026-09-06
-- 本轮目标：新增 .env 配置项控制 LLM think 开关，默认关闭（应用户需求）
-- 技术决策：
-  - 新增 `LLM_ENABLE_THINKING`（bool，默认 False）：关闭时 Ollama 请求携带顶层 `think:false`、GLM 请求携带 `thinking:{"type":"disabled"}`；开关经容器注入 Provider 构造函数，Provider 不读全局配置
-  - 顺带修复真实体验缺陷：qwen3.5 默认思考导致首字延迟 30~40s（思考 token 被流式解析忽略，用户只看到等待）
-- 运行过的验证：
-  - uv run pytest → 86 passed（新增：配置默认/覆盖 1 例 + Ollama/GLM 请求体 think 断言 2 例）
-  - 真实 Ollama 对比：think=false 0.54s vs think=true 2.30s（简单问题 4 倍，思考 144 token 只为答"5"）
-  - 真实 GLM（glm-4.5-air）thinking=disabled 流式调用正常
-  - 重启后端后 SSE 实测：整轮 RAG 回答（50 个 delta）13.3s 完成，对比此前仅首字 30~40s
-- 运维教训：Windows 下 TaskStop 只杀 shell 不杀 uvicorn 子进程（孤儿进程占住 8000，表现为旧代码+对 Ollama 连接异常 500）；需 netstat 找 PID 后 taskkill/Stop-Process 强杀
-- 额外发现并修复：backend/.env.example 一直被根 .gitignore 的 `.env.*` 模式误伤、从未真正入库（历次"已提供模板"的记录实际只存在于本地）；已加 `!.env.example` 否定规则并收录
-- 提交记录：本轮提交
-- 下一步最佳动作：可选增强（会话重命名/停止按钮/部署收敛），无阻塞项
-
-### Session 014（FE-002 ~ FE-010 前端全部功能）
-- 日期：2026-09-06
-- 本轮目标：完成前端全部剩余功能（FE-002~010），直至前后端全链路可用
-- 技术决策：
-  - FE-002：types/api/state 三层（client.ts request<T>+ApiError 解析统一错误；chat.ts fetch 手动消费 SSE，EventSource 不支持 POST）；React Context 轻量状态，UI 组件零直接 fetch
-  - FE-003：语义化主题 token（stone 暖灰 + 唯一 emerald 强调色，明暗双主题跟随系统）；圆角体系（控件 lg/气泡 2xl/徽标 full）；图标统一 @phosphor-icons/react（不手绘 SVG）
-  - FE-004：新会话延迟创建（第一句提问时才 POST，title=提问截短 20 字，解决后端不自动改标题导致的列表不可辨认）；乐观插入 + SSE 增量写入
-  - FE-006/008：删除统一两步确认交互；新增 danger 语义色 token
-  - FE-007：streamingRef 守卫生成中禁止切换/新建会话（openConversation/startNewChat 入口拦截）
-  - FE-010：助手消息 react-markdown 渲染（默认不解析原始 HTML）；ink-faint 对比度提升至 WCAG AA（明暗两套）
-- 运行过的验证（全部真实执行）：
-  - npm run build（tsc 类型检查 + vite）每个功能均通过；fetch 隔离机械校验（仅 api/ 层 3 处）
-  - 真实浏览器（IAB）：Shell 布局/视图切换截图；提问→新会话以提问为标题→流式回答「二十年」引用专利法第四十二条→后端确认持久化
-  - 增量渲染采样序列 506→681(生成中)→823(完成)；生成中点击其他会话被守卫阻止；停后端发送→502 错误条、重启恢复
-  - 会话删除：条目消失 + 刷新不复活 + 删除当前会话回新对话
-  - 知识库：真实 MD 文档经 input change 路径上传→201→embedding 入库「可检索」；bad.exe 前端预校验拒绝；两步确认删除
-  - FE-009 联调双闭环：劳动法问答（引用新上传劳动合同法文档）→刷新恢复→删除；上传消保法→立即 RAG（三倍赔偿+五百元）→删除清理
-  - 终验：后端 uv run pytest 83 passed；前端 build 通过；Markdown 渲染截图复验
-- 已记录证据：feature_list.json FE-002~010 全部 passing（附各项验证细节）
-- 提交记录：7f6a3b9、4009527、06e0168、2fcc092、10b0664、a531eb0、870f6b0、fd7a0bb、本轮收尾提交
-- 已知风险或未解决问题：
-  - Ollama qwen3.5:4b 首 token 延迟约 30~40s（本机 CPU 推理），回答期间 UI 有状态提示但体验依赖模型速度
-  - 前端依赖较新（Vite 8/TS 7/React 19），生态兼容问题留意
-  - 深色主题为 token 自动切换，未做浏览器强制暗色截图（结构同源，风险低）
-- 下一步最佳动作：可选产品化增强（会话重命名、回答停止按钮、深色主题手动开关、部署收敛 CORS）
-
-### Session 013（FE-001 前端项目基础框架）
-- 日期：2026-09-06
-- 本轮目标：FE-001 在 frontend/ 建立 React + TS + Vite + Tailwind + React Router 基础框架
-- 技术决策：
-  - 手写脚手架而非 create-vite 模板：文件全部带中文注释，结构与后续 FE 对齐（pages/api/components/types 预留目录 + .gitkeep）
-  - Tailwind CSS v4（@tailwindcss/vite 插件 + 单行 @import），无 tailwind.config；dev 经 Vite 代理 /api → 127.0.0.1:8000，前端代码只用相对路径，规避开发期 CORS
-  - build 脚本为 tsc --noEmit && vite build（类型检查前置）；React Router 用最直白的 BrowserRouter/Routes/Route 写法（0 基础友好）
-  - 踩坑：TS7 对 CSS 副作用导入报 TS2882，补 Vite 标准 vite-env.d.ts 解决
-- 运行过的验证：
-  - npm install 成功（React 19.2 / Router 7.18 / Tailwind 4.3 / Vite 8.2 / TS 7.0，0 漏洞）
-  - npm run build 通过（类型检查 + 152ms 打包）；dist CSS 含按需生成的 Tailwind 工具类
-  - npm run dev 启动 292ms ready；curl / → 200 且 title/挂载点正确
-  - 真实后端启动后 curl /api/health 经代理返回 {"status":"ok"}，后端访问日志确认 200
-- 提交记录：本轮提交
-- 下一步最佳动作：FE-002 前端 API 与状态基础层
-
-### Session 012（前端 feature 清单评审与修订）
-- 日期：2026-09-06
-- 内容：前端开工前评审 feature_list.json FE-001~010 的适合性、准确性、全面性（逐条对照 PRODUCT.md、ARCHITECTURE.md 第 7 节 API 契约与后端实际路由/DTO）
-  - 发现并修复真实缺口：PRODUCT.md 要求知识库管理"查看文档名称、删除文档"，FE-008 原定义只有上传与状态反馈 → 补入侧边栏切换入口、文档列表展示（名称/大小/状态）、文档删除；FE-009 联调闭环同步补"文档删除"
-  - 精度修订：FE-001 锚定 frontend/ 目录；FE-002 明确类型定义范围（统一错误结构 {code,message}、SSE 事件）并锁定轻量状态管理（hooks/Context）
-  - 其余 FE-003~007、FE-010 与 PRODUCT.md 及后端 SSE 协议（delta/done/error）逐条吻合，未改动
-- 基线验证：uv run pytest → 83 passed；后端 9 个端点与 ARCHITECTURE.md 第 7 节一致；feature_list.json JSON 校验通过
-- 提交记录：本轮提交
-
-### Session 011（四层测试验证 + 文档与清单整合）
-- 日期：2026-09-06
-- 内容：
-  - 四层测试全部真实验证通过：单元 37 / 集成 39 / 接口 7（自动化合计 83）+ 端到端真实链路（真实 uvicorn + 专利法上传入库 + 流式 RAG 问答引用第四十二条 + 持久化）
-  - ARCHITECTURE.md 全面整合：530 行/30 节 → 238 行/10 节（删重复实现叙述，补端口清单、边界守护、四层测试体系、扩展点）
-  - feature_list.json 后端 11 项 description/evidence 同步至演进后事实；并做过 62 项声明的机械审计（62/62 通过），审计脚本按用户决定删除（f46352c）
-  - qa_workflow.py 加 @runtime_checkable 与装配守卫测试
-- 提交记录：48f5596、21ca7ef、15ad5f5、b3bb4bc、f46352c
-
-### Session 010（DDD 合规整改 + agent OOP + langgraph 隔离）
-- 日期：2026-09-06
-- 内容：
-  - AST 机械扫描发现并修复 3 处违例：Database 端口迁至 domain/repositories/database.py；新增 QaWorkflow 领域端口（QaWorkflow Protocol，ChatService 解除 langgraph 依赖）；application 对 infrastructure 的反向导入清零
-  - app/agent/ 确立为 langgraph 唯一隔离区：create_qa_workflow 工厂唯一入口 + OOP 重构（AgentNode 命令模式/QaGraphBuilder 建造者/LangGraphQaWorkflow 适配器）
-  - 新增 tests/unit/test_ddd_boundaries.py（4 项 AST 边界守护随 pytest 运行）
-  - ARCHITECTURE.md 同步端口清单、隔离区规则、OOP 结构
-- 提交记录：f9c2cb5、9bf599a、675ec72、46f391b
-- 测试状态：全量 83 passed（unit 37 + integration 46）
-
-### 补记（Session 007 之后、008 之前的一轮，未及时登记）
-- 提交 5b375bf：BE-010 GLM 真实调用补验通过（glm-4.5-air）；BE-012 用真实《专利法》TXT+MD 复验并修复定长切分截断法条的缺陷（chunk_text 改段落感知）；修复相对路径随启动目录漂移（settings 锚定 resolved_*）；停止跟踪运行时数据（data/、backend/data/）；收录用户改动（md 格式支持、tests/data_source 测试数据）
-
-### Session 009
-- 日期：2026-09-06
-- 本轮目标：所有 LLM 问答统一走 LangGraph 图（应用户要求）
-- 技术决策：generate 节点内经 get_stream_writer() 推送 token；非流式 ainvoke、流式 astream(stream_mode=custom) 执行同一节点；ChatService 精简为（会话服务 + 图），不再直接依赖 RAG/LLM——检索与 Prompt 组装只在图内一份实现
-- 运行过的验证：全量 pytest 77 passed（新增 2 个 astream custom 用例）；真实服务器 E2E：专利法提问 SSE 55 个 delta 经图产出，回答引用第四十二条，消息持久化正常
-- 提交记录：本轮提交
-
-### Session 008
-- 日期：2026-09-06
-- 本轮目标：后端全面检查 + 测试分层重组 + 完整测试
-- 已完成：
-  - 移除空占位包（agent/nodes、agent/tools、application/dto）；清理测试未用导入
-  - 测试分层：tests/unit/（33 个，纯逻辑无外部 IO）+ tests/integration/（42 个，真实 SQLite/Chroma/Mock/完整应用）
-  - pyproject 增加 pytest testpaths；ChatService.send_message 保留（非流式入口，LangGraph 图唯一运行时消费者，暂无路由调用）
-- 运行过的验证：unit 33 + integration 42 = 75 passed；启动 smoke 通过
-- 提交记录：4be634b
-
-### Session 007
-- 日期：2026-09-06
-- 本轮目标：完成后端全部剩余功能（BE-014 ~ BE-022）
-- 技术决策：
-  - BE-014：RagService + build_context（含来源标注，空结果返回空串衔接"信息不足"策略）；新增 min_score 相似度阈值。
-  - BE-015/016：LangGraph StateGraph（START→retrieve?→generate→END），Agent 仅依赖 LLMProvider 抽象；Prompt 组装集中于 agent/prompts.py。
-  - BE-017：LEGAL_SYSTEM_PROMPT 三条硬规则（依据知识库并注明来源/无依据明确声明/严禁虚构法条）。
-  - BE-018：ConversationService 统一会话业务（缺失会话统一异常，级联删除）。
-  - BE-019~021：API 全异步、路由只调 Service、统一错误结构 {code,message}；ChatService 流式"完成才持久化"；DocumentService 状态机 processing→ready/failed。
-  - 修复的真实缺陷：日志 extra 误用 LogRecord 保留字段（message/filename）使业务 404 变 500；API 测试改在 LOG_LEVEL=INFO 下运行以覆盖此类问题。
-- 已完成：RAG 检索、LangGraph 双工作流、回答策略、对话服务、全部 REST/SSE API、统一异常体系
-- 运行过的验证：
-  - `uv run pytest tests -q` → 75 passed 全量通过
-  - 真实 RAG 端到端（nomic-embed-text + Chroma + qwen3.5:4b）：有依据答"试用期不超过六个月"并引用来源；无关问题明确声明信息不足
-  - 真实 uvicorn：会话创建/40401 统一结构/TXT 上传入库 ready/bad.exe 40001 全部正确
-- 已记录证据：feature_list.json BE-014~022 evidence
-- 提交记录：7d472e0 (BE-014)、2289115 (BE-015/016/017)、d1ab058 (BE-018)、e0eb5e7 (BE-019~022)
-- 已知风险或未解决问题：BE-010 GLM 真实调用待密钥；前端（FE-001~010）未开始
-- 下一步最佳动作：前端 FE-001 前端项目基础框架；或提供 GLM_API_KEY 后补验 BE-010
-
-### Session 005
-- 日期：2026-09-06
-- 本轮目标：BE-009 ~ BE-013（用户指定"完成 5 个 feature"）
-- 技术决策：
-  - BE-009：LLMProvider 抽象（chat 同步 + stream 异步生成器 + model_name）；ChatMessage 复用 MessageRole。
-  - BE-010：Ollama（NDJSON 流）与 GLM（OpenAI 兼容 + SSE 流）实现；Provider 构造函数支持 httpx transport 注入作为测试接缝；glm 缺密钥时装配即报错。
-  - BE-011：解析器策略接口（domain/services）+ Pipeline 编排（application），解析经 to_thread；TextParser 多编码回退（utf-8/gb18030/big5）。
-  - BE-012：PdfParser（pypdf 逐页提取）；损坏 PDF 与无文本层 PDF 均明确报错；测试用 fpdf2 生成真实 PDF。
-  - BE-013：EmbeddingService 抽象 + OllamaEmbeddingService（/api/embed 批量）+ KnowledgeIngestionService 入库编排；新增 OLLAMA_EMBEDDING_MODEL 配置。
-  - 教训：uv pip install 进 venv 的包必须同步写入 pyproject，否则 uv sync 会将其移除（pypdf 曾被剥离，已修复）。
-- 已完成：LLM 抽象与双实现、文档 Pipeline、PDF/TXT 解析、Embedding 与入库编排、容器装配齐备
-- 运行过的验证：
-  - `uv run pytest tests -q` → 53 passed 全量通过
-  - Ollama 真实调用：chat 与流式问答通过（qwen3.5:9b，经 OLLAMA_MODEL 覆盖；scripts/verify_ollama_stream.py）
-  - 知识库入库端到端：真实 Chroma + 确定性 embedding，检索命中带 metadata 的 chunk、按 document_id 删除
-  - 真实启动：Database/VectorStore 初始化日志正常，curl /api/health → ok
-- 已记录证据：feature_list.json BE-009/011/012 = passing；BE-010/BE-013 = in_progress（环境阻塞见下）
-- 提交记录：41aed90 (BE-009)、2de5486 (BE-010)、075a736 (BE-011)、8b393bf+9def484 (BE-012)、e395422 (BE-013)
-- 已知风险或未解决问题：
-  - BE-010 剩余：GLM 真实调用需配置 GLM_API_KEY 后补验
-  - BE-013 已补验通过（Session 006）：真实 nomic-embed-text 向量端到端入库检索成功；此前"模型不存在/服务不支持 embeddings"的判断有误——第一次查 /api/tags 时输出被截断导致漏判，且当时服务状态不同；教训：结论前必须完整读取输出
-- 下一步最佳动作：BE-014 RAG 检索服务
-
-### Session 006
-- 日期：2026-09-06
-- 本轮目标：应用户要求将全项目 embedding 模型改为 nomic-embed-text:latest，并核实模型可用性
-- 技术决策：对话模型 OLLAMA_MODEL 保持 qwen3.5:4b 不变，仅改 OLLAMA_EMBEDDING_MODEL
-- 已完成：settings.py 与 .env.example 更新；BE-013 真实向量端到端补验；新增 scripts/verify_real_embedding.py
-- 运行过的验证：pytest 53 passed；真实链路 DocumentPipeline→OllamaEmbedding(nomic-embed-text, 768 维)→Chroma，语义检索命中（score 0.6207）
-- 提交记录：5e27b76（配置）、本轮 BE-013 置 passing 提交
-- 下一步最佳动作：BE-014 RAG 检索服务
-
-### Session 004
-- 日期：2026-09-06
-- 本轮目标：BE-006 / BE-007 / BE-008（用户指定"完成 3 个 feature"，中途因会话中断恢复续做）
-- 技术决策：
-  - BE-006：DocumentChunk/RetrievedChunk 数据契约；VectorStore 抽象含 initialize/close 生命周期；embedding 由调用方传入，向量库与 embedding 模型彻底解耦。
-  - BE-007：chromadb PersistentClient + law_chunks 集合（cosine 空间，score=1-distance）；所有阻塞调用经 asyncio.to_thread 包装；不使用内置 embedding 函数。
-  - BE-008：MilvusVectorStore 骨架调用即抛明确 NotImplementedError（拒绝静默空结果）；容器工厂按 VECTOR_STORE_PROVIDER 分支，向量库初始化接入 lifespan。
-- 已完成：VectorStore 抽象与契约测试、Chroma 实现、Milvus 骨架、容器工厂与 lifespan 接入
-- 运行过的验证：
-  - `uv run pytest tests -q` → 28 passed（Chroma 4：写入检索/删除隔离/跨连接持久化/幂等；工厂 3：chroma 解析/milvus 解析/明确报错）
-  - 真实启动：日志 "VectorStore initialized (provider: chroma)"，curl /api/health → ok
-  - VECTOR_STORE_PROVIDER=milvus 时 initialize 抛出明确 NotImplementedError（早暴露设计生效）
-- 已记录证据：feature_list.json BE-006/BE-007/BE-008 evidence
-- 提交记录：7d96fe8 (BE-006)、9aa3ece (BE-007)、664d8f4 (BE-008)
-- 已知风险或未解决问题：chroma 依赖较重（安装体积大），启动耗时略有增加；其余无
-- 下一步最佳动作：BE-009 LLM Provider 抽象层（Ollama/GLM 前置）
-
-### Session 003
-- 日期：2026-09-06
-- 本轮目标：BE-003 / BE-004 / BE-005（用户指定"完成 3 个 feature"）
-- 技术决策：
-  - BE-003：自研轻量 DIContainer（接口注册工厂+单例），不引入 DI 框架；containers.py 为唯一装配点，挂载到 app.state.container。
-  - BE-004：领域实体用纯 dataclass（零技术依赖）；Repository 接口在 domain 层；Database 抽象含 transaction() 事务上下文。
-  - BE-005：aiosqlite 实现；提交边界由 Database 层统一控制（_tx_depth 计数），仓库不自行 commit——测试暴露了"仓库自动提交破坏外层事务回滚"的真实缺陷后修正。
-  - 本机环境备注：Ollama 已运行（本机现装有 qwen3.5:9b）；Ollama 默认模型配置已于后续提交改为 qwen3.5:4b（BE-010 验证前需确认该模型已拉取）；GLM_API_KEY 未设置。
-- 已完成：DI 容器与装配点、领域实体与 Repository 接口、Database 抽象、SQLite 实现、lifespan 自动建库
-- 运行过的验证：
-  - `uv run pytest tests -q` → 18 passed（DI 4 + 数据库抽象 4 + SQLite 6 + 健康检查 1 + 配置 4，共 18；其中 SQLite 含持久化/级联/事务回滚/幂等）
-  - 真实启动：删除 data/law_agent.db 后启动自动建库，日志 "Database initialized"，curl /api/health → ok
-- 已记录证据：feature_list.json BE-003/BE-004/BE-005 evidence
-- 提交记录：1b0b9a8 (BE-003)、942b4d6 (BE-004)、本轮 BE-005 提交
-- 更新过的文件或工件：docs/ARCHITECTURE.md（第 15-17 节）、app/common/di.py、app/containers.py、app/main.py、domain/entities/**、domain/repositories/**、infrastructure/database/**、tests/**、pyproject.toml（aiosqlite）、进度三件套
-- 已知风险或未解决问题：
-  - 开发中发现 shell 中 `cd && uv run pytest` 复合命令偶发挂起，改用 python 内部 os.chdir 后稳定（不影响项目本身）
-- 下一步最佳动作：BE-006 向量数据库抽象层（Chroma/Milvus 前置）
-
-### Session 002
-- 日期：2026-09-06
-- 本轮目标：BE-002 后端配置管理
-- 技术决策：
-  - 配置统一走 pydantic-settings（`backend/app/config/settings.py`），业务代码通过 `get_settings()`（lru_cache 单例）读取，禁止散读环境变量。
-  - 三个 Provider（DB/向量库/LLM）用 str Enum 表达，非法取值在启动时即被 pydantic 拒绝。
-  - 敏感配置 GLM_API_KEY 只从环境变量注入，不落盘、不进日志；提供 `.env.example` 模板，真实 `.env` 由 gitignore 排除。
-  - 启动时以结构化日志输出当前生效的 Provider（仅名称，无密钥）。
-- 已完成：Settings 配置体系、Provider 枚举、.env.example、main.py 启动配置日志、4 个配置测试
-- 运行过的验证：
-  - `uv run pytest tests -q` → 5 passed
-  - 真实启动：日志 `"Application configured", data={db_provider: sqlite, vector_store_provider: chroma, llm_provider: ollama}`，`curl /api/health` → ok
-  - 环境变量切换 smoke：`DB_PROVIDER=mysql VECTOR_STORE_PROVIDER=milvus LLM_PROVIDER=glm` 启动后日志显示三者已切换，业务代码零修改
-- 已记录证据：见 feature_list.json BE-002 evidence
-- 提交记录：feat: BE-002 unified configuration management
-- 更新过的文件或工件：docs/ARCHITECTURE.md（新增第 14 节）、backend/app/config/settings.py、backend/app/main.py、backend/.env.example、backend/tests/test_settings.py、progress.md、feature_list.json、session-handoff.md、clean-state-checklist.md
-- 已知风险或未解决问题：无
-- 下一步最佳动作：BE-003 后端分层与依赖注入架构
-
-### Session 001
-- 日期：2026-09-06
-- 本轮目标：BE-001 后端项目基础框架
-- 技术决策：
-  - 按 ARCHITECTURE.md 将 pyproject.toml 从仓库根目录移至 `backend/`（根目录原为空占位文件），`.venv` 与 `uv.lock` 均位于 backend 内。
-  - Python 锁定为 `>=3.11,<3.12`（uv 已安装 cpython 3.11.15）。
-  - 结构化 JSON 日志在 `backend/app/common/logging.py` 统一实现，uvicorn 自身日志也归一为 JSON；`LOG_LEVEL` 默认 ERROR。
-  - 应用入口采用 `create_app()` 工厂函数，为后续按配置装配 Provider 留扩展点。
-  - 本轮只建立模块边界（api/application/domain/infrastructure/agent/config/common），未提前实现 BE-002 配置管理。
-- 已完成：backend 骨架、FastAPI 入口 + /api/health、结构化日志、健康检查测试
-- 运行过的验证：
-  - `uv sync` 成功（fastapi 0.48+ / uvicorn 0.52.4 等）
-  - `uv run pytest tests -q` → 1 passed
-  - `LOG_LEVEL=INFO uv run uvicorn app.main:app ...` 真实启动成功，`curl /api/health` → `{"status":"ok"}`
-  - 日志输出为单行 JSON：`{"timestamp": ..., "level": "INFO", "service": "system", "message": "Health check requested"}`
-- 已记录证据：见 feature_list.json BE-001 evidence
-- 提交记录：见 git log（feat: BE-001 backend base framework）
-- 更新过的文件或工件：docs/ARCHITECTURE.md（新增第 13 节）、backend/**、progress.md、feature_list.json、session-handoff.md、clean-state-checklist.md、删除根 pyproject.toml
-- 已知风险或未解决问题：无
-- 下一步最佳动作：BE-002 后端配置管理（pydantic-settings 统一配置入口 + Provider 切换）

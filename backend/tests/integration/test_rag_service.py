@@ -1,7 +1,8 @@
 """RAG 检索服务测试。
 
-端到端使用真实 Chroma + 确定性 embedding：证明检索服务在真实
-向量库上按语义命中入库内容，且上下文构建带来源标注。
+用内存 Fake（遵循 VectorStore 混合检索契约）验证 RagService 的编排
+行为：检索命中、来源标注、无命中空串；真实 Milvus 上的混合检索
+行为由 test_milvus_vector_store.py 覆盖。
 """
 
 import hashlib
@@ -14,7 +15,7 @@ from app.application.services.knowledge_service import KnowledgeIngestionService
 from app.application.services.rag_service import RagService
 from app.domain.services.embedding import EmbeddingService
 from app.infrastructure.document_parser.text_parser import TextParser
-from app.infrastructure.vector_store.chroma import ChromaVectorStore
+from tests.fakes import InMemoryVectorStore
 
 
 class DeterministicEmbedding(EmbeddingService):
@@ -38,9 +39,9 @@ class DeterministicEmbedding(EmbeddingService):
 
 
 @pytest_asyncio.fixture
-async def rag_service(tmp_path) -> RagService:
-    """真实 Chroma + 预置劳动法知识的检索服务。"""
-    store = ChromaVectorStore(str(tmp_path / "chroma"))
+async def rag_service() -> RagService:
+    """内存 Fake 向量库 + 预置劳动法知识的检索服务。"""
+    store = InMemoryVectorStore()
     await store.initialize()
     embedding = DeterministicEmbedding()
     ingestion = KnowledgeIngestionService(
@@ -77,9 +78,9 @@ async def test_build_context_includes_source_label(rag_service: RagService) -> N
 
 
 @pytest.mark.asyncio
-async def test_build_context_empty_when_no_hit(tmp_path) -> None:
+async def test_build_context_empty_when_no_hit() -> None:
     """知识库无相关内容时应返回空串，供上层走"信息不足"策略。"""
-    store = ChromaVectorStore(str(tmp_path / "empty_chroma"))
+    store = InMemoryVectorStore()
     await store.initialize()
     service = RagService(DeterministicEmbedding(), store)
     try:

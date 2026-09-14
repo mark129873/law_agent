@@ -7,7 +7,12 @@
 
 from __future__ import annotations
 
+from typing import Callable
+
 from app.agent import create_qa_workflow
+from app.agent.config import AgentConfig
+from app.agent.services.reranker_service import CrossEncoderScorer, RerankerService
+from app.agent.subgraphs.legal_rag.config import LegalRAGConfig
 from app.application.services.chat_service import ChatService
 from app.application.services.conversation_service import ConversationService
 from app.application.services.document_pipeline import DocumentParserFactory, DocumentPipeline
@@ -15,10 +20,11 @@ from app.application.services.document_service import DocumentService
 from app.application.services.knowledge_service import KnowledgeIngestionService
 from app.application.services.rag_service import RagService
 from app.common.di import DIContainer
-from app.config.settings import Settings, get_settings
+from app.config.settings import PlannerProvider, Settings, VectorStoreProvider, get_settings
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
 from app.domain.services.embedding import EmbeddingService
+from app.domain.services.trace_sink import TraceSink
 from app.domain.repositories.database import Database
 from app.infrastructure.database.sqlalchemy.database import SQLAlchemyDatabase, sqlite_url
 from app.infrastructure.document_parser.pdf_parser import PdfParser
@@ -26,7 +32,7 @@ from app.infrastructure.document_parser.text_parser import TextParser
 from app.infrastructure.embedding.ollama_embedding import OllamaEmbeddingService
 from app.infrastructure.llm.glm import GLMProvider
 from app.infrastructure.llm.ollama import OllamaProvider
-from app.infrastructure.vector_store.chroma import ChromaVectorStore
+from app.infrastructure.trace.langfuse_sink import LangfuseTraceSinkFactory
 from app.infrastructure.vector_store.milvus import MilvusVectorStore
 
 
@@ -50,16 +56,12 @@ def _build_database(settings: Settings) -> Database:
 
 
 def _build_vector_store(settings: Settings) -> VectorStore:
-    """按配置构造向量库实现（工厂函数，BE-008）。
+    """按配置构造向量库实现（工厂函数，BE-029）。
 
-    为什么骨架也纳入工厂：VECTOR_STORE_PROVIDER=milvus 时装配成功、
-    使用时才报"未实现"，这样 Provider 的表达能力与 Chroma 完全一致，
-    未来 Milvus 落地只改本函数的一行分支。
+    为什么工厂仍然保留：未来接入其他向量库 Provider 时只需在此
+    增加分支，业务代码与分层结构不动。
     """
-    if settings.vector_store_provider.value == "chroma":
-        # 使用锚定后的绝对路径，避免进程工作目录影响数据位置
-        return ChromaVectorStore(settings.resolved_chroma_persist_dir)
-    if settings.vector_store_provider.value == "milvus":
+    if settings.vector_store_provider == VectorStoreProvider.MILVUS:
         return MilvusVectorStore(settings.milvus_uri)
     raise NotImplementedError(f"向量库 Provider '{settings.vector_store_provider.value}' 尚未实现")
 
@@ -78,6 +80,27 @@ def _build_llm_provider(settings: Settings) -> LLMProvider:
     raise NotImplementedError(f"大模型 Provider '{settings.llm_provider.value}' 尚未实现")
 
 
+def _build_planner(settings: Settings, container: DIContainer) -> LLMProvider:
+    """按配置构造规划器（工厂函数，BE-030）。
+
+    follow=复用主 LLM Provider 实例（零额外连接）；
+    ollama/glm=按主 Provider 的连接配置构造独立实例，
+    模型名可用 PLANNER_MODEL 单独覆盖。
+    为什么规划器可能用不同模型：任务分解对模型能力最敏感，
+    本地小模型规划质量不稳，强模型规划 + 快模型执行是常见组合。
+    """
+    if settings.planner_provider == PlannerProvider.FOLLOW:
+        return container.resolve(LLMProvider)
+    model = settings.planner_model  # 空串由各分支回退到该 Provider 默认模型
+    if settings.planner_provider == PlannerProvider.OLLAMA:
+        return OllamaProvider(settings.ollama_base_url, model or settings.ollama_model, settings.llm_enable_thinking)
+    if settings.planner_provider == PlannerProvider.GLM:
+        if not settings.glm_api_key:
+            raise ValueError("PLANNER_PROVIDER=glm 但未配置 GLM_API_KEY 环境变量")
+        return GLMProvider(settings.glm_base_url, settings.glm_api_key, model or settings.glm_model, settings.llm_enable_thinking)
+    raise NotImplementedError(f"规划器 Provider '{settings.planner_provider.value}' 尚未实现")
+
+
 def _build_document_pipeline(settings: Settings) -> DocumentPipeline:
     """构造文档处理 Pipeline：注册全部已实现的解析器策略。"""
     return DocumentPipeline(
@@ -88,6 +111,35 @@ def _build_document_pipeline(settings: Settings) -> DocumentPipeline:
 def _build_embedding_service(settings: Settings) -> EmbeddingService:
     """按配置构造向量生成服务（当前实现：Ollama）。"""
     return OllamaEmbeddingService(settings.ollama_base_url, settings.ollama_embedding_model)
+
+
+def _build_reranker(settings: Settings) -> RerankerService:
+    """构造统一重排服务（BE-033）。
+
+    为什么构造时不加载模型：CrossEncoderScorer 懒加载——首次 rerank
+    才读本地模型，装配阶段零开销；加载失败在检索侧降级 RRF 序。
+    RERANK_ENABLED=false 时整体降级（CPU 无 CUDA 部署的可行性开关）。
+    """
+    return RerankerService(
+        CrossEncoderScorer(settings.reranker_model_path, settings.reranker_device),
+        enabled=settings.rerank_enabled,
+    )
+
+
+def _build_trace_sink_factory(settings: Settings) -> Callable[[], TraceSink | None] | None:
+    """按配置构造 trace 汇工厂（BE-043）。
+
+    关闭（默认）返回 None：ChatService 不构造任何观测实现，langfuse
+    模块零导入零开销；开启但缺密钥时工厂内部 WARN 降级为恒 None
+    （可观测故障不阻断业务，见 infrastructure/trace/langfuse_sink.py）。
+    """
+    if not settings.langfuse_enabled:
+        return None
+    return LangfuseTraceSinkFactory(
+        base_url=settings.langfuse_base_url,
+        public_key=settings.langfuse_public_key,
+        secret_key=settings.langfuse_secret_key,
+    )
 
 
 def create_container(settings: Settings | None = None) -> DIContainer:
@@ -102,7 +154,7 @@ def create_container(settings: Settings | None = None) -> DIContainer:
     container.register(Settings, lambda c: settings, singleton=True)
     # 数据库：按 DB_PROVIDER 配置注册对应实现（BE-005）
     container.register(Database, lambda c: _build_database(settings), singleton=True)
-    # 向量库：按 VECTOR_STORE_PROVIDER 配置注册对应实现（BE-006~008）
+    # 向量库：Milvus（稠密 + 稀疏 BM25 混合检索，BE-029）
     container.register(VectorStore, lambda c: _build_vector_store(settings), singleton=True)
     # 大模型：按 LLM_PROVIDER 配置注册对应实现（BE-010）
     container.register(LLMProvider, lambda c: _build_llm_provider(settings), singleton=True)
@@ -118,9 +170,15 @@ def create_container(settings: Settings | None = None) -> DIContainer:
         ),
         singleton=True,
     )
-    # 业务服务（BE-014/018/019/020/021）
+    # 业务服务（BE-014/018/019/020/021/029）
     container.register(ConversationService, lambda c: ConversationService(c.resolve(Database)), singleton=True)
-    container.register(RagService, lambda c: RagService(c.resolve(EmbeddingService), c.resolve(VectorStore)), singleton=True)
+    container.register(
+        RagService,
+        lambda c: RagService(c.resolve(EmbeddingService), c.resolve(VectorStore)),
+        singleton=True,
+    )
+    # 统一重排服务（BE-033：本地 MiniLM CrossEncoder，懒加载）
+    container.register(RerankerService, lambda c: _build_reranker(settings), singleton=True)
     container.register(
         DocumentService,
         lambda c: DocumentService(
@@ -135,8 +193,19 @@ def create_container(settings: Settings | None = None) -> DIContainer:
         ChatService,
         lambda c: ChatService(
             conversation_service=c.resolve(ConversationService),
-            # 唯一的问答执行体：经 agent 包工厂构建，langgraph 类型不外泄
-            qa_graph=create_qa_workflow(c.resolve(LLMProvider), rag=c.resolve(RagService)),
+            # 唯一的问答执行体：经 agent 包工厂构建，langgraph 类型不外泄；
+            # 一期重写后依赖端口组合（LLM + Embedding + VectorStore + Reranker）
+            qa_graph=create_qa_workflow(
+                c.resolve(LLMProvider),
+                embedding=c.resolve(EmbeddingService),
+                vector_store=c.resolve(VectorStore),
+                planner=_build_planner(settings, c),
+                reranker=c.resolve(RerankerService),
+                agent_config=AgentConfig(),
+                rag_config=LegalRAGConfig(),
+            ),
+            # Langfuse trace 汇工厂（BE-043）：按 LANGFUSE_ENABLED 注入，关闭为 None
+            trace_sink_factory=_build_trace_sink_factory(settings),
         ),
         singleton=True,
     )

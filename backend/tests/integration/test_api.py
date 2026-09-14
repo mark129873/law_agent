@@ -1,6 +1,6 @@
 """API 层集成测试（BE-019/020/021/022）。
 
-测试环境：临时 SQLite + 临时 Chroma + Fake LLM/Embedding；
+测试环境：临时 SQLite + 内存 Fake 向量库 + Fake LLM/Embedding；
 覆盖统一错误结构、会话 CRUD、SSE 流式协议、文档上传入库与删除。
 """
 
@@ -11,21 +11,35 @@ from typing import AsyncIterator
 import pytest
 from fastapi.testclient import TestClient
 
-from app.application.services.rag_service import RagService
 from app.containers import create_container
 from app.config.settings import Settings
 from app.domain.entities.llm import ChatMessage, LlmParams
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
+from tests.fakes import InMemoryVectorStore
 from app.domain.services.embedding import EmbeddingService
 from app.main import create_app
 
 
 class ScriptedLLM(LLMProvider):
-    """脚本化 Fake LLM：chat 返回固定答案，stream 按词产出。"""
+    """脚本化 Fake LLM：按系统提示特征分流（BE-038 一期主图适配）。
 
-    def __init__(self, answer: str = "依据知识库：试用期最长不超过六个月。") -> None:
+    - 顶层编排器：首次输出 local_rag（进检索），其后为空（默认 finish）；
+    - 其余 chat 节点（意图路由/检索规划/证据评估/grounding 判分）返回空串，
+      各节点走各自的安全默认（路由默认 legal_question、规划默认仅原始问题、
+      评估默认不充分、判分默认放行）；
+    - 生成节点走 stream，输出 answer 属性的文本（可按用例替换）。
+    """
+
+    _ORCHESTRATOR_MARKER = "顶层编排器"
+    _GRADER_SUFFICIENT = (
+        '{"sufficient": true, "confidence": 0.9, "local_recovery_possible": false, '
+        '"missing_evidence": [], "conflicts": [], "suggested_external_queries": [], "reason": "证据齐全"}'
+    )
+
+    def __init__(self, answer: str = "知识库中暂无相关依据，建议咨询专业律师。") -> None:
         self._answer = answer
+        self._orchestrator_scripts = ['{"action": "local_rag", "reason": "需要知识库"}']
         self.received_messages: list[list[ChatMessage]] = []
 
     @property
@@ -34,7 +48,12 @@ class ScriptedLLM(LLMProvider):
 
     async def chat(self, messages: list[ChatMessage], params: LlmParams | None = None) -> str:
         self.received_messages.append(messages)
-        return self._answer
+        system = messages[0].content
+        if self._ORCHESTRATOR_MARKER in system:
+            return self._orchestrator_scripts.pop(0) if self._orchestrator_scripts else ""
+        if "证据评估器" in system:
+            return self._GRADER_SUFFICIENT  # 单轮检索即收尾（不触发恢复循环）
+        return ""  # 其余节点走安全默认
 
     async def stream(self, messages: list[ChatMessage], params: LlmParams | None = None) -> AsyncIterator[str]:
         self.received_messages.append(messages)
@@ -71,21 +90,24 @@ def client(tmp_path):
     """
     settings = Settings(
         sqlite_db_path=str(tmp_path / "api.db"),
-        chroma_persist_dir=str(tmp_path / "chroma"),
         log_dir=str(tmp_path / "log"),
         log_level="INFO",
+        # 显式关闭 Langfuse：隔离 pymilvus load_dotenv 把 .env 灌入环境变量的
+        # 副作用（LANGFUSE_ENABLED=true 泄漏会让接口测试触真实观测平台）
+        langfuse_enabled=False,
         _env_file=None,
     )
     app = create_app(settings)
     container = app.state.container
     llm = ScriptedLLM()
-    # 在启动前替换 LLM 与 Embedding/RAG 检索（避免测试触网）：
-    # 入库（KnowledgeIngestionService）与检索（RagService）必须用同一个
-    # 确定性 embedding，否则向量维度不一致会导致检索报错（曾踩坑）
+    # 在启动前替换 LLM / Embedding / 向量库（避免测试触网与依赖外部 Milvus）：
+    # 入库（KnowledgeIngestionService）与 Agent 检索（MilvusService）必须用
+    # 同一个确定性 embedding，否则向量维度不一致会导致检索报错（曾踩坑）
     embedding = DeterministicEmbedding()
+    store = InMemoryVectorStore()
     container.register(LLMProvider, lambda c: llm)
     container.register(EmbeddingService, lambda c: embedding)
-    container.register(RagService, lambda c: RagService(embedding, c.resolve(VectorStore)))
+    container.register(VectorStore, lambda c: store)
 
     with TestClient(app) as test_client:
         test_client.llm = llm  # type: ignore[attr-defined]
@@ -120,7 +142,7 @@ def test_messages_and_delete(client: TestClient) -> None:
 
 
 def test_chat_stream_sse_protocol(client: TestClient) -> None:
-    """SSE 协议：delta 事件增量到达，done 收尾，完整回答已持久化。
+    """SSE 协议：plan 先行、delta 事件增量到达，done 收尾，完整回答已持久化。
 
     知识库为空（未上传文档）：不应出现 sources 事件——这是
     "无检索命中 → 无参考文档"的协议契约。
@@ -138,25 +160,31 @@ def test_chat_stream_sse_protocol(client: TestClient) -> None:
                 events.append(json.loads(line[len("data: "):]))
 
     assert events[-1]["type"] == "done"
-    assert all(e["type"] != "sources" for e in events)  # 空知识库无来源事件
-    deltas = [e["content"] for e in events if e["type"] == "delta"]
-    assert "".join(deltas) == "依据知识库：试用期最长不超过六个月。"
+    # status/think 过程事件（BE-041/BE-042）与业务事件交织，业务断言过滤后进行
+    assert any(e["type"] == "status" and e["phase"] == "start" for e in events)
+    business_events = [e for e in events if e["type"] not in ("status", "think")]
+    assert business_events[0]["type"] == "plan"  # BE-030：规划事件先行
+    assert business_events[0]["sub_queries"] == ["试用期多长？"]
+    deltas = [e["content"] for e in business_events if e["type"] == "delta"]
+    assert "".join(deltas) == "知识库中暂无相关依据，建议咨询专业律师。"
 
     # 流结束后回答必须已持久化；无检索命中 → 来源为 null
     messages = client.get(f"/api/conversations/{conversation_id}/messages").json()
     assert [m["role"] for m in messages] == ["user", "assistant"]
-    assert messages[1]["content"] == "依据知识库：试用期最长不超过六个月。"
+    assert messages[1]["content"] == "知识库中暂无相关依据，建议咨询专业律师。"
     assert messages[1]["sources"] is None
 
 
 def test_chat_stream_emits_sources_and_persists_them(client: TestClient) -> None:
-    """RAG 检索有命中：sources 事件先于 delta 出现，且随回答持久化可回读。"""
+    """RAG 检索有命中：plan→sources→delta 顺序出现，且随回答持久化可回读。"""
     # 上传文档入知识库（测试容器的 RagService 使用确定性 embedding，不触网）
     upload = client.post(
         "/api/documents",
         files={"file": ("劳动法.txt", "劳动合同违约金条款：违反服务期约定应支付违约金。".encode("utf-8"))},
     )
     assert upload.status_code == 201
+    # 有依据场景的生成答案须满足校验契约（注明来源），否则 verify 会打回重生成
+    client.llm._answer = "依据知识库：试用期最长不超过六个月。【来源：劳动法.txt】"  # type: ignore[attr-defined]
 
     conversation_id = client.post("/api/conversations", json={"title": "来源流"}).json()["id"]
     with client.stream(
@@ -168,11 +196,13 @@ def test_chat_stream_emits_sources_and_persists_them(client: TestClient) -> None
             if line.startswith("data: "):
                 events.append(json.loads(line[len("data: "):]))
 
-    sources_events = [e for e in events if e["type"] == "sources"]
+    # status/think 过程事件（BE-041/BE-042）与业务事件交织，业务断言过滤后进行
+    business_events = [e for e in events if e["type"] not in ("status", "think")]
+    sources_events = [e for e in business_events if e["type"] == "sources"]
     assert len(sources_events) == 1  # 最多一次
     # sources 先于第一个 delta 到达（检索节点先于生成节点执行）
-    first_delta_index = events.index(next(e for e in events if e["type"] == "delta"))
-    assert events.index(sources_events[0]) < first_delta_index
+    first_delta_index = business_events.index(next(e for e in business_events if e["type"] == "delta"))
+    assert business_events.index(sources_events[0]) < first_delta_index
     source_items = sources_events[0]["sources"]
     assert source_items and source_items[0]["source"] == "劳动法.txt"
     assert "违约金" in source_items[0]["content"]

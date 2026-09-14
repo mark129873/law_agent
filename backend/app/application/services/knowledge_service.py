@@ -3,6 +3,11 @@
 为什么独立成 Service：上传入库是完整的业务闭环（含日志与状态变更），
 API 层只应调用它而不应拼装基础设施组件；
 依赖全部来自抽象接口，任一环节可独立替换。
+
+存储说明（BE-029）：chunk 只写入 Milvus 一个集合——稠密向量由
+EmbeddingService 生成后传入，稀疏 BM25 表示由 Milvus 服务端按
+content 自动生成（BE-028 时代的"向量库 + 关键词索引"双写已随
+迁移消失，两路检索数据天然同源）。
 """
 
 from __future__ import annotations

@@ -2,49 +2,102 @@
 
 ## 当前已验证
 - 现在明确可用的部分：
-  - **后端 BE-001~027 全部 passing**（最新 BE-027：结构化日志落盘 `backend/log/` 与日志规则强化）。
-  - **前端 FE-001~012 全部 passing**（含 FE-012：侧边栏历史对话旧在上新在下）。
-  - **测试体系**：后端自动化 117 个（2026-09-10 全绿）；端到端脚本 3 个（依赖本机 Ollama，手工运行）。
-- 最近一轮实际跑过的验证（2026-09-10，Session 024，BE-027 日志落盘）：
-  - `uv run pytest -q` → 117 passed（基线 106）；分层 unit 48 / integration（除 API）60 / API 9
-  - 干净环境（先删 `backend/data`）跑全量通过
-  - 真实启动实测（8011 端口）：删 `backend/log` → 启动自动创建并写入 `app.log`（单行 JSON，`timestamp` 形如 `2026-09-10T09:37:50.369Z`）；带 `X-Request-ID: verify-001` 请求 `/api/health` 后日志带 `request_id=verify-001`；验证后进程与端口已清理
+  - **Agent 模块一期重写 + 思考块 + Langfuse trace + 全量 Prompt 优化 + 精排状态语义修复 + Reranker 模型统一 + 低质量兜底 Agent 删除全部 passing（BE-032~047 + FE-001~016；BE-030 deprecated）**：主图 14 节点 + RAG 子图 10 节点 + 服务层 + status/think 双事件 + 豆包式思考块 + Langfuse 三级追踪 + 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾。
+  - **全量 Prompt 优化（BE-044，本轮新增）**：12 个 Prompt 统一五段结构（角色/任务/格式/规则/纪律）+ JSON 纪律（禁 markdown 代码块）+ 示例值防锚定标注 + answer_generator 明确【来源：文件名】格式硬约束 + grounding 降误判（实质一致即可/无关数字不算法律数据/宁可放行）。**编排器"不 finish"误诊修正**（Langfuse 时间线取证：闲聊打回真凶是重复执行 direct_answer，非 judge）——regenerating：RAG 2→0、闲聊 3→0；RAG 回答从 65 字重复堆砌变一句精准+来源标注。
+  - **Langfuse trace（BE-043，本轮新增）**：domain TraceSink/TraceSpan 端口 + trace_sink_var（ContextVar）；infrastructure/trace/langfuse_sink.py（langfuse 4.15.2）；ChatService 记 trace 生命周期与流程事件、with_node_status 压/弹节点 span（子图嵌套）、LLMService 三路径记 generation；.env 开关 LANGFUSE_ENABLED（默认 false，缺密钥 WARN 降级，全方法吞异常）。
+  - **真实云端验证通过**（jp.cloud.langfuse.com，用户 .env 预置密钥）：E2E trace 含 29 节点 span / 11 generation（model+Prompt+输出）/ 15 think + 2 regenerating 事件。
+  - **精排状态语义修复（BE-045）**：`RERANK_ENABLED=false` 被识别为主动关闭，使用 RRF 但不再显示“精排不可用”；CrossEncoder 真失败仍保留 degraded/WARN；启动日志记录 `rerank_enabled` 与 `reranker_device`。
+  - **Reranker 模型统一（BE-046）**：生产配置、检查脚本、`.env.example`、README 和架构文档统一为 `cross-encoder/ms-marco-MiniLM-L-6-v2`；检查脚本下载到根目录 `.model` 后从本地目录加载并执行样本打分。
+  - **测试体系**：自动化 226 个（unit 156 含 agent 99 / integration 70 含 agent 12 与 API 9）；test_milvus_vector_store.py 5 例需真实 Milvus（不可达自动跳过）。
+- 最近一轮实际跑过的验证（2026-09-14，Session 041）：
+  - Milvus 集合重置后全量 `uv run pytest tests -q -rs` → **226 passed, 1 warning**；相关精排测试 37 passed。
+  - 真实后端启动日志确认 `rerank_enabled=false`；上传专利法 TXT 后提问“发明专利权的保护期限是多少年？”返回“二十年”、第四十二条来源 10 条，SSE 思考文案为“证据按融合排序完成（精排已关闭）”。
+  - `frontend/npm run build` 通过；本次改动涉及后端 SSE 文案，无需前端代码改动。
+  - 当前本地 `.env` 已切换为 MiniLM 本地目录并开启 `RERANK_ENABLED=true`；旧 Qwen3 性能记录仅属于 Session 041 的历史验证，不再是当前启动配置。
+  - README 本地相对链接 5 个均有效，2 个 Mermaid 代码块与全部 Markdown 围栏闭合；配置、API、仓库地址和功能边界已对照当前代码核验。
+  - 最近一次真实 E2E 仍为 Session 034：GLM+Milvus 全断言通过，RAG 回答一句精准+【来源】一次通过；闲聊 curl 实测 0 regenerating。
+- 验证后已清理：本轮创建的测试会话/专利法文档已删除，`law_chunks` 集合已 drop，Milvus 三个容器保持运行状态但集合为空；`backend/data/law_agent.db` 仍为 gitignore 的本地数据库文件。
 
-## 本轮改动（Session 024：BE-027 日志落盘与规则强化）
-- `docs/RELIABILITY.md`：日志规则全面强化——双 sink（stdout + 文件）、落盘目录 `backend/log/`、按天轮转与保留 30 天、目录自愈、**写盘失败降级为仅 stdout**、`setup_logging` 幂等、service 受控清单、字段契约（`request_id` / ERROR 带堆栈 / 字段只增不改）、敏感键脱敏兜底、日志契约测试；时间戳与实现对齐为 UTC 毫秒 + `Z`；默认等级 `ERROR → INFO`
-- 代码：`app/common/logging.py`（双 sink + `TimedRotatingFileHandler` + 目录自愈 + `OSError` 降级 + 幂等关闭 + UTC 毫秒 Z + `WARNING→WARN` + 敏感键脱敏 + `RequestContextFilter`/ContextVar）；新增 `app/api/middleware.py`（纯 ASGI `RequestIdMiddleware`，避免 BaseHTTPMiddleware 破坏 SSE）；`settings.py`（`log_level` 默认 INFO + `log_dir`/`log_file_name`/`log_backup_count` + `resolved_log_dir`）；`main.py`（`create_app` 首行 `setup_logging(settings)` + 注册中间件）；新增 `tests/conftest.py`（测试日志隔离到系统临时目录）与 `tests/unit/test_logging.py`（9 例契约测试）
-- 配置与忽略：`.env.example` 新增日志配置段；`.gitignore` 新增 `backend/log/`
-- 文档同步：`ARCHITECTURE.md` §2（`api/middleware.py`、common 落盘、`log/` 目录）、§6（配置表 + 日志配置说明）、§8（日志行）、§9（48/60/9，合计 117）；`feature_list.json` BE-027；`init.md` 测试数量 117；`clean-state-checklist.md` 增加 `backend/log` 未提交校验
+## 本轮改动（Session 044：添加 MIT 开源协议）
+- 新增根目录 `LICENSE`，采用标准 MIT License 文本，版权主体为 `law_agent contributors`。
+- README 增加许可证说明和 `LICENSE` 链接。
+- 本轮只涉及许可证与文档，不改运行时代码；上一轮全量测试结果为 226 passed、1 warning。
+
+## 本轮改动（Session 043：删除低质量 fallback_generator_agent）
+- 删除 `backend/app/agent/nodes/fallback_generator_agent.py`、`backend/app/agent/prompts/fallback_generator.py` 及主图注册、条件边、节点标签。
+- grounding 未通过且 `max_global_steps` 耗尽时返回 `final`，由已有 `final_answer_node` 整理当前草稿；不再进行额外兜底 LLM 调用，think 事件说明预算收尾原因。
+- Web/Plugin Stub 的未开通能力说明迁移到 `backend/app/agent/prompts/capability_notice.py`，保持原有能力边界提示，不与 fallback 语义混用。
+- 文档与功能清单同步：ARCHITECTURE Mermaid、PRODUCT/RELIABILITY/README、`feature_list.json` BE-036/BE-047、`progress.md`。
+- 验证：Milvus 重置后定向测试 22 passed、全量测试 226 passed、1 warning；后端启动日志与 `/api/health` 检查通过。SQLite 文件删除命令受执行环境破坏性操作策略拦截，未绕过该限制。
+
+## 本轮改动（Session 042：统一 MiniLM Reranker 与本地下载启动）
+- `Settings`、生产装配、`.env.example`、Reranker 默认值测试、ARCHITECTURE、PRODUCT 和 README 统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`。
+- `check_rerank_local.py` 改为幂等下载到 `.model/cross-encoder/ms-marco-MiniLM-L-6-v2`，校验 `config.json` 后加载本地 CrossEncoder，并输出模型、设备、分数和耗时。
+- 本机忽略配置已改为新模型的本地目录并开启精排；`.model/` 已加入 `.gitignore`，模型权重不入库。
+- 验证：Milvus 健康检查通过；模型脚本复用本地目录完成三条样本打分；后端全量测试 226 passed、1 warning；`git diff --check` 通过。
+
+## 本轮改动（Session 041：修复精排状态误报）
+- 根因：本地 `backend/.env` 显式设置 `RERANK_ENABLED=false`；模型并非坏掉。CPU 真实精排很慢，20 条候选实测超过 180s。
+- 代码：`RerankResult` 增 `disabled`，`EvidenceRankingNode` 区分主动关闭/模型失败文案与 trace；关闭记 INFO、失败记 WARN；应用启动日志记录精排开关和设备。
+- 文档/功能：同步 `docs/PRODUCT.md`、`docs/ARCHITECTURE.md`、`docs/RELIABILITY.md`、`feature_list.json`（BE-045）。
+- 验证：定向 37 passed；全量 226 passed、1 warning；真实专利法问答正常返回“二十年”并带 10 条来源。
+
+## 本轮改动（Session 040：GitHub 发布版 README）
+- `README.md` 从极简启动说明扩展为完整项目首页：项目定位、技术亮点、系统/主图 Mermaid、RAG 与 SSE、技术栈、快速开始、配置/API、目录结构、测试、边界、贡献和 License 状态。
+- Git 克隆地址使用当前 `origin`：`https://github.com/mark129873/law_agent_harness.git`；Docker 启动命令改为可从仓库根目录执行，补充 PowerShell 的 `curl.exe` 提示。
+- 只陈述当前事实：SQLite 是唯一已启用数据库 Provider，Web Search/Plugin 仍为 Stub，MySQL 8.0 尚未接入，许可证文件尚未提供；未把二期规划写成现有能力。
+- 验证：全量 pytest 225 passed、1 warning；前端 build 通过；README 本地链接与 Markdown 围栏检查通过；`feature_list.json` 无状态变化且冷热分层未触发。
+
+## 本轮改动（Session 039：收紧失败路径重试预算）
+- 用户要求仅减少 RAG 无对应文档的恢复次数与主图总体重试预算，不改变架构、节点或 LangGraph 连线。
+- `backend/app/agent/subgraphs/legal_rag/config.py`：`max_retries` 从 2 调为 1，首次证据不足后最多恢复检索一轮。
+- `backend/app/agent/config.py`：`max_global_steps` 从 4 调为 2，grounding 失败更快进入现有 fallback。
+- 同步 `docs/ARCHITECTURE.md`、RAG 集成测试、主图预算单测和 `feature_list.json` 证据。
+- 验证：相关测试 22 passed；全量 pytest 225 passed、1 warning；前端 build 通过；`git diff --check` 通过。
+- 其他重试机制保持不变：Milvus 单查询异常重试 1 次、LLM 结构化输出解析重试 1 次。
+
+## 本轮改动（Session 038：一期设计稿删除——30 条约束与 § 号速查并入 ARCHITECTURE §12）
+- **普查先行**：代码引用 57 个设计 § 号 + 30 处"约束 N"——ARCHITECTURE.md 新增 §12：30 条强制约束逐条保编号收录 + 设计 §号速查表（核心内容 + 权威现落点）
+- **删除**：docs/archive/legal_agent_phase1_technical_design.md（git rm）；ARCHITECTURE/agent/__init__ 引用改指 §12；设计 §XX/约束 N 语义自此由 §12 唯一承载
+- **上一轮（Session 037，ba871d1）**：全文文档优化——Session 021~030 沉降、设计稿曾入冷存、去重复、补 README
+- **上一轮（Session 036，f16a9ed）**：plan.md 悬空引用修复——硬约束清单迁 ARCHITECTURE §11、D1~D12 决策表迁 PRODUCT §6
+- **上一轮（Session 033 Langfuse，0a14ca9/8f6e0fb）**：RELIABILITY/ARCHITECTURE + trace_sink 端口 + infrastructure sink + ChatService/包装器/LLMService 采集 + .env 开关
+- **后端**：
+  - `domain/services/trace_sink.py`：TraceSink/TraceSpan 协议 + trace_sink_var + current_trace_sink()
+  - `agent/trace_context.py`：trace_span_var（当前节点 span，LLM generation 挂靠父 span）
+  - `infrastructure/trace/langfuse_sink.py`：LangfuseTraceSpan/LangfuseTraceSink/LangfuseTraceSinkFactory（懒初始化、缺密钥 WARN 降级、全方法吞异常、`__call__ = create` 别名）+ null_trace_sink_factory
+  - `agent/node_status.py`：包装器增 span 压栈/finally 弹栈（异常也 end，父级恢复）
+  - `agent/services/llm_service.py`：invoke/structured_invoke（每次尝试一条）/stream（聚合增量）记 generation；messages 序列化 role 用 .value
+  - `application/services/chat_service.py`：构造器增 trace_sink_factory；stream_answer 设/重置 ContextVar、start_trace/end_trace（正常 output/异常 error）、plan/sources/think/regenerating → record_event
+  - `containers.py`：_build_trace_sink_factory 按 LANGFUSE_ENABLED 注入
+  - `config/settings.py`：langfuse_enabled/base_url/public_key/secret_key
+  - 测试：test_trace_sink.py（假客户端 6 例）、test_llm_service_trace.py（8 例）、test_chat_service_trace.py（4 例）、test_node_status 增 3 例、test_settings 增 2 例、DDD 守护加 langfuse
+  - 用户 backend/.env：LANGFUSE_ENABLED=true（复用预置密钥与 LANGFUSE_BASE_URL）
 
 ## 仍损坏或未验证
 - 已知缺陷：无
 - 未验证路径：
-  - MySQL 8.0 真实接入（驱动、URL 分支、真实实例集成测试、增量迁移方案）——只做到"方言无关 + 容器显式拒绝"，无任何 MySQL 实机验证
-  - 连接池化（每请求一会话/连接）——当前仍是单会话，端口形状与池化模型不兼容，属独立改造
-  - 前端本轮未改动（未重跑 `npm run build`；API 契约与 SSE 协议未变，HTTP 层由 8 个接口测试覆盖）
-  - 端到端脚本（真实 Ollama）与浏览器 E2E 本轮未执行
+  - Langfuse 自托管实例未验证（用户用云版；开关口径一致）
+  - Ollama LLM 路径真实 E2E、MySQL 8.0、Web Search 二期（既有未验证项）
 - 下一轮会话需要注意的风险：
-  - **数据目录现在会被自动重建，但内容不会回来**：`backend/data/` 已被清空（旧的历史会话/文档数据不复存在），当前是空库；`tests/data_source/` 里的真实法律文档仍在，可重新上传
-  - **测试干净环境流程**（RELIABILITY.md）：开工/收尾测试前删除 `backend/data/`
-  - **ORM 新增的维护面**（已有 6 个契约测试锁住，但仍是新成本）：实体与 ORM 模型两套定义（字段增删要同时改 `models.py` 与 `mappers.py`）；session 状态语义（identity map、过期对象、批量操作需显式 `synchronize_session`）；异步 ORM 必须保持 `expire_on_commit=False`，否则提交后访问对象属性会抛 `MissingGreenlet`
-  - 文档状态更新多了一次 SELECT（属性级更新换 identity map 一致性），属明确取舍
-  - 同一 `created_at` 无第二排序键（用户指定"仅按时间判断"）：重复查询稳定，但插入先后不再保证
-  - Ollama 0.32.0 偶发缺陷仍在：上传（embedding 批处理）后立即提问可能 500（后端已转为 SSE error 事件）
-  - Windows 下 TaskStop/taskkill 可能超时或留孤儿进程占用 8000：`netstat -ano | grep :8000` 找 PID 后用 PowerShell `Stop-Process -Force`；Git Bash 偶发 `uv` 找不到（exit 127），重试即可
-  - 浏览器 IAB 上传不走系统文件选择框：用页面内 DataTransfer 构造 File 派发 input change
-  - min_score 默认 0.0（不过滤）；E2E 脚本依赖本机 Ollama（qwen3.5:4b / nomic-embed-text:latest）与 .env 中 GLM_API_KEY
-
-## 下一步最佳动作
-- 若继续做数据库方向：MySQL 8.0 接入（`uv add aiomysql` → `containers.py` 增加 `mysql+aiomysql://…` URL 分支 → 真实实例跑同一批契约测试 → Alembic autogenerate 可直接消费现有声明式模型），属独立功能，需在 feature_list.json 立项
-- 可选产品增强（需用户决定）：会话重命名（需 PATCH 端点）、回答停止按钮（需取消协议）、深色主题手动开关、部署方案与 CORS 收敛、OllamaProvider 加重试
-- 这一步中哪些东西不要动：后端 API 契约（ARCHITECTURE.md 第 7 节表格与 SSE 协议含 sources）；统一错误结构 {code,message}；前端 api/state 分层与主题 token 体系；messages.sources 的存储格式（JSON 数组 [{source,content}]）；`IsoDateTime` 的 ISO-8601 存储格式（改了会让旧库时间无法回读）；领域层零技术依赖（ORM 模型不得进入 domain，守护测试会拦）；**数据存放位置**（用户明确要求保持 `backend/data/`，不要改锚点或写死绝对路径）
+  - **pymilvus load_dotenv 副作用升级**：.env 现含 LANGFUSE_ENABLED=true，会灌入测试进程环境——新增 API/集成测试时必须在 Settings 显式 `langfuse_enabled=False`（test_api 夹具已示范），否则测试触真实观测平台
+  - **langfuse v4 查询口径**：验证/导出要用 `api.trace.get(id)` 完整详情或 observations.get_many 带 fields——get_many 裸调不返回 input/output/model，别误判为上报缺失
+  - **SDK 后台批量上报**：网络受限时见 export timeout 日志（sink 吞异常不影响业务）；进程退出前如需强推可 `client.flush()`
+  - **编排器"不 finish"误诊已修正（BE-044）**：旧记录"judge 对 direct 路径过度敏感"实为编排器重复选 direct_answer（Langfuse 时间线取证）——若回归先查编排决策的 generation 留档（api.trace.get），不要想当然调 judge Prompt
+  - **Prompt 修改纪律**：9 个角色标记词（意图路由器/顶层编排器/回答校验器/检索规划器/改写器/子查询生成器/扩展器/证据评估器/恢复规划器）与 BE-017 字面锚点被测试断言，改 Prompt 前先查 tests 的 marker/锚点清单（docs/ARCHITECTURE.md §11「Prompt 与事件硬约束契约」有全列表）
+  - 既有风险不变：每问题 LLM 调用 5~8 次；BE-017 字面锚点三方联动
+  - **ADR 体系已删除（Session 035）**：注释/文档不得再新增 ADR-XXXX 引用；架构决策统一引用 docs/ARCHITECTURE.md
+  - **Windows 端口清理**：停 uvicorn/npm 后子进程可能残留占端口，需 netstat 找 PID + taskkill //F
+- 下一步最佳动作（需用户决定）：失败查询链路优化（已量化：最坏 20 次 LLM/24 检索/3 重排；方案=恢复轮经济模式+零新增早退+同能力防重入护栏+预算参数可配）；可选产品增强（会话重命名/停止按钮/CORS 收敛）；MySQL 8.0 接入；Web Search 二期立项
+- 这一步中哪些东西不要动：后端 API 契约（§7 SSE）；领域层零技术依赖（langfuse 已入守护名单，只允许 infrastructure/trace）；**trace_sink_var 的注入时机（必须在图任务创建前 set）**；**LangfuseTraceSink 全方法吞异常原则**；双预算常量；BE-017 字面锚点联动
 
 ## 命令
+- Milvus 启动：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone`
 - 后端启动：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 干净环境重置（RELIABILITY.md 规定，测试前后各做一次）：删除 `backend/data/`（启动时会自动重建，BE-026）
-- 后端验证：`cd backend && uv run pytest`（全量 106 个）；分层：`pytest tests/unit` / `pytest tests/integration`
-- 数据落点确认：`Get-ChildItem backend\data -Force`（应看到 `law_agent.db` 与 `chroma\`）
-- 前端构建：`cd frontend && npm install && npm run build`（tsc 类型检查 + vite）
-- 前端启动：`cd frontend && npm run dev`（http://localhost:5173，/api 代理到后端 8000；联调需先启动后端）
-- 端到端（需本机 Ollama）：启动服务器后 `PYTHONPATH=backend python backend/scripts/verify_real_e2e.py`
-- 定向调试：`LOG_LEVEL=INFO uv run uvicorn app.main:app --port 8000`；OpenAPI http://127.0.0.1:8000/docs
+- 干净环境重置（两步）：删除 `backend/data/` + `uv run python scripts/reset_milvus.py`
+- 后端验证：`cd backend && uv run pytest tests -q`（全量 226 个；Milvus 未启动时 5 例自动跳过）
+- 前端构建/启动：`cd frontend && npm run build` / `npm run dev`
+- 端到端：启动服务器后 `PYTHONPATH=backend uv run --with httpx python backend/scripts/verify_real_e2e.py`
+- Langfuse 云端查证：`api.trace.list / api.trace.get(id)`（完整详情含 observations IO）
+- 图导出：`cd backend && uv run python scripts/export_qa_graph.py`
+

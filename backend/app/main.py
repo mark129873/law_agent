@@ -1,7 +1,7 @@
 """FastAPI 应用入口。
 
 为什么用工厂函数：便于测试中按需构建应用实例（注入临时配置），
-也为后续根据配置装配不同 Provider（SQLite/MySQL、Chroma/Milvus 等）留出扩展点。
+也为后续根据配置装配不同 Provider（SQLite/MySQL、Milvus 等）留出扩展点。
 """
 
 from __future__ import annotations
@@ -48,7 +48,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "Database initialized",
             extra={"service": "database", "provider": settings.db_provider.value},
         )
-        # 向量库随应用一起初始化，保证首次请求前存储就绪
+        # 向量库（Milvus 混合检索）随应用一起初始化：建立连接并加载
+        # 已有集合（集合不存在时由首次入库懒建，见 BE-029）
         vector_store: VectorStore = container.resolve(VectorStore)
         await vector_store.initialize()
         logger.info(
@@ -69,6 +70,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "db_provider": settings.db_provider.value,
             "vector_store_provider": settings.vector_store_provider.value,
             "llm_provider": settings.llm_provider.value,
+            # 把精排的最终生效开关写入启动日志，排查“为什么一直走 RRF”
+            # 时无需猜测 .env 是否被读取；不记录模型路径等非必要信息。
+            "rerank_enabled": settings.rerank_enabled,
+            "reranker_device": settings.reranker_device,
         },
     )
 
