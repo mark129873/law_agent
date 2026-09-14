@@ -244,5 +244,5 @@ def test_reranker_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
     settings = Settings(_env_file=None)  # 不读 .env，验证纯默认值
     assert settings.rerank_enabled is True  # 默认开启（设计 §32 忠实）
-    assert settings.reranker_model_path == "Qwen/Qwen3-Reranker-0.6B"
+    assert settings.reranker_model_path == "cross-encoder/ms-marco-MiniLM-L-6-v2"
     assert settings.reranker_device == "cpu"

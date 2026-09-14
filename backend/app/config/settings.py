@@ -124,13 +124,13 @@ class Settings(BaseSettings):
     planner_model: str = ""  # 空串表示用所选 Provider 的默认对话模型
 
     # ---- Agent 服务（一期重写 BE-033）----
-    # Rerank 总开关：默认开启（设计 §32 统一重排）。CPU 部署且无 CUDA 时
-    # 实测约 15s/对不可行，可置 false 走 RRF 降级序（degraded 可观测）。
+    # Rerank 总开关：默认开启（设计 §32 统一重排）。如果部署环境暂时
+    # 不需要精排，可置 false 使用 RRF；服务仍会把“主动关闭”单独记录。
     rerank_enabled: bool = True
-    # Rerank 模型：本地 Qwen3-Reranker-0.6B（CrossEncoder，CPU 推理）。
-    # 可填 HF 模型 id（联网解析）或本地快照绝对路径（离线推荐）；
+    # Rerank 模型与 scripts/check_rerank_model/check_rerank_local.py 保持一致：
+    # 默认使用 Hugging Face 模型 id；也可改为脚本下载后的本地快照路径。
     # 加载失败时检索降级为 RRF 融合序，不阻断问答。
-    reranker_model_path: str = "Qwen/Qwen3-Reranker-0.6B"
+    reranker_model_path: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     reranker_device: str = "cpu"
 
     # ---- Langfuse 链路追踪（BE-043）----

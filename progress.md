@@ -4,12 +4,19 @@
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`（当前分支 feature/auto_coder）
 - 标准启动路径：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 标准验证路径：`cd backend && uv run pytest tests -q`（全量 226 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
-- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）全部 passing：主图 + Local Legal RAG 子图 + Web/Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化（打回率 RAG 2→0、闲聊 3→0），架构决策见 docs/ARCHITECTURE.md
-- 已知性能边界：本机 CPU（无 CUDA）上 Qwen3-Reranker-0.6B 可加载但推理很慢（8 条候选实测约 75s，20 条超过 180s）；本地 `.env` 保持 `RERANK_ENABLED=false`，按 RRF 正常完成并明确显示“精排已关闭”，GPU 机器可开启真实精排
+- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ Reranker 模型统一（BE-046）全部 passing：主图 + Local Legal RAG 子图 + Web/Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化（打回率 RAG 2→0、闲聊 3→0），架构决策见 docs/ARCHITECTURE.md
+- 当前 Reranker：全项目统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；`check_rerank_local.py` 首次下载到根目录 `.model/cross-encoder/ms-marco-MiniLM-L-6-v2` 并执行 CPU 样本打分。本地 `.env` 已切换为该模型并开启 `RERANK_ENABLED=true`；无法使用时仍按既有故障降级契约记录 WARN。
 - 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；仅收紧主图总预算与 RAG 无充分证据后的恢复轮次，图拓扑和其他重试机制不变
-- 当前最高优先级未完成功能：无——BE-001~045 与 FE-001~016 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
+- 当前最高优先级未完成功能：无——BE-001~046 与 FE-001~016 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
 - 当前 blocker：无
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md（Session 001~030 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
+
+### Session 042（统一 MiniLM Reranker 与本地下载启动）
+- 日期：2026-09-14
+- 本轮目标：将全项目 Reranker 切换为 `check_rerank_local.py` 中的 `cross-encoder/ms-marco-MiniLM-L-6-v2`，并补齐模型下载、配置和启动说明。
+- 改动：Settings、装配点、`.env.example`、测试默认值、架构/产品文档和 README 全部同步；检查脚本统一负责下载到 `.model`、本地加载和样本打分；本机忽略配置切换到新模型并开启精排；新增 BE-046。
+- 验证：Milvus 健康检查通过；模型检查脚本复用本地目录并完成打分；后端全量测试 226 passed、1 warning；`git diff --check` 通过。
+- 风险/交接：首次下载需要访问 Hugging Face；CPU/GPU 设备由 `RERANKER_DEVICE` 配置，模型加载或推理异常仍会按既有契约降级为 RRF。
 
 ### Session 041（修复精排状态误报）
 - 日期：2026-09-14

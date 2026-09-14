@@ -1,4 +1,4 @@
-"""统一重排服务：Qwen3-Reranker-0.6B CrossEncoder（BE-033，设计 §34）。
+"""统一重排服务：MiniLM CrossEncoder（BE-033，设计 §34）。
 
 为什么依赖注入打分器而非直接持有 CrossEncoder：测试注入脚本化
 打分器即可覆盖排序与降级逻辑，自动化测试不加载真实模型
@@ -46,10 +46,9 @@ class RerankerService:
     SubQuery 用于召回覆盖，Original Query 才代表用户真实意图的
     最终相关性——多路召回、单口径精排。
 
-    为什么有 enabled 开关：本机实测 CPU 上 0.6B 因果
-    重排模型约 15s/对（无 CUDA），一次问答不可行——开关置 false 走
-    RRF 降级序（与加载失败同一降级语义，degraded=True 可观测），
-    GPU/更快的机器上恢复开启即得精排；功能本体与测试不依赖开关。
+    为什么有 enabled 开关：不同部署环境对 CPU/GPU 延迟的承受能力不同，
+    关闭时仍保留 RRF 召回序，且通过 disabled 状态可观测；开启时使用
+    配置注入的 CrossEncoder，模型加载或推理失败才进入 degraded 降级。
     """
 
     def __init__(self, scorer: RerankScorer, enabled: bool = True) -> None:
@@ -99,11 +98,11 @@ class RerankerService:
 
 
 class CrossEncoderScorer:
-    """CrossEncoder 适配器：懒加载单例 + CPU 推理。
+    """CrossEncoder 适配器：懒加载单例 + 可配置设备推理。
 
-    为什么懒加载：0.6B 模型加载数秒且常驻内存，首次 rerank 才加载；
-    asyncio.Lock 防并发首次调用重复加载。为什么 to_thread：加载与
-    CPU 推理是阻塞调用，放线程池避免卡死事件循环（SSE 全异步）。
+    为什么懒加载：模型需要常驻内存，首次 rerank 才加载；asyncio.Lock
+    防并发首次调用重复加载。为什么 to_thread：模型加载与推理都是阻塞
+    调用，放线程池避免卡死事件循环（SSE 全异步）。
     """
 
     def __init__(self, model_path: str, device: str = "cpu") -> None:

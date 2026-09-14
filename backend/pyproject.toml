@@ -16,6 +16,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0,<3.0",
     "pymilvus>=3.0.1",
     "sentence-transformers>=6.0.1",
+    "huggingface-hub>=0.20.0,<2.0",
     "torch>=2.14.0",
     "transformers>=5.17.0",
     "accelerate>=1.15.0",

@@ -4,7 +4,7 @@
 -本文档只描述**架构与实现**（分层、数据流、配置、契约、测试体系）；用户可见的行为需求见 docs/PRODUCT.md
 -实现变更不得改变 PRODUCT.md 描述的用户可见行为；行为要变，先改 PRODUCT.md，再改实现
 -后端 Python 3.11（uv 管理环境，.venv 虚拟环境）+ FastAPI（接口全异步）+ LangGraph，LLM 支持 Ollama 本地部署与 GLM API（详细技术栈见 §1 末尾）
--Agent 模块一期重写（2026-09）：主图轻量编排 + 独立 Local Legal RAG 子图 + Web/Plugin Stub 入口，设计依据一期技术稿核心内容已并入本文档 §12（30 条强制约束 + 设计 §号速查）；统一重排采用本地 Qwen3-Reranker-0.6B（CrossEncoder，模型失败时降级 RRF；显式关闭时按配置正常使用 RRF）
+-Agent 模块一期重写（2026-09）：主图轻量编排 + 独立 Local Legal RAG 子图 + Web/Plugin Stub 入口，设计依据一期技术稿核心内容已并入本文档 §12（30 条强制约束 + 设计 §号速查）；统一重排采用 `cross-encoder/ms-marco-MiniLM-L-6-v2`（CrossEncoder，模型失败时降级 RRF；显式关闭时按配置正常使用 RRF）
 -数据库此版本支持sqlite3, 后续版本支持mysql8.0根据配置进行切换, 做好数据库接口层抽象
 -数据库实现统一走 SQLAlchemy 2.0 async ORM（声明式模型 + Data Mapper 映射），SQLite 是当前唯一已启用的 Provider，MySQL 8.0 接入只需换 URL 与异步驱动
 -向量数据库使用 Milvus（standalone 部署，backend/docker-compose.yml 编排 etcd + minio + milvus），稠密向量与稀疏 BM25 混合检索由 Milvus 服务端 hybrid_search 完成（BE-029），业务代码经 VectorStore 端口访问，不感知具体实现
@@ -36,11 +36,11 @@
                ▼
       ┌──────────────────────────────────┐
       │ LLM：Ollama 本地 / GLM API        │
-      │ Rerank：本地 Qwen3-Reranker-0.6B  │
+      │ Rerank：本地 MiniLM CrossEncoder   │
       └──────────────────────────────────┘
 ```
 
-技术栈：Python 3.11 + FastAPI（全异步）+ uv 环境管理 + LangGraph + SQLAlchemy 2.0 async ORM（声明式模型 + AsyncSession，当前挂 aiosqlite 驱动）+ Milvus（服务端 hybrid_search：稠密 + 稀疏 BM25，RRF 融合）+ sentence-transformers（Qwen3-Reranker-0.6B CrossEncoder 统一重排）+ httpx。
+技术栈：Python 3.11 + FastAPI（全异步）+ uv 环境管理 + LangGraph + SQLAlchemy 2.0 async ORM（声明式模型 + AsyncSession，当前挂 aiosqlite 驱动）+ Milvus（服务端 hybrid_search：稠密 + 稀疏 BM25，RRF 融合）+ sentence-transformers（`cross-encoder/ms-marco-MiniLM-L-6-v2` CrossEncoder 统一重排）+ httpx。
 前端技术栈：React 19 + TypeScript（严格模式）+ Vite 8 + Tailwind CSS v4 + React Router 7 + 原生 Fetch（无 axios）。
 
 ## 2. 目录结构
@@ -299,7 +299,7 @@ retrieval_planner_agent（检索计划，四类策略多选）
 | `PLANNER_MODEL` | 模型名 | 空（用所选 Provider 的默认模型） |
 | `LLM_ENABLE_THINKING` | true / false | false |
 | `RERANK_ENABLED` | true / false | true（CPU 且无 CUDA 实测较慢；false 表示主动使用 RRF 融合序，不应视为模型故障） |
-| `RERANKER_MODEL_PATH` | HF 模型 id 或本地快照绝对路径 | Qwen/Qwen3-Reranker-0.6B |
+| `RERANKER_MODEL_PATH` | HF 模型 id 或本地快照绝对路径 | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
 | `RERANKER_DEVICE` | cpu / cuda | cpu |
 | `MILVUS_URI` | — | http://127.0.0.1:19530 |
 | `LANGFUSE_ENABLED` | true / false | false（BE-043：Langfuse 链路追踪开关，关闭零导入零开销） |
@@ -378,7 +378,7 @@ npm run build                                      # tsc 类型检查 + 生产�
 - **Web Search（二期）**：把 `agent/web/web_search_stub_node` 替换为 web_research_subgraph 并在 AgentGraphBuilder 改接节点即可，主图路由接口不变；`suggested_external_queries` 已从 RAG 子图透传到主图 state 备用。
 - **Plugin / Skill Runtime（二期）**：把 `agent/plugins/plugin_stub_node` 替换为 runtime 实现，约束同上；一期 Stub 不做任何动态加载。
 - **新文档格式**：实现 `DocumentParser` 策略并注册进工厂；**新 LLM Provider**：实现 `LLMProvider`（chat + stream + model_name）+ 容器加分支，密钥仅环境注入；**新 Agent 节点**：实现节点类并在 AgentGraphBuilder/build_legal_rag_graph 接线 + constants.py 登记中文标签（status 事件文案）。
-- **Rerank**：GPU 机器设 `RERANKER_DEVICE=cuda` 即启用精排；`rerank_max_candidates=20` 控制精排输入规模。`RERANK_ENABLED=false` 是可观测的主动关闭状态，证据仍按 Milvus RRF 序输出；只有 CrossEncoder 加载/推理异常才记为 `reranker_degraded`。
+- **Rerank**：统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；GPU 机器设 `RERANKER_DEVICE=cuda`，CPU 机器使用 `cpu`。`rerank_max_candidates=20` 控制精排输入规模。`RERANK_ENABLED=false` 是可观测的主动关闭状态，证据仍按 Milvus RRF 序输出；只有 CrossEncoder 加载/推理异常才记为 `reranker_degraded`。
 - **前端**：遵循 §7 API 契约与 SSE 协议；开发期统一请求相对路径 `/api/...` 由 Vite 代理，前端代码不感知后端地址。
 
 ## 11. Prompt 与事件硬约束契约（BE-042/044，原 plan.md 承载，此处为唯一权威清单）

@@ -95,9 +95,10 @@ LOG_LEVEL=ERROR  # 仅输出 ERROR
 ### 作用
 干净环境管理保证测试从一个已知的空白状态启动，避免历史遗留数据干扰测试结果，引发未知异常。
 
-### 重置机制
-1. 删除本地数据库文件 `backend/data/`, 里面存放的均为测试遗留数据, 可以直接删除
+### 重置机制 (测试前需运行)
+1. 删除本地数据库文件 `rm backend/data/law_agent.db`, 里面存放的为sqlite数据库文件，可直接删除，不影响测试运行
 2. 删除 Milvus 中的知识库集合（BE-029 起向量数据由 Milvus 容器卷持久化，不在 `backend/data/`）：在 Milvus 服务运行的前提下执行 `cd backend && uv run python scripts/reset_milvus.py`（幂等删除 `law_chunks` 集合，下次启动/入库自动重建）
+3. 删除完成之后, 明确输出: 测试干净环境管理完成, 清理xxx文件, 删除xxx数据库内容
 
 ### 需要重置干净环境的场景
 - 开工测试之前

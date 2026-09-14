@@ -177,7 +177,7 @@ def create_container(settings: Settings | None = None) -> DIContainer:
         lambda c: RagService(c.resolve(EmbeddingService), c.resolve(VectorStore)),
         singleton=True,
     )
-    # 统一重排服务（BE-033：本地 Qwen3-Reranker，懒加载）
+    # 统一重排服务（BE-033：本地 MiniLM CrossEncoder，懒加载）
     container.register(RerankerService, lambda c: _build_reranker(settings), singleton=True)
     container.register(
         DocumentService,

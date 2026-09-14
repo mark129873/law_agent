@@ -49,3 +49,7 @@ gui-test-screenshots/
 # Milvus standalone 容器卷（docker compose 在 backend/ 下启动时生成）
 backend/volumes/
 volumes/
+
+# 模型文件
+.model/
+model/
