@@ -60,9 +60,19 @@ def _build_vector_store(settings: Settings) -> VectorStore:
 
     为什么工厂仍然保留：未来接入其他向量库 Provider 时只需在此
     增加分支，业务代码与分层结构不动。
+
+    dense_top_k / bm25_top_k / rrf_k 从 LegalRAGConfig 读取：这三个
+    参数本质上是检索业务参数（召回量 + 融合平滑），由业务配置统一定义，
+    向量库实现只负责透传到底层 Milvus API。
     """
     if settings.vector_store_provider == VectorStoreProvider.MILVUS:
-        return MilvusVectorStore(settings.milvus_uri)
+        rag_cfg = LegalRAGConfig()
+        return MilvusVectorStore(
+            settings.milvus_uri,
+            dense_top_k=rag_cfg.dense_top_k,
+            bm25_top_k=rag_cfg.bm25_top_k,
+            rrf_k=rag_cfg.rrf_k,
+        )
     raise NotImplementedError(f"向量库 Provider '{settings.vector_store_provider.value}' 尚未实现")
 
 

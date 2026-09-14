@@ -21,8 +21,8 @@ class LegalRAGConfig:
     max_expanded_queries: int = 3
     # 单轮检索查询总数上限（设计 §26/§49：控制并发检索成本）
     max_retrieval_queries: int = 8
-    # 混合检索参数（设计 §31）：dense/bm25 候选数由 Milvus 服务端
-    # hybrid_search 统一处理，hybrid_top_k 为融合后返回量
+    # 混合检索参数（设计 §31）：dense/bm25 每路独立取候选后交给 RRF 融合，
+    # hybrid_top_k 为融合后最终返回量；装配点读取后注入 MilvusVectorStore
     dense_top_k: int = 30
     bm25_top_k: int = 30
     hybrid_top_k: int = 20
@@ -32,7 +32,7 @@ class LegalRAGConfig:
     # 只把最有希望的候选交给 CrossEncoder，控制 CPU/GPU 推理耗时；RRF
     # 序与 rerank 序高度相关，预截断前 20 对最终排序质量影响有限）
     rerank_max_candidates: int = 20
-    # RRF 融合参数（与 Milvus RRFRanker 口径一致，勿单独调整）
+    # RRF 融合平滑常数（论文推荐值 60，排名越靠前贡献越大）；装配点注入 Milvus RRFRanker
     rrf_k: int = 60
     # 证据充分性置信度阈值（evidence_grader_agent 参考）
     evidence_confidence_threshold: float = 0.80

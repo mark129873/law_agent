@@ -6,7 +6,8 @@
 - 稀疏表示由 Milvus 服务端的 BM25 Function 按 content 字段自动生成，
   content 启用 jieba 分词器——中文法条词面匹配不需要客户端分词；
 - hybrid_search 一次调用同时发起稠密 + 稀疏两路 AnnSearchRequest，
-  服务端 RRFRanker(k=60) 融合（与 BE-028 自研融合的 k 值一致）；
+  服务端 RRFRanker(k=rrf_k) 融合；每路可独立配置候选上限
+  dense_top_k / bm25_top_k，融合后再截断到 top_k（融合后返回量）；
 - 集合在首次 add_chunks 时按实际 embedding 维度懒建（稠密维度跟随
   embedding 模型，不写死配置）；检索在集合不存在时返回空（空知识库语义）。
 
@@ -38,9 +39,6 @@ logger = logging.getLogger("app.vector_store.milvus")
 # 测试经构造参数注入独立集合名，避免污染生产数据。
 _DEFAULT_COLLECTION = "law_chunks"
 
-# RRF 平滑常数（论文推荐值）：排名越靠前贡献越大（与 BE-028 口径一致）
-_RRF_K = 60
-
 
 def _new_chunk_id() -> str:
     """生成 chunk 主键，与领域仓储同样使用 uuid 保证与存储解耦。"""
@@ -48,18 +46,31 @@ def _new_chunk_id() -> str:
 
 
 class MilvusVectorStore(VectorStore):
-    """基于 pymilvus MilvusClient 的 VectorStore 抽象实现（混合检索）。"""
+    """基于 pymilvus MilvusClient 的 VectorStore 抽象实现（混合检索）。
+
+    构造参数均有生产默认值，测试可按需覆盖以验证参数透传。
+    dense_top_k / bm25_top_k 控制每路候选预取量，rrf_k 控制融合平滑。
+    """
 
     def __init__(
         self,
         uri: str,
         collection_name: str = _DEFAULT_COLLECTION,
         min_score: float = 0.0,
+        dense_top_k: int = 30,
+        bm25_top_k: int = 30,
+        rrf_k: int = 60,
     ) -> None:
         self._uri = uri
         self._collection_name = collection_name
         # 默认相似度下限：调用方（RagService）也可按次传入覆盖
         self._default_min_score = min_score
+        # 每路候选预取量：dense/bm25 各自取 top N 后交给 RRF 融合，
+        # 比只取融合后 top_k 召回率更高，代价是多取少量候选（可忽略）
+        self._dense_top_k = dense_top_k
+        self._bm25_top_k = bm25_top_k
+        # RRF 平滑常数：论文推荐值 60，排名越靠前贡献越大
+        self._rrf_k = rrf_k
         self._client: MilvusClient | None = None
         # 集合是否已确认存在（懒建标记；False 时检索直接返回空）
         self._collection_ready = False
@@ -193,17 +204,22 @@ class MilvusVectorStore(VectorStore):
             dense_param: dict = {"metric_type": "COSINE"}
             if threshold > 0:
                 dense_param["radius"] = threshold
+            # 稠密通道候选上限：构造注入的 dense_top_k，与融合后 top_k 解耦
             dense_req = AnnSearchRequest(
-                data=[query_embedding], anns_field="dense", param=dense_param, limit=max(1, top_k),
+                data=[query_embedding], anns_field="dense", param=dense_param,
+                limit=max(1, self._dense_top_k),
             )
-            # 稀疏通道直接传原始查询文本，分词与 BM25 打分都在服务端完成
+            # 稀疏通道直接传原始查询文本，分词与 BM25 打分都在服务端完成；
+            # 候选上限同样由构造注入，确保两路召回量对称
             sparse_req = AnnSearchRequest(
-                data=[query_text], anns_field="sparse", param={"metric_type": "BM25"}, limit=max(1, top_k),
+                data=[query_text], anns_field="sparse", param={"metric_type": "BM25"},
+                limit=max(1, self._bm25_top_k),
             )
+            # RRF 融合：ranker 平滑常数由构造注入，融合后截断到 top_k
             result = client.hybrid_search(
                 self._collection_name,
                 reqs=[dense_req, sparse_req],
-                ranker=RRFRanker(_RRF_K),
+                ranker=RRFRanker(self._rrf_k),
                 limit=max(1, top_k),
                 output_fields=["document_id", "content", "filename", "chunk_index"],
                 consistency_level="Strong",

@@ -10,7 +10,9 @@
   边界差异）；
 - 词面通道：查询文本（按空白切分）为 chunk 内容的子串即命中；
   真实中文分词与 BM25 打分行为由真实 Milvus 集成测试覆盖；
-- 融合：RRF（k=60，与 Milvus RRFRanker 同参数），多路命中叠加。
+- 融合：RRF（rrf_k 构造注入，与生产 Milvus RRFRanker 同参数），
+  多路命中叠加；每路候选上限 dense_top_k / bm25_top_k 独立截断后
+  再融合，融合后截断到 top_k。
 """
 
 from __future__ import annotations
@@ -20,8 +22,6 @@ import math
 from app.domain.entities.chunk import DocumentChunk, RetrievedChunk
 from app.domain.repositories.vector_store import VectorStore
 
-_RRF_K = 60
-
 
 def _cosine(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b))
@@ -30,11 +30,17 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 class InMemoryVectorStore(VectorStore):
-    """内存 Fake：确定性实现混合检索契约。"""
+    """内存 Fake：确定性实现混合检索契约。
 
-    def __init__(self) -> None:
+    构造参数与 MilvusVectorStore 对齐，确保 Fake 与生产实现行为对等。
+    """
+
+    def __init__(self, dense_top_k: int = 30, bm25_top_k: int = 30, rrf_k: int = 60) -> None:
         self._chunks: dict[str, tuple[DocumentChunk, list[float]]] = {}
         self._counter = 0
+        self._dense_top_k = dense_top_k
+        self._bm25_top_k = bm25_top_k
+        self._rrf_k = rrf_k
 
     async def initialize(self) -> None: ...
     async def close(self) -> None: ...
@@ -57,24 +63,30 @@ class InMemoryVectorStore(VectorStore):
         min_score: float = 0.0,
     ) -> list[RetrievedChunk]:
         # 稠密通道：余弦相似度 + min_score 过滤（融合之前，语义同 Milvus）
-        dense: dict[str, float] = {}
+        # 按分数降序截断到 dense_top_k，模拟 Milvus AnnSearchRequest 的 per-request limit
+        dense_all: dict[str, float] = {}
         for chunk_id, (chunk, embedding) in self._chunks.items():
             score = _cosine(query_embedding, embedding)
             if score >= min_score:
-                dense[chunk_id] = score
-        # 词面通道：查询词为内容的子串即命中
+                dense_all[chunk_id] = score
+        dense = dict(
+            sorted(dense_all.items(), key=lambda kv: kv[1], reverse=True)
+            [: max(1, self._dense_top_k)]
+        )
+        # 词面通道：查询词为内容的子串即命中；截断到 bm25_top_k
         tokens = [t for t in query_text.split() if t]
-        keyword = [
+        keyword_all = [
             chunk_id
             for chunk_id, (chunk, _) in self._chunks.items()
             if any(token in chunk.content for token in tokens)
         ]
-        # RRF 融合（只看排名，与生产 RRFRanker 同参数）
+        keyword = keyword_all[: max(1, self._bm25_top_k)]
+        # RRF 融合（只看排名，rrf_k 由构造注入）
         scores: dict[str, float] = {}
         for rank, chunk_id in enumerate(sorted(dense, key=dense.get, reverse=True), start=1):
-            scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (_RRF_K + rank)
+            scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (self._rrf_k + rank)
         for rank, chunk_id in enumerate(keyword, start=1):
-            scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (_RRF_K + rank)
+            scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (self._rrf_k + rank)
         ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)[: max(1, top_k)]
         return [
             RetrievedChunk(chunk=self._chunks[chunk_id][0], score=score)
