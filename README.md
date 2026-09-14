@@ -11,7 +11,7 @@
 
 Law Agent 意图构建法律助手, 目前第一版已完成知识库问答场景(法条检索), 并预留插件入口(合同&文书审查插件、案件辅助插件)、外部知识补充(网页搜查、外接MCP)以待后续开发。
 
-用户可以上传文档，系统完成文档解析、清洗、段落感知切分、向量化和 Milvus 入库；用户提问后，Agent 通过 LangGraph 主图与 Local Legal RAG 子图完成问题路由、本地 Legal RAG、依据校验与兜底；检索走 Milvus 稠密向量 + BM25 混合召回（服务端 RRF），本地 Reranker 重排。回答必须能落到知识库来源；没有依据时会明确说明，而不是编造法条。
+用户可以上传文档，系统完成文档解析、清洗、段落感知切分、向量化和 Milvus 入库；用户提问后，Agent 通过 LangGraph 主图与 Local Legal RAG 子图完成问题路由、本地 Legal RAG、依据校验与确定性收尾；检索走 Milvus 稠密向量 + BM25 混合召回（服务端 RRF），本地 Reranker 重排。回答必须能落到知识库来源；没有依据时会明确说明，而不是编造法条。
 
 项目的重点不是简单地把检索结果拼接到 Prompt，而是将以下能力组合成一条可观测、可测试、可降级的 Agent 链路
 
@@ -84,31 +84,21 @@ cd backend
 uv sync
 uv run python scripts/check_rerank_model/check_rerank_local.py
 ```
-
-脚本会完成模型下载、CPU 加载和三条样本文档打分。`.model/` 已加入 `.gitignore`，模型文件不会提交到 Git。
+脚本会完成模型下载和检验。
 
 ### 4. 配置并启动后端
 
-在 `backend/.env` 中确认使用脚本下载的本地模型：
-
-```env
-RERANK_ENABLED=true
-RERANKER_MODEL_PATH=../.model/cross-encoder/ms-marco-MiniLM-L-6-v2
-RERANKER_DEVICE=cpu
-```
-
-以上相对路径以 `backend` 目录为当前工作目录；也可以将 `RERANKER_MODEL_PATH` 改为该模型目录的绝对路径。GPU 环境可将 `RERANKER_DEVICE` 改为 `cuda`。如果暂时关闭精排，设置 `RERANK_ENABLED=false`，系统会明确显示“精排已关闭”；只有模型加载或推理失败才显示故障降级。
 ```bash
 cd backend
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
-默认配置使用 Ollama：
+若使用 Ollama：
 ```bash
 ollama serve
 ollama pull qwen3.5:4b
 ollama pull nomic-embed-text:latest
 ```
-如果使用 GLM，将 `backend/.env` 中的 `LLM_PROVIDER` 改为 `glm`，并设置 `GLM_API_KEY`。
+若使用 GLM, 默认模型为 `glm-4.5-air`，需将 `backend/.env` 中的 `LLM_PROVIDER` 改为 `glm`，并设置 `GLM_API_KEY`。
 
 
 ### 5. 启动前端

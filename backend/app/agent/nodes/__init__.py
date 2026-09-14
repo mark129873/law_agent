@@ -7,7 +7,6 @@
 from app.agent.nodes.action_router_node import ACTION_TARGETS, ActionRouterNode, route_action
 from app.agent.nodes.answer_generator_agent import AnswerGeneratorAgent
 from app.agent.nodes.direct_answer_agent import DirectAnswerAgent
-from app.agent.nodes.fallback_generator_agent import FallbackGeneratorAgent
 from app.agent.nodes.final_answer_node import FinalAnswerNode
 from app.agent.nodes.grounding_checker_agent import GroundingCheckerAgent
 from app.agent.nodes.observation_node import ObservationNode
@@ -19,7 +18,6 @@ __all__ = [
     "ActionRouterNode",
     "AnswerGeneratorAgent",
     "DirectAnswerAgent",
-    "FallbackGeneratorAgent",
     "FinalAnswerNode",
     "GroundingCheckerAgent",
     "ObservationNode",

@@ -37,7 +37,7 @@
 | service | 归属 |
 |---------|------|
 | `system` | 应用生命周期、健康检查、全局异常兜底 |
-| `agent` | Agent 图节点执行（一期重写：意图路由/编排/检索规划/查询变体/混合检索/重排/证据评估/恢复/回答/校验/兜底）；每节点起止各一条 INFO（"Agent node started/completed"，data.node + data.duration_ms），节点状态同时以 status SSE 事件外推（前端浅色过程展示，BE-041）；LLM 节点 data 含 model 与业务计数；精排主动关闭记 INFO，模型加载/推理失败才记 WARN（"Agent reranker failed, degraded to RRF order"） |
+| `agent` | Agent 图节点执行（一期重写：意图路由/编排/检索规划/查询变体/混合检索/重排/证据评估/恢复/回答/校验/确定性收尾）；每节点起止各一条 INFO（"Agent node started/completed"，data.node + data.duration_ms），节点状态同时以 status SSE 事件外推（前端浅色过程展示，BE-041）；LLM 节点 data 含 model 与业务计数；精排主动关闭记 INFO，模型加载/推理失败才记 WARN（"Agent reranker failed, degraded to RRF order"） |
 | `api` | API 层业务异常与未预期异常处理 |
 | `database` | 数据库连接与建表 |
 | `vector_store` | 向量库（Milvus）初始化与读写 |
@@ -96,8 +96,8 @@ LOG_LEVEL=ERROR  # 仅输出 ERROR
 干净环境管理保证测试从一个已知的空白状态启动，避免历史遗留数据干扰测试结果，引发未知异常。
 
 ### 重置机制 (测试前需运行)
-1. 删除本地数据库文件 `rm backend/data/law_agent.db`, 里面存放的为sqlite数据库文件，可直接删除，不影响测试运行
-2. 删除 Milvus 中的知识库集合（BE-029 起向量数据由 Milvus 容器卷持久化，不在 `backend/data/`）：在 Milvus 服务运行的前提下执行 `cd backend && uv run python scripts/reset_milvus.py`（幂等删除 `law_chunks` 集合，下次启动/入库自动重建）
+1. 删除 sqlite数据库中的原先的测试数据
+2. 删除 Milvus 中的知识库集合：在 Milvus 服务运行的前提下执行 `cd backend && uv run python scripts/reset_milvus.py`（幂等删除 `law_chunks` 集合，下次启动/入库自动重建）
 3. 删除完成之后, 明确输出: 测试干净环境管理完成, 清理xxx文件, 删除xxx数据库内容
 
 ### 需要重置干净环境的场景

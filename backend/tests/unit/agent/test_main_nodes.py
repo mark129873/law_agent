@@ -2,7 +2,7 @@
 
 脚本化 Fake 覆盖：路由解析与安全默认、编排预算双保险、观察归一、
 直接回答流式与打回、回答生成四情形、grounding 双规则与跳过、
-兜底与收尾节点。
+预算收尾节点。
 """
 
 import asyncio
@@ -21,7 +21,6 @@ from app.agent.constants import (
 from app.agent.nodes import (
     AnswerGeneratorAgent,
     DirectAnswerAgent,
-    FallbackGeneratorAgent,
     FinalAnswerNode,
     GroundingCheckerAgent,
     ObservationNode,
@@ -197,7 +196,7 @@ def test_answer_generator_not_implemented_generates_explanation(monkeypatch: pyt
         capability_result={"capability": "web_search", "status": CAPABILITY_NOT_IMPLEMENTED,
                            "evidence": [], "citations": [], "metadata": {}},
     )))
-    # 说明性回答经 fallback 提示组装（未开通指引在 user 消息），带 delta 流式
+    # 说明性回答经能力说明 Prompt 组装（未开通指引在 user 消息），带 delta 流式
     assert "尚未开通" in llm.streamed[0][-1].content
     assert any(e.type == "delta" for e in events)
 
@@ -269,20 +268,19 @@ def test_grounding_judge_detects_unsupported_claims():
     assert "可获双倍赔偿" in result["grounding_issues"][0]
 
 
-# ---- FallbackGeneratorAgent / FinalAnswerNode ----
+# ---- grounding 预算收尾 / FinalAnswerNode ----
 
-def test_fallback_streams_and_final_node_finalizes(monkeypatch: pytest.MonkeyPatch):
-    events = _events_of(monkeypatch, __import__("app.agent.nodes.fallback_generator_agent", fromlist=["x"]))
-    llm = StreamingFakeLLM(stream_text="谨慎回答")
-    fallback = asyncio.run(FallbackGeneratorAgent(LLMService(llm))(
-        _state(answer_draft="旧稿", evidence=[{"source_name": "专利法.txt", "content": "二十年"}],
-               grounding_issues=["引用不符"])))
-    assert fallback["answer_draft"] == "谨慎回答"
-    assert events[0].type == "regenerating"  # 旧草稿已流出 → 先清空
+def test_grounding_budget_exhaustion_routes_directly_to_final():
+    # 预算耗尽后不再调用额外 LLM，沿用已有草稿进入确定性收尾。
+    from app.agent.graph import route_after_grounding
+
+    route = route_after_grounding(AgentConfig(max_global_steps=2))
+    assert route({"grounding_passed": False, "global_step_count": 2}) == "final"
+    assert route({"grounding_passed": False, "global_step_count": 1}) == "retry"
 
     final = asyncio.run(FinalAnswerNode(CitationService())(
-        _state(answer_draft="谨慎回答", evidence=[{"source_name": "专利法.txt", "content": "二十年",
+        _state(answer_draft="已有回答", evidence=[{"source_name": "专利法.txt", "content": "二十年",
                                                    "chunk_id": "c1", "document_id": "d1"}])))
-    assert final["answer"] == "谨慎回答"  # 端口输出键
-    assert final["final_answer"] == "谨慎回答"
+    assert final["answer"] == "已有回答"  # 端口输出键
+    assert final["final_answer"] == "已有回答"
     assert final["citations"][0]["citation_id"] == "1"

@@ -17,7 +17,6 @@ graph TD;
 	direct_answer_agent(direct_answer_agent)
 	answer_generator_agent(answer_generator_agent)
 	grounding_checker_agent(grounding_checker_agent)
-	fallback_generator_agent(fallback_generator_agent)
 	final_answer_node(final_answer_node)
 	__end__([<p>__end__</p>]):::last
 	__start__ --> query_router_agent;
@@ -28,8 +27,6 @@ graph TD;
 	action_router_node -.-> web_search_entry_node;
 	answer_generator_agent --> grounding_checker_agent;
 	direct_answer_agent --> observation_node;
-	fallback_generator_agent --> final_answer_node;
-	grounding_checker_agent -. &nbsp;fallback&nbsp; .-> fallback_generator_agent;
 	grounding_checker_agent -. &nbsp;final&nbsp; .-> final_answer_node;
 	grounding_checker_agent -. &nbsp;retry&nbsp; .-> orchestrator_agent;
 	legal_rag_subgraph --> observation_node;

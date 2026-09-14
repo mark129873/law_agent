@@ -2,7 +2,7 @@
 
 ## 当前已验证
 - 现在明确可用的部分：
-  - **Agent 模块一期重写 + 思考块 + Langfuse trace + 全量 Prompt 优化 + 精排状态语义修复 + Reranker 模型统一全部 passing（BE-032~046 + FE-001~016；BE-030 deprecated）**：主图 15 节点 + RAG 子图 10 节点 + 服务层 + status/think 双事件 + 豆包式思考块 + Langfuse 三级追踪 + 12 个 Prompt 五段结构化。
+  - **Agent 模块一期重写 + 思考块 + Langfuse trace + 全量 Prompt 优化 + 精排状态语义修复 + Reranker 模型统一 + 低质量兜底 Agent 删除全部 passing（BE-032~047 + FE-001~016；BE-030 deprecated）**：主图 14 节点 + RAG 子图 10 节点 + 服务层 + status/think 双事件 + 豆包式思考块 + Langfuse 三级追踪 + 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾。
   - **全量 Prompt 优化（BE-044，本轮新增）**：12 个 Prompt 统一五段结构（角色/任务/格式/规则/纪律）+ JSON 纪律（禁 markdown 代码块）+ 示例值防锚定标注 + answer_generator 明确【来源：文件名】格式硬约束 + grounding 降误判（实质一致即可/无关数字不算法律数据/宁可放行）。**编排器"不 finish"误诊修正**（Langfuse 时间线取证：闲聊打回真凶是重复执行 direct_answer，非 judge）——regenerating：RAG 2→0、闲聊 3→0；RAG 回答从 65 字重复堆砌变一句精准+来源标注。
   - **Langfuse trace（BE-043，本轮新增）**：domain TraceSink/TraceSpan 端口 + trace_sink_var（ContextVar）；infrastructure/trace/langfuse_sink.py（langfuse 4.15.2）；ChatService 记 trace 生命周期与流程事件、with_node_status 压/弹节点 span（子图嵌套）、LLMService 三路径记 generation；.env 开关 LANGFUSE_ENABLED（默认 false，缺密钥 WARN 降级，全方法吞异常）。
   - **真实云端验证通过**（jp.cloud.langfuse.com，用户 .env 预置密钥）：E2E trace 含 29 节点 span / 11 generation（model+Prompt+输出）/ 15 think + 2 regenerating 事件。
@@ -17,6 +17,13 @@
   - README 本地相对链接 5 个均有效，2 个 Mermaid 代码块与全部 Markdown 围栏闭合；配置、API、仓库地址和功能边界已对照当前代码核验。
   - 最近一次真实 E2E 仍为 Session 034：GLM+Milvus 全断言通过，RAG 回答一句精准+【来源】一次通过；闲聊 curl 实测 0 regenerating。
 - 验证后已清理：本轮创建的测试会话/专利法文档已删除，`law_chunks` 集合已 drop，Milvus 三个容器保持运行状态但集合为空；`backend/data/law_agent.db` 仍为 gitignore 的本地数据库文件。
+
+## 本轮改动（Session 043：删除低质量 fallback_generator_agent）
+- 删除 `backend/app/agent/nodes/fallback_generator_agent.py`、`backend/app/agent/prompts/fallback_generator.py` 及主图注册、条件边、节点标签。
+- grounding 未通过且 `max_global_steps` 耗尽时返回 `final`，由已有 `final_answer_node` 整理当前草稿；不再进行额外兜底 LLM 调用，think 事件说明预算收尾原因。
+- Web/Plugin Stub 的未开通能力说明迁移到 `backend/app/agent/prompts/capability_notice.py`，保持原有能力边界提示，不与 fallback 语义混用。
+- 文档与功能清单同步：ARCHITECTURE Mermaid、PRODUCT/RELIABILITY/README、`feature_list.json` BE-036/BE-047、`progress.md`。
+- 验证：Milvus 重置后定向测试 22 passed、全量测试 226 passed、1 warning；后端启动日志与 `/api/health` 检查通过。SQLite 文件删除命令受执行环境破坏性操作策略拦截，未绕过该限制。
 
 ## 本轮改动（Session 042：统一 MiniLM Reranker 与本地下载启动）
 - `Settings`、生产装配、`.env.example`、Reranker 默认值测试、ARCHITECTURE、PRODUCT 和 README 统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`。
@@ -83,7 +90,7 @@
 - Milvus 启动：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone`
 - 后端启动：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 干净环境重置（两步）：删除 `backend/data/` + `uv run python scripts/reset_milvus.py`
-- 后端验证：`cd backend && uv run pytest tests -q`（全量 225 个；Milvus 未启动时 5 例自动跳过）
+- 后端验证：`cd backend && uv run pytest tests -q`（全量 226 个；Milvus 未启动时 5 例自动跳过）
 - 前端构建/启动：`cd frontend && npm run build` / `npm run dev`
 - 端到端：启动服务器后 `PYTHONPATH=backend uv run --with httpx python backend/scripts/verify_real_e2e.py`
 - Langfuse 云端查证：`api.trace.list / api.trace.get(id)`（完整详情含 observations IO）

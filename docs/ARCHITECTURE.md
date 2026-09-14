@@ -86,8 +86,8 @@ backend/
 │   │   ├── events.py           # ContextVar 注入式事件发射器（跨子图事件贯通）
 │   │   ├── trace_context.py    # 当前节点 span 的 ContextVar（BE-043：LLM generation 挂靠父 span）
 │   │   ├── node_status.py      # with_node_status 全节点包装（起止 status 事件 + 结构化日志）
-│   │   ├── nodes/              # 主图 9 节点（_agent=LLM 节点 / _node=确定性节点，设计 §2.1）
-│   │   ├── prompts/            # 主图 6 Prompt（意图路由/编排/直接回答/回答生成/校验/兜底）
+│   │   ├── nodes/              # 主图 8 节点（_agent=LLM 节点 / _node=确定性节点，设计 §2.1）
+│   │   ├── prompts/            # 主图 6 Prompt（意图路由/编排/直接回答/回答生成/校验/能力说明）
 │   │   ├── services/           # LLMService（结构化输出容错）/ MilvusService / RerankerService / CitationService
 │   │   ├── subgraphs/legal_rag/  # Local Legal RAG 子图：graph + state/config/schemas + nodes 10 + prompts 6
 │   │   ├── web/ plugins/       # Web Search / Plugin 一期 Stub（仅 NOT_IMPLEMENTED/DISABLED 入口）
@@ -197,7 +197,7 @@ DELETE /api/documents/{id}：向量按 document_id 删除 + 元数据删除（�
 ### 面向对象结构
 - `AgentGraphBuilder`（建造者，agent/graph.py）：按设计 §3 拓扑装配主图，Local Legal RAG 子图作为复合节点接入（显式输入/输出过滤）；装配与条件边规则集中一处。
 - `LangGraphQaWorkflow`（适配器）：显式实现 `QaWorkflow` 领域端口；`astream` = ainvoke + ContextVar 事件队列排空（规避 langgraph 1.2.11 子图 custom 事件不上浮的实测缺陷）；对外唯一入口 `create_qa_workflow(llm, embedding, vector_store, planner, reranker, …)` 工厂。
-- 节点命名（设计 §2.1）：带 LLM 的节点以 `_agent` 结尾（意图路由/编排/检索规划/查询变体/证据评估/恢复规划/直接回答/回答生成/校验/兜底），确定性节点以 `_node` 结尾（动作路由/观察/策略路由/混合检索/证据重排/结果/stub/收尾）。
+- 节点命名（设计 §2.1）：带 LLM 的节点以 `_agent` 结尾（意图路由/编排/检索规划/查询变体/证据评估/恢复规划/直接回答/回答生成/校验），确定性节点以 `_node` 结尾（动作路由/观察/策略路由/混合检索/证据重排/结果/stub/收尾）。
 - 模型分工：planner（PLANNER_PROVIDER）服务决策密集的轻节点（意图路由/顶层编排/RAG 子图规划），主 LLM 服务回答生成与 grounding 校验——强模型规划 + 快模型执行。
 
 ### 主图拓扑（由 scripts/export_qa_graph.py 生成，拓扑变更后重跑即可同步）
@@ -222,37 +222,35 @@ graph TD;
 	direct_answer_agent(direct_answer_agent)
 	answer_generator_agent(answer_generator_agent)
 	grounding_checker_agent(grounding_checker_agent)
-	fallback_generator_agent(fallback_generator_agent)
 	final_answer_node(final_answer_node)
+	__end__([<p>__end__</p>]):::last
 	__start__ --> query_router_agent;
-	query_router_agent --> orchestrator_agent;
-	orchestrator_agent --> action_router_node;
-	action_router_node -. &nbsp;local_rag&nbsp; .-> legal_rag_subgraph;
-	action_router_node -. &nbsp;plugin&nbsp; .-> plugin_entry_node;
-	action_router_node -. &nbsp;web_search&nbsp; .-> web_search_entry_node;
-	action_router_node -. &nbsp;direct_answer&nbsp; .-> direct_answer_agent;
-	action_router_node -. &nbsp;finish&nbsp; .-> answer_generator_agent;
-	plugin_entry_node --> plugin_stub_node;
-	web_search_entry_node --> web_search_stub_node;
-	legal_rag_subgraph --> observation_node;
-	plugin_stub_node --> observation_node;
-	web_search_stub_node --> observation_node;
-	direct_answer_agent --> observation_node;
-	observation_node --> orchestrator_agent;
+	action_router_node -.-> answer_generator_agent;
+	action_router_node -.-> direct_answer_agent;
+	action_router_node -.-> legal_rag_subgraph;
+	action_router_node -.-> plugin_entry_node;
+	action_router_node -.-> web_search_entry_node;
 	answer_generator_agent --> grounding_checker_agent;
-	grounding_checker_agent -. &nbsp;retry&nbsp; .-> orchestrator_agent;
-	grounding_checker_agent -. &nbsp;fallback&nbsp; .-> fallback_generator_agent;
+	direct_answer_agent --> observation_node;
 	grounding_checker_agent -. &nbsp;final&nbsp; .-> final_answer_node;
-	fallback_generator_agent --> final_answer_node;
+	grounding_checker_agent -. &nbsp;retry&nbsp; .-> orchestrator_agent;
+	legal_rag_subgraph --> observation_node;
+	observation_node --> orchestrator_agent;
+	orchestrator_agent --> action_router_node;
+	plugin_entry_node --> plugin_stub_node;
+	plugin_stub_node --> observation_node;
+	query_router_agent --> orchestrator_agent;
+	web_search_entry_node --> web_search_stub_node;
+	web_search_stub_node --> observation_node;
 	final_answer_node --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
 	classDef last fill:#bfb6fc
 ```
 
-- **顶层循环**：query_router（规范化+意图+请求类型）→ orchestrator（决定下一能力，受 `max_global_steps=2` 预算，超限强制 finish）→ action_router（§46.1 确定性映射）→ Capability → observation（CapabilityResult 归一、步数+1）→ orchestrator；finish 后 answer_generator → grounding_checker → final_answer / fallback。
+- **顶层循环**：query_router（规范化+意图+请求类型）→ orchestrator（决定下一能力，受 `max_global_steps=2` 预算，超限强制 finish）→ action_router（§46.1 确定性映射）→ Capability → observation（CapabilityResult 归一、步数+1）→ orchestrator；finish 后 answer_generator → grounding_checker → final_answer。
 - **Capability**：legal_rag 子图（检索）；web_search / plugin（一期 Stub，仅 NOT_IMPLEMENTED/DISABLED，替换 Stub 即接入二期实现，主图零重构）；direct_answer（一般性对话直接流式回答，D2——法律事实型问题默认走检索）。
-- **回答收尾链**：answer_generator 是 finish 路径唯一流式出口（direct 已有完整草稿时透传）；grounding_checker 规则档先行（有依据必须【来源：…】、检索无命中必须声明信息不足、direct 路径只查编造引用）+ LLM judge 档；未通过且预算内回 orchestrator，预算耗尽走 fallback 谨慎回答。grounding 每次执行递增 global_step_count（防打回回路绕过预算）。
+- **回答收尾链**：answer_generator 是 finish 路径唯一流式出口（direct 已有完整草稿时透传）；grounding_checker 规则档先行（有依据必须【来源：…】、检索无命中必须声明信息不足、direct 路径只查编造引用）+ LLM judge 档；未通过且预算内回 orchestrator，预算耗尽直接进入确定性的 `final_answer_node`，不再追加一次兜底 LLM 生成。grounding 每次执行递增 global_step_count（防打回回路绕过预算）。
 
 ### Local Legal RAG 子图（agent/subgraphs/legal_rag/，设计 §4）
 
@@ -362,7 +360,7 @@ npm run build                                      # tsc 类型检查 + 生产�
 
 | 层级 | 位置 | 数量 | 验证内容 |
 |------|------|------|---------|
-| 单元 | tests/unit/ | 156（含 agent 99） | DI 容器、配置（含 Langfuse 开关默认值）、DDD 边界守护（AST，含 langgraph/langfuse 隔离区）、日志契约、Agent utils 纯函数（含思考内容截断/发射 BE-042）、LLM 结构化输出容错与 generation 采集（BE-043）、Langfuse sink 契约与降级（假客户端）、ChatService trace 生命周期（BE-043）、Reranker 排序/主动关闭/故障降级、RAG 子图 10 节点、主图 9 节点、Stub、状态包装器（status+span）、回答策略、端口契约（内存 Fake）、文档 Pipeline 与解析器 |
+| 单元 | tests/unit/ | 156（含 agent 99） | DI 容器、配置（含 Langfuse 开关默认值）、DDD 边界守护（AST，含 langgraph/langfuse 隔离区）、日志契约、Agent utils 纯函数（含思考内容截断/发射 BE-042）、LLM 结构化输出容错与 generation 采集（BE-043）、Langfuse sink 契约与降级（假客户端）、ChatService trace 生命周期（BE-043）、Reranker 排序/主动关闭/故障降级、RAG 子图 10 节点、主图 8 节点、Stub、状态包装器（status+span）、回答策略、端口契约（内存 Fake）、文档 Pipeline 与解析器 |
 | 集成 | tests/integration/（除 API） | 70（含 agent 12） | 真实 SQLite（持久化/级联/事务/迁移/ORM 契约/排序契约）、首次启动自愈、真实 Milvus 混合检索（不可达时跳过）、legal_rag 子图全场景（简单/多变体/恢复循环/预算耗尽/检索故障/事件序列）、主图 E2E 五 case（设计 §50：RAG 成功/直接回答/证据不足/Web DISABLED/Plugin NOT_IMPLEMENTED）、LLM/Embedding/RAG |
 | 接口 | tests/integration/test_api.py | 9 | 完整应用（临时 SQLite + Fake 向量库/LLM）：会话 CRUD、统一错误、SSE 协议（status/plan 先行、过滤 status 后原序不变）、文档上传删除、x-request-id |
 | 端到端 | scripts/（手工运行） | 3 脚本 | 真实 uvicorn + 真实 Milvus/LLM：上传→入库→流式 RAG 问答引用原文→检索策略/状态事件→持久化 |
@@ -399,7 +397,7 @@ normalized_query / intent / request_type / extracted_conditions；action / reaso
 JSON 纪律（以 { 开始以 } 结束、禁 markdown 代码块）；JSON 示例统一加"值仅为格式示意"防锚定；answer_generator 补【来源：文件名】格式硬约束与简洁约束；grounding 降误判（实质一致即可/无关数字不算法律数据/宁可放行）；direct_answer 禁输出法条编号与精确法律数据。验证口径：Langfuse regenerating 打回率 RAG 2→0、闲聊 3→0。
 
 ### think 事件节点→内容清单（BE-042）
-query_router=意图判定；orchestrator=编排决策；strategy_router=选中策略；hybrid_retriever=查询数与命中数；evidence_ranking=重排启用/主动关闭/故障降级与保留条数；evidence_grader=评估结论；recovery_planner=恢复计划；grounding_checker=校验判定+理由；finish 路由=兜底触发说明；web/plugin stub=未开通说明；final_answer=引用来源条数；observation / direct_answer / answer_generator 不发（避免与回答本体重复）。
+query_router=意图判定；orchestrator=编排决策；strategy_router=选中策略；hybrid_retriever=查询数与命中数；evidence_ranking=重排启用/主动关闭/故障降级与保留条数；evidence_grader=评估结论；recovery_planner=恢复计划；grounding_checker=校验判定+理由与预算收尾说明；web/plugin stub=未开通说明；final_answer=引用来源条数；observation / direct_answer / answer_generator 不发（避免与回答本体重复）。
 
 ## 12. 一期设计约束与 § 号速查（原 legal_agent_phase1_technical_design.md 承载，该稿已删除，此处为唯一权威）
 

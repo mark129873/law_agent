@@ -13,7 +13,7 @@ from app.agent.constants import (
 from app.agent.events import emit_event
 from app.agent.prompts.answer_generator import build_answer_messages
 from app.agent.prompts.direct_answer import build_direct_messages
-from app.agent.prompts.fallback_generator import build_fallback_messages
+from app.agent.prompts.capability_notice import build_capability_notice_messages
 from app.agent.services.llm_service import LLMService
 from app.agent.state import AgentState
 from app.agent.utils.evidence_utils import format_evidence_context
@@ -60,11 +60,9 @@ class AnswerGeneratorAgent:
         # 未开通能力（Web/Plugin Stub）→ 说明性回答（规则 3，PRODUCT.md §3）
         if status in (CAPABILITY_NOT_IMPLEMENTED, CAPABILITY_DISABLED):
             feature = "网络搜索" if state.get("last_capability") == "web_search" else "插件能力"
-            messages = build_fallback_messages(
+            messages = build_capability_notice_messages(
                 question,
-                context="",
-                issues=[f"{feature}功能尚未开通，请告知用户该功能暂不可用，"
-                        f"并建议：法律问题可直接提出，系统将基于本地法律知识库回答。"],
+                issues=[f"{feature}功能尚未开通，请告知用户该功能暂不可用。"],
             )
             mode = f"not_implemented:{feature}"
         else:

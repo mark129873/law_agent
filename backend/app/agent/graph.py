@@ -27,7 +27,6 @@ from app.agent.nodes import (
     ActionRouterNode,
     AnswerGeneratorAgent,
     DirectAnswerAgent,
-    FallbackGeneratorAgent,
     FinalAnswerNode,
     GroundingCheckerAgent,
     ObservationNode,
@@ -43,6 +42,7 @@ from app.agent.state import AgentState
 from app.agent.subgraphs.legal_rag.config import LegalRAGConfig
 from app.agent.subgraphs.legal_rag.graph import build_legal_rag_graph
 from app.agent.plugins import PluginEntryNode, PluginStubNode
+from app.agent.utils.think_utils import emit_think
 from app.agent.web import WebSearchEntryNode, WebSearchStubNode
 from app.domain.services.qa_workflow import QaWorkflow
 
@@ -115,7 +115,6 @@ class AgentGraphBuilder:
         add_node_traced(builder, "direct_answer_agent", DirectAnswerAgent(self._llm))
         add_node_traced(builder, "answer_generator_agent", AnswerGeneratorAgent(self._llm))
         add_node_traced(builder, "grounding_checker_agent", GroundingCheckerAgent(self._llm))
-        add_node_traced(builder, "fallback_generator_agent", FallbackGeneratorAgent(self._llm))
         add_node_traced(builder, "final_answer_node", FinalAnswerNode(CitationService()))
 
         # ---- 入口与顶层循环（设计 §3）----
@@ -140,26 +139,29 @@ class AgentGraphBuilder:
         builder.add_conditional_edges(
             "grounding_checker_agent",
             route_after_grounding(self._agent_config),
-            {"retry": "orchestrator_agent", "fallback": "fallback_generator_agent", "final": "final_answer_node"},
+            {"retry": "orchestrator_agent", "final": "final_answer_node"},
         )
-        builder.add_edge("fallback_generator_agent", "final_answer_node")
         builder.add_edge("final_answer_node", END)
         return builder.compile()
 
 
 def route_after_grounding(config: AgentConfig):
     """grounding 后路由（设计 §3）：通过 → 收尾；未过且预算内 → 回编排；
-    预算耗尽 → 兜底谨慎回答（预算检查在条件边）。
+    预算耗尽 → 直接进入确定性收尾（预算检查在条件边）。
 
     为什么预算比较用 >= 而不是 >：grounding_checker_agent 每次执行
     都会 +1 计数（含本次），即"本次校验已经消耗了一个步数"。
+    预算耗尽时不再额外调用 LLM，避免低质量兜底回答覆盖已有草稿。
     """
     def _route(state: AgentState) -> str:
         if state.get("grounding_passed"):
             return "final"
         if int(state.get("global_step_count") or 0) < config.max_global_steps:
             return "retry"
-        return "fallback"
+        # 路由没有独立节点，因此用 grounding 标签记录确定性收尾原因，
+        # 让前端思考块仍能解释为何没有继续重试。
+        emit_think("grounding_checker_agent", "依据校验未通过且重试预算耗尽，直接收尾当前回答")
+        return "final"
 
     return _route
 

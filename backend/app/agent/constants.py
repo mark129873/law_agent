@@ -61,7 +61,6 @@ NODE_LABELS: dict[str, str] = {
     "observation_node": "汇总结果",
     "answer_generator_agent": "生成回答",
     "grounding_checker_agent": "校验回答依据",
-    "fallback_generator_agent": "生成谨慎回答",
     "final_answer_node": "整理引用来源",
     # Local Legal RAG 子图节点
     "retrieval_planner_agent": "规划检索策略",
