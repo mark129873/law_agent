@@ -293,6 +293,29 @@ def test_evidence_ranking_dedups_and_reranks_with_original_query():
     assert trace["input_count"] == 3 and trace["dedup_count"] == 2 and trace["reranker_degraded"] is False
 
 
+def test_evidence_ranking_distinguishes_disabled_from_failed_reranker(monkeypatch: pytest.MonkeyPatch):
+    """主动关闭精排只提示配置状态，不能误报为模型故障降级。"""
+    messages: list[str] = []
+    monkeypatch.setattr(
+        "app.agent.subgraphs.legal_rag.nodes.evidence_ranking_node.emit_think",
+        lambda _node, text: messages.append(text),
+    )
+    node = EvidenceRankingNode(RerankerService(FakeScorer([0.9]), enabled=False), CONFIG)
+    result = asyncio.run(
+        node(
+            _state(
+                retrieval_candidates=[
+                    {"chunk_id": "c1", "content": "甲", "rrf_score": 0.1},
+                ]
+            )
+        )
+    )
+    assert messages == ["证据按融合排序完成（精排已关闭），保留 1 条证据"]
+    assert "降级" not in messages[0]
+    assert result["rag_trace"][0]["reranker_degraded"] is False
+    assert result["rag_trace"][0]["reranker_disabled"] is True
+
+
 # ---- EvidenceGraderAgent ----
 
 def test_evidence_grader_parses_grade():

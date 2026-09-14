@@ -26,10 +26,16 @@ class RerankScorer(Protocol):
 
 @dataclass(frozen=True)
 class RerankResult:
-    """重排结果：条目 + 是否降级（设计 §47：失败降级 RRF 序并记录）。"""
+    """重排结果。
+
+    `degraded` 只表示模型实际失败后的故障降级；`disabled` 表示用户
+    通过配置主动关闭精排。两者都使用 RRF 顺序，但对用户提示和运行
+    监控的含义不同，不能把“主动关闭”误报成“模型不可用”。
+    """
 
     items: list[EvidenceItem]
     degraded: bool = False
+    disabled: bool = False
     error: str = field(default="")
 
 
@@ -60,9 +66,13 @@ class RerankerService:
         if not documents:
             return RerankResult(items=[], degraded=False)
         if not self._enabled:
+            logger.info(
+                "Agent reranker disabled by configuration",
+                extra={"service": "agent", "doc_count": len(documents)},
+            )
             return RerankResult(
                 items=documents[:top_n],
-                degraded=True,
+                disabled=True,
                 error="rerank disabled by configuration (RERANK_ENABLED=false)",
             )
         try:

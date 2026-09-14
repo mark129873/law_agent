@@ -4,7 +4,7 @@
 -本文档只描述**架构与实现**（分层、数据流、配置、契约、测试体系）；用户可见的行为需求见 docs/PRODUCT.md
 -实现变更不得改变 PRODUCT.md 描述的用户可见行为；行为要变，先改 PRODUCT.md，再改实现
 -后端 Python 3.11（uv 管理环境，.venv 虚拟环境）+ FastAPI（接口全异步）+ LangGraph，LLM 支持 Ollama 本地部署与 GLM API（详细技术栈见 §1 末尾）
--Agent 模块一期重写（2026-09）：主图轻量编排 + 独立 Local Legal RAG 子图 + Web/Plugin Stub 入口，设计依据一期技术稿核心内容已并入本文档 §12（30 条强制约束 + 设计 §号速查）；统一重排采用本地 Qwen3-Reranker-0.6B（CrossEncoder，失败/关闭时降级 RRF 序）
+-Agent 模块一期重写（2026-09）：主图轻量编排 + 独立 Local Legal RAG 子图 + Web/Plugin Stub 入口，设计依据一期技术稿核心内容已并入本文档 §12（30 条强制约束 + 设计 §号速查）；统一重排采用本地 Qwen3-Reranker-0.6B（CrossEncoder，模型失败时降级 RRF；显式关闭时按配置正常使用 RRF）
 -数据库此版本支持sqlite3, 后续版本支持mysql8.0根据配置进行切换, 做好数据库接口层抽象
 -数据库实现统一走 SQLAlchemy 2.0 async ORM（声明式模型 + Data Mapper 映射），SQLite 是当前唯一已启用的 Provider，MySQL 8.0 接入只需换 URL 与异步驱动
 -向量数据库使用 Milvus（standalone 部署，backend/docker-compose.yml 编排 etcd + minio + milvus），稠密向量与稀疏 BM25 混合检索由 Milvus 服务端 hybrid_search 完成（BE-029），业务代码经 VectorStore 端口访问，不感知具体实现
@@ -267,7 +267,7 @@ retrieval_planner_agent（检索计划，四类策略多选）
     每 Query 独立走 Milvus Dense+BM25+RRF；单查询失败重试 1 次，全失败置 RETRIEVAL_ERROR；
     推送 plan 事件=本轮全部检索查询）
   → evidence_ranking_node（dedup 三级键合并 matched_queries → RRF 预截断 20 →
-    以 original_query 统一 rerank → top-10；reranker 失败/关闭降级 RRF 序）
+    以 original_query 统一 rerank → top-10；显式关闭按配置使用 RRF，模型失败才记故障降级）
   → evidence_grader_agent（覆盖度/缺失/冲突/可恢复性；安全默认=不充分）
   → 路由：充分 → rag_result_node（SUCCESS，推 sources 事件）；
           可恢复且 retry_count<max_retries=1 → recovery_planner_agent（本地三动作多选，
@@ -298,7 +298,7 @@ retrieval_planner_agent（检索计划，四类策略多选）
 | `PLANNER_PROVIDER` | follow / ollama / glm | follow（跟随 LLM_PROVIDER） |
 | `PLANNER_MODEL` | 模型名 | 空（用所选 Provider 的默认模型） |
 | `LLM_ENABLE_THINKING` | true / false | false |
-| `RERANK_ENABLED` | true / false | true（CPU 且无 CUDA 实测约 15s/对，建议 false 走 RRF 降级序） |
+| `RERANK_ENABLED` | true / false | true（CPU 且无 CUDA 实测较慢；false 表示主动使用 RRF 融合序，不应视为模型故障） |
 | `RERANKER_MODEL_PATH` | HF 模型 id 或本地快照绝对路径 | Qwen/Qwen3-Reranker-0.6B |
 | `RERANKER_DEVICE` | cpu / cuda | cpu |
 | `MILVUS_URI` | — | http://127.0.0.1:19530 |
@@ -362,12 +362,12 @@ npm run build                                      # tsc 类型检查 + 生产�
 
 | 层级 | 位置 | 数量 | 验证内容 |
 |------|------|------|---------|
-| 单元 | tests/unit/ | 155（含 agent 98） | DI 容器、配置（含 Langfuse 开关默认值）、DDD 边界守护（AST，含 langgraph/langfuse 隔离区）、日志契约、Agent utils 纯函数（含思考内容截断/发射 BE-042）、LLM 结构化输出容错与 generation 采集（BE-043）、Langfuse sink 契约与降级（假客户端）、ChatService trace 生命周期（BE-043）、Reranker 排序与降级、RAG 子图 10 节点、主图 9 节点、Stub、状态包装器（status+span）、回答策略、端口契约（内存 Fake）、文档 Pipeline 与解析器 |
+| 单元 | tests/unit/ | 156（含 agent 99） | DI 容器、配置（含 Langfuse 开关默认值）、DDD 边界守护（AST，含 langgraph/langfuse 隔离区）、日志契约、Agent utils 纯函数（含思考内容截断/发射 BE-042）、LLM 结构化输出容错与 generation 采集（BE-043）、Langfuse sink 契约与降级（假客户端）、ChatService trace 生命周期（BE-043）、Reranker 排序/主动关闭/故障降级、RAG 子图 10 节点、主图 9 节点、Stub、状态包装器（status+span）、回答策略、端口契约（内存 Fake）、文档 Pipeline 与解析器 |
 | 集成 | tests/integration/（除 API） | 70（含 agent 12） | 真实 SQLite（持久化/级联/事务/迁移/ORM 契约/排序契约）、首次启动自愈、真实 Milvus 混合检索（不可达时跳过）、legal_rag 子图全场景（简单/多变体/恢复循环/预算耗尽/检索故障/事件序列）、主图 E2E 五 case（设计 §50：RAG 成功/直接回答/证据不足/Web DISABLED/Plugin NOT_IMPLEMENTED）、LLM/Embedding/RAG |
 | 接口 | tests/integration/test_api.py | 9 | 完整应用（临时 SQLite + Fake 向量库/LLM）：会话 CRUD、统一错误、SSE 协议（status/plan 先行、过滤 status 后原序不变）、文档上传删除、x-request-id |
 | 端到端 | scripts/（手工运行） | 3 脚本 | 真实 uvicorn + 真实 Milvus/LLM：上传→入库→流式 RAG 问答引用原文→检索策略/状态事件→持久化 |
 
-- 自动化合计 225 个，`uv run pytest` 全量运行无需外部服务（Fake 遵循领域端口，与生产实现互换验证同一契约；Langfuse 以假客户端锁契约）；唯一例外 test_milvus_vector_store.py 需真实 Milvus，不可达时自动跳过。
+- 自动化合计 226 个，`uv run pytest` 全量运行无需外部服务（Fake 遵循领域端口，与生产实现互换验证同一契约；Langfuse 以假客户端锁契约）；唯一例外 test_milvus_vector_store.py 需真实 Milvus，不可达时自动跳过。
 - Agent 测试的 Fake 体系：脚本化 LLMProvider（按系统提示特征分流输出）、Fake Embedding/VectorStore/RerankScorer——rerank 真实模型不进自动化测试，仅真实 E2E 验证。
 - E2E 脚本依赖真实服务，不纳入 pytest（保持自动化封闭性）；结论记录于 feature_list.json 各功能 evidence。测试数据源：tests/data_source/（专利法 TXT + MD 等）。
 
@@ -378,7 +378,7 @@ npm run build                                      # tsc 类型检查 + 生产�
 - **Web Search（二期）**：把 `agent/web/web_search_stub_node` 替换为 web_research_subgraph 并在 AgentGraphBuilder 改接节点即可，主图路由接口不变；`suggested_external_queries` 已从 RAG 子图透传到主图 state 备用。
 - **Plugin / Skill Runtime（二期）**：把 `agent/plugins/plugin_stub_node` 替换为 runtime 实现，约束同上；一期 Stub 不做任何动态加载。
 - **新文档格式**：实现 `DocumentParser` 策略并注册进工厂；**新 LLM Provider**：实现 `LLMProvider`（chat + stream + model_name）+ 容器加分支，密钥仅环境注入；**新 Agent 节点**：实现节点类并在 AgentGraphBuilder/build_legal_rag_graph 接线 + constants.py 登记中文标签（status 事件文案）。
-- **Rerank**：GPU 机器设 `RERANKER_DEVICE=cuda` 即启用精排；`rerank_max_candidates=20` 控制精排输入规模。
+- **Rerank**：GPU 机器设 `RERANKER_DEVICE=cuda` 即启用精排；`rerank_max_candidates=20` 控制精排输入规模。`RERANK_ENABLED=false` 是可观测的主动关闭状态，证据仍按 Milvus RRF 序输出；只有 CrossEncoder 加载/推理异常才记为 `reranker_degraded`。
 - **前端**：遵循 §7 API 契约与 SSE 协议；开发期统一请求相对路径 `/api/...` 由 Vite 代理，前端代码不感知后端地址。
 
 ## 11. Prompt 与事件硬约束契约（BE-042/044，原 plan.md 承载，此处为唯一权威清单）
@@ -399,7 +399,7 @@ normalized_query / intent / request_type / extracted_conditions；action / reaso
 JSON 纪律（以 { 开始以 } 结束、禁 markdown 代码块）；JSON 示例统一加"值仅为格式示意"防锚定；answer_generator 补【来源：文件名】格式硬约束与简洁约束；grounding 降误判（实质一致即可/无关数字不算法律数据/宁可放行）；direct_answer 禁输出法条编号与精确法律数据。验证口径：Langfuse regenerating 打回率 RAG 2→0、闲聊 3→0。
 
 ### think 事件节点→内容清单（BE-042）
-query_router=意图判定；orchestrator=编排决策；strategy_router=选中策略；hybrid_retriever=查询数与命中数；evidence_ranking=重排启用/降级与保留条数；evidence_grader=评估结论；recovery_planner=恢复计划；grounding_checker=校验判定+理由；finish 路由=兜底触发说明；web/plugin stub=未开通说明；final_answer=引用来源条数；observation / direct_answer / answer_generator 不发（避免与回答本体重复）。
+query_router=意图判定；orchestrator=编排决策；strategy_router=选中策略；hybrid_retriever=查询数与命中数；evidence_ranking=重排启用/主动关闭/故障降级与保留条数；evidence_grader=评估结论；recovery_planner=恢复计划；grounding_checker=校验判定+理由；finish 路由=兜底触发说明；web/plugin stub=未开通说明；final_answer=引用来源条数；observation / direct_answer / answer_generator 不发（避免与回答本体重复）。
 
 ## 12. 一期设计约束与 § 号速查（原 legal_agent_phase1_technical_design.md 承载，该稿已删除，此处为唯一权威）
 

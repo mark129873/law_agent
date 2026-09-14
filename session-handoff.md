@@ -2,16 +2,26 @@
 
 ## 当前已验证
 - 现在明确可用的部分：
-  - **Agent 模块一期重写 + 思考块 + Langfuse trace + 全量 Prompt 优化全部 passing（BE-032~044 + FE-001~016；BE-030 deprecated）**：主图 15 节点 + RAG 子图 10 节点 + 服务层 + status/think 双事件 + 豆包式思考块 + Langfuse 三级追踪 + 12 个 Prompt 五段结构化。
+  - **Agent 模块一期重写 + 思考块 + Langfuse trace + 全量 Prompt 优化 + 精排状态语义修复全部 passing（BE-032~045 + FE-001~016；BE-030 deprecated）**：主图 15 节点 + RAG 子图 10 节点 + 服务层 + status/think 双事件 + 豆包式思考块 + Langfuse 三级追踪 + 12 个 Prompt 五段结构化。
   - **全量 Prompt 优化（BE-044，本轮新增）**：12 个 Prompt 统一五段结构（角色/任务/格式/规则/纪律）+ JSON 纪律（禁 markdown 代码块）+ 示例值防锚定标注 + answer_generator 明确【来源：文件名】格式硬约束 + grounding 降误判（实质一致即可/无关数字不算法律数据/宁可放行）。**编排器"不 finish"误诊修正**（Langfuse 时间线取证：闲聊打回真凶是重复执行 direct_answer，非 judge）——regenerating：RAG 2→0、闲聊 3→0；RAG 回答从 65 字重复堆砌变一句精准+来源标注。
   - **Langfuse trace（BE-043，本轮新增）**：domain TraceSink/TraceSpan 端口 + trace_sink_var（ContextVar）；infrastructure/trace/langfuse_sink.py（langfuse 4.15.2）；ChatService 记 trace 生命周期与流程事件、with_node_status 压/弹节点 span（子图嵌套）、LLMService 三路径记 generation；.env 开关 LANGFUSE_ENABLED（默认 false，缺密钥 WARN 降级，全方法吞异常）。
   - **真实云端验证通过**（jp.cloud.langfuse.com，用户 .env 预置密钥）：E2E trace 含 29 节点 span / 11 generation（model+Prompt+输出）/ 15 think + 2 regenerating 事件。
-  - **测试体系**：自动化 225 个（unit 155 含 agent 98 / integration 70 含 agent 12 与 API 9）；test_milvus_vector_store.py 5 例需真实 Milvus（不可达自动跳过）。
-- 最近一轮实际跑过的验证（2026-09-14，Session 040 收尾）：
-  - Milvus 集合重置后全量 `uv run pytest tests -q -rs` → **225 passed, 1 warning**；前端 `npm run build` 通过；`git diff --check` 通过。
+  - **精排状态语义修复（BE-045）**：`RERANK_ENABLED=false` 被识别为主动关闭，使用 RRF 但不再显示“精排不可用”；CrossEncoder 真失败仍保留 degraded/WARN；启动日志记录 `rerank_enabled` 与 `reranker_device`。
+  - **测试体系**：自动化 226 个（unit 156 含 agent 99 / integration 70 含 agent 12 与 API 9）；test_milvus_vector_store.py 5 例需真实 Milvus（不可达自动跳过）。
+- 最近一轮实际跑过的验证（2026-09-14，Session 041）：
+  - Milvus 集合重置后全量 `uv run pytest tests -q -rs` → **226 passed, 1 warning**；相关精排测试 37 passed。
+  - 真实后端启动日志确认 `rerank_enabled=false`；上传专利法 TXT 后提问“发明专利权的保护期限是多少年？”返回“二十年”、第四十二条来源 10 条，SSE 思考文案为“证据按融合排序完成（精排已关闭）”。
+  - `frontend/npm run build` 通过；本次改动涉及后端 SSE 文案，无需前端代码改动。
+  - Qwen3-Reranker 本地快照独立实测可加载并返回分数；CPU 8 条候选约 75s、20 条超过 180s，故当前 CPU `.env` 保持关闭以避免请求卡死。
   - README 本地相对链接 5 个均有效，2 个 Mermaid 代码块与全部 Markdown 围栏闭合；配置、API、仓库地址和功能边界已对照当前代码核验。
   - 最近一次真实 E2E 仍为 Session 034：GLM+Milvus 全断言通过，RAG 回答一句精准+【来源】一次通过；闲聊 curl 实测 0 regenerating。
-- 验证后已清理：law_chunks 集合不存在（无需 drop）、Milvus 三个容器已停止；本轮未改动测试前已存在且被 gitignore 的 `backend/data/law_agent.db`。
+- 验证后已清理：本轮创建的测试会话/专利法文档已删除，`law_chunks` 集合已 drop，Milvus 三个容器保持运行状态但集合为空；`backend/data/law_agent.db` 仍为 gitignore 的本地数据库文件。
+
+## 本轮改动（Session 041：修复精排状态误报）
+- 根因：本地 `backend/.env` 显式设置 `RERANK_ENABLED=false`；模型并非坏掉。CPU 真实精排很慢，20 条候选实测超过 180s。
+- 代码：`RerankResult` 增 `disabled`，`EvidenceRankingNode` 区分主动关闭/模型失败文案与 trace；关闭记 INFO、失败记 WARN；应用启动日志记录精排开关和设备。
+- 文档/功能：同步 `docs/PRODUCT.md`、`docs/ARCHITECTURE.md`、`docs/RELIABILITY.md`、`feature_list.json`（BE-045）。
+- 验证：定向 37 passed；全量 226 passed、1 warning；真实专利法问答正常返回“二十年”并带 10 条来源。
 
 ## 本轮改动（Session 040：GitHub 发布版 README）
 - `README.md` 从极简启动说明扩展为完整项目首页：项目定位、技术亮点、系统/主图 Mermaid、RAG 与 SSE、技术栈、快速开始、配置/API、目录结构、测试、边界、贡献和 License 状态。

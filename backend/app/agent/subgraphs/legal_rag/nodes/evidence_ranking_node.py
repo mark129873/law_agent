@@ -39,11 +39,18 @@ class EvidenceRankingNode:
             candidates, key=lambda item: item.get("rrf_score") or 0.0, reverse=True
         )[: self._config.rerank_max_candidates]
         result = await self._reranker.rerank(original, pre_rerank, top_n=self._config.rerank_top_k)
-        # 思考内容（BE-042）：运行细节——精排是否可用（降级=按 RRF 融合序）与保留条数
-        if result.degraded:
+        # 思考内容（BE-042）：主动关闭与模型故障使用不同文案，避免把
+        # RERANK_ENABLED=false 这种有意配置误报成“精排不可用”。两种状态
+        # 都按 RRF 融合序输出，但只有实际异常才算 degraded。
+        if result.disabled:
             emit_think(
                 "evidence_ranking_node",
-                f"证据重排降级（精排不可用），按融合排序保留 {len(result.items)} 条证据",
+                f"证据按融合排序完成（精排已关闭），保留 {len(result.items)} 条证据",
+            )
+        elif result.degraded:
+            emit_think(
+                "evidence_ranking_node",
+                f"证据重排失败，已降级为融合排序，保留 {len(result.items)} 条证据",
             )
         else:
             emit_think(
@@ -63,6 +70,7 @@ class EvidenceRankingNode:
                         "pre_rerank_count": len(pre_rerank),
                         "rerank_count": len(result.items),
                         "reranker_degraded": result.degraded,
+                        "reranker_disabled": result.disabled,
                     },
                 )
             ],

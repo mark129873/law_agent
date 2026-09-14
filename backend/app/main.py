@@ -70,6 +70,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "db_provider": settings.db_provider.value,
             "vector_store_provider": settings.vector_store_provider.value,
             "llm_provider": settings.llm_provider.value,
+            # 把精排的最终生效开关写入启动日志，排查“为什么一直走 RRF”
+            # 时无需猜测 .env 是否被读取；不记录模型路径等非必要信息。
+            "rerank_enabled": settings.rerank_enabled,
+            "reranker_device": settings.reranker_device,
         },
     )
 

@@ -3,13 +3,21 @@
 ## 当前已验证状态
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`（当前分支 feature/auto_coder）
 - 标准启动路径：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 225 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
-- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）全部 passing：主图 + Local Legal RAG 子图 + Web/Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化（打回率 RAG 2→0、闲聊 3→0），架构决策见 docs/ARCHITECTURE.md
-- 已知性能边界：本机 CPU（无 CUDA）上 Qwen3-Reranker-0.6B 约 15s/对，本地部署默认 `RERANK_ENABLED=false` 走 RRF 降级序（GPU 机器可开启精排）
+- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 226 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
+- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）全部 passing：主图 + Local Legal RAG 子图 + Web/Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化（打回率 RAG 2→0、闲聊 3→0），架构决策见 docs/ARCHITECTURE.md
+- 已知性能边界：本机 CPU（无 CUDA）上 Qwen3-Reranker-0.6B 可加载但推理很慢（8 条候选实测约 75s，20 条超过 180s）；本地 `.env` 保持 `RERANK_ENABLED=false`，按 RRF 正常完成并明确显示“精排已关闭”，GPU 机器可开启真实精排
 - 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；仅收紧主图总预算与 RAG 无充分证据后的恢复轮次，图拓扑和其他重试机制不变
-- 当前最高优先级未完成功能：无——BE-001~044 与 FE-001~016 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
+- 当前最高优先级未完成功能：无——BE-001~045 与 FE-001~016 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
 - 当前 blocker：无
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md（Session 001~030 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
+
+### Session 041（修复精排状态误报）
+- 日期：2026-09-14
+- 本轮目标：排查“证据重排降级（精排不可用）”是否由 reranker 故障导致，并修复主动关闭精排时的误导性思考文案。
+- 根因与决策：工作区 `.env` 曾显式设置 `RERANK_ENABLED=false`，不是模型加载失败；本地 Qwen3-Reranker 快照实测可加载并返回分数，但 CPU 对 20 条候选超过 180s，因此恢复安全的 CPU 默认关闭，不把它改成会卡死请求的强制开启。
+- 改动：`RerankResult` 增 `disabled` 状态；EvidenceRankingNode 区分“精排已关闭”和“模型失败降级”；主动关闭记 INFO，模型失败仍记 WARN；启动日志增加 `rerank_enabled`/`reranker_device`；同步 PRODUCT/ARCHITECTURE/RELIABILITY 与 BE-045。
+- 验证：Milvus 集合重置；相关单测 37 passed；全量 `uv run pytest tests -q -rs` 为 **226 passed, 1 warning**；`frontend/npm run build` 通过；真实启动日志确认 `rerank_enabled=false`；上传专利法后提问“发明专利权的保护期限是多少年？”返回“二十年”、第四十二条来源 10 条，SSE 思考显示“证据按融合排序完成（精排已关闭）”。
+- 风险/交接：若要真实精排，请在 GPU 或可接受长延迟的机器设置 `RERANK_ENABLED=true`；当前 CPU 配置无需再把“精排已关闭”误判为项目故障。
 
 ### Session 040（GitHub 发布版 README）
 - 日期：2026-09-14

@@ -323,6 +323,13 @@
       "description": "主图 6 + RAG 子图 6 统一五段结构（角色/任务/格式/规则/纪律）；强化 JSON 输出纪律（禁 markdown 代码块）；消除示例值锚定偏差；answer_generator 明确【来源：文件名】格式硬约束；direct_answer 避雷法条编号与精确法律数据；grounding RAG 档实质一致即可 + GENERAL 档无关数字不算法律数据；retrieval_planner target_evidence 量化引导。硬约束：9 个角色标记词、BE-017 字面锚点、JSON 键与值域零变更。验证：全量 pytest + 真实 E2E + Langfuse regenerating 对比（打回率下降）。",
       "status": "passing",
       "evidence": "2026-09-13：12 个 Prompt 统一五段结构（角色/任务/格式/规则/纪律）+ JSON 纪律（禁 markdown 代码块）+ 示例值防锚定标注；answer_generator 明确【来源：文件名】格式；direct_answer 避雷法条编号；grounding RAG 档实质一致即可 + GENERAL 档无关数字不算法律数据；retrieval_planner target_evidence 1~6 条。9 角色标记词与字面锚点零变更，干净环境 225 passed。真实验证：RAG 回答从 65 字重复堆砌变一句精准+来源标注、一次通过；用 Langfuse trace 取证修正误诊——闲聊打回真凶是编排器该 finish 时重复选 direct_answer（非 judge），修编排规则后 regenerating：RAG 2→0、闲聊 3→0。"
+    },
+    {
+      "id": "BE-045",
+      "name": "区分精排主动关闭与模型故障降级",
+      "description": "RERANK_ENABLED=false 时继续使用 RRF 融合序，但以 disabled 状态和“精排已关闭”思考文案展示；CrossEncoder 加载/推理异常仍以 degraded 状态、WARN 日志和故障文案展示；启动日志记录生效开关与设备。",
+      "status": "passing",
+      "evidence": "2026-09-14：RerankResult 增 disabled 状态，EvidenceRankingNode 区分关闭/失败文案与 trace；启动日志记录开关和设备；37 个相关单测通过，真实模型快照可加载并返回分数。"
     }
   ]
 }

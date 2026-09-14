@@ -181,6 +181,7 @@ def test_rerank_degrades_to_rrf_order_on_scorer_error():
     docs = _docs()
     result = asyncio.run(service.rerank("原始问题", docs, top_n=2))
     assert result.degraded is True
+    assert result.disabled is False
     assert "model not loaded" in result.error
     assert [item["chunk_id"] for item in result.items] == ["c1", "c2"]  # 原序（RRF）截断
     assert all("rerank_score" not in item for item in result.items)  # 降级不写 rerank 分
@@ -201,7 +202,8 @@ def test_rerank_disabled_degrades_to_rrf_order_without_scoring():
     service = RerankerService(scorer, enabled=False)
     docs = [{"chunk_id": "c1", "content": "甲"}, {"chunk_id": "c2", "content": "乙"}]
     result = asyncio.run(service.rerank("q", docs, top_n=1))
-    assert result.degraded is True
+    assert result.degraded is False
+    assert result.disabled is True
     assert "disabled" in result.error
     assert [item["chunk_id"] for item in result.items] == ["c1"]  # 原序截断
     assert scorer.calls == []  # 不触发打分（不加载模型）

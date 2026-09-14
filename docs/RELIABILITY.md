@@ -37,7 +37,7 @@
 | service | 归属 |
 |---------|------|
 | `system` | 应用生命周期、健康检查、全局异常兜底 |
-| `agent` | Agent 图节点执行（一期重写：意图路由/编排/检索规划/查询变体/混合检索/重排/证据评估/恢复/回答/校验/兜底）；每节点起止各一条 INFO（"Agent node started/completed"，data.node + data.duration_ms），节点状态同时以 status SSE 事件外推（前端浅色过程展示，BE-041）；LLM 节点 data 含 model 与业务计数；rerank 降级记 WARN（"Agent reranker failed/degraded"） |
+| `agent` | Agent 图节点执行（一期重写：意图路由/编排/检索规划/查询变体/混合检索/重排/证据评估/恢复/回答/校验/兜底）；每节点起止各一条 INFO（"Agent node started/completed"，data.node + data.duration_ms），节点状态同时以 status SSE 事件外推（前端浅色过程展示，BE-041）；LLM 节点 data 含 model 与业务计数；精排主动关闭记 INFO，模型加载/推理失败才记 WARN（"Agent reranker failed, degraded to RRF order"） |
 | `api` | API 层业务异常与未预期异常处理 |
 | `database` | 数据库连接与建表 |
 | `vector_store` | 向量库（Milvus）初始化与读写 |
