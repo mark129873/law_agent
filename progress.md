@@ -11,6 +11,13 @@
 - 当前 blocker：无
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md（Session 001~030 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
 
+### Session 040（GitHub 发布版 README）
+- 日期：2026-09-14
+- 本轮目标：为仓库提供适合 GitHub 项目首页的中文 README，仅陈述当前代码与文档已经实现或明确标注的能力。
+- 改动：重写 `README.md`，补齐项目定位、技术亮点、两张 Mermaid 架构图、RAG/SSE 说明、真实仓库克隆地址、跨平台启动步骤、配置/API/目录结构、验证方式、已知边界、贡献说明与 License 状态；明确 Web/Plugin 仍为 Stub、MySQL 尚未接入以及法律免责声明。
+- 验证：逐项对照 `docs/ARCHITECTURE.md`、`docs/PRODUCT.md`、代码配置和 API 路由；本地链接 5 个均有效、2 个 Mermaid 代码块闭合；Milvus 集合重置后全量 pytest `225 passed, 1 warning`，前端 `npm run build` 通过，`git diff --check` 通过。
+- 状态：纯发布文档改进，不新增产品功能，`feature_list.json` 状态与证据无需变更；热层 Session 10 个、passing 条目 36 个，均未触发冷热沉降。
+
 ### Session 039（收紧失败路径重试预算）
 - 日期：2026-09-14
 - 本轮目标：按用户要求减少 RAG 无对应文档时的恢复次数，以及主图总体重试预算；不改变架构、节点或 LangGraph 连线。

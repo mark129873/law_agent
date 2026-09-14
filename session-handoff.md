@@ -7,11 +7,17 @@
   - **Langfuse trace（BE-043，本轮新增）**：domain TraceSink/TraceSpan 端口 + trace_sink_var（ContextVar）；infrastructure/trace/langfuse_sink.py（langfuse 4.15.2）；ChatService 记 trace 生命周期与流程事件、with_node_status 压/弹节点 span（子图嵌套）、LLMService 三路径记 generation；.env 开关 LANGFUSE_ENABLED（默认 false，缺密钥 WARN 降级，全方法吞异常）。
   - **真实云端验证通过**（jp.cloud.langfuse.com，用户 .env 预置密钥）：E2E trace 含 29 节点 span / 11 generation（model+Prompt+输出）/ 15 think + 2 regenerating 事件。
   - **测试体系**：自动化 225 个（unit 155 含 agent 98 / integration 70 含 agent 12 与 API 9）；test_milvus_vector_store.py 5 例需真实 Milvus（不可达自动跳过）。
-- 最近一轮实际跑过的验证（2026-09-13，Session 034 收尾）：
-  - 干净环境（删 data + reset_milvus）全量 `uv run pytest tests -q` → **225 passed**（9 角色标记词分流全绿，Prompt 契约零破坏）
-  - 真实 E2E（GLM+Milvus）：verify_real_e2e.py 全断言通过，RAG 回答一句精准+【来源】一次通过；闲聊 curl 实测 0 regenerating
-  - Langfuse 打回率对比：RAG regenerating 2→0、闲聊 3→0；judge verdict 留档取证（时间线定位编排器重复决策）
-- 验证后已清理：law_chunks 集合 drop、backend/data 删除、后端进程停止
+- 最近一轮实际跑过的验证（2026-09-14，Session 040 收尾）：
+  - Milvus 集合重置后全量 `uv run pytest tests -q -rs` → **225 passed, 1 warning**；前端 `npm run build` 通过；`git diff --check` 通过。
+  - README 本地相对链接 5 个均有效，2 个 Mermaid 代码块与全部 Markdown 围栏闭合；配置、API、仓库地址和功能边界已对照当前代码核验。
+  - 最近一次真实 E2E 仍为 Session 034：GLM+Milvus 全断言通过，RAG 回答一句精准+【来源】一次通过；闲聊 curl 实测 0 regenerating。
+- 验证后已清理：law_chunks 集合不存在（无需 drop）、Milvus 三个容器已停止；本轮未改动测试前已存在且被 gitignore 的 `backend/data/law_agent.db`。
+
+## 本轮改动（Session 040：GitHub 发布版 README）
+- `README.md` 从极简启动说明扩展为完整项目首页：项目定位、技术亮点、系统/主图 Mermaid、RAG 与 SSE、技术栈、快速开始、配置/API、目录结构、测试、边界、贡献和 License 状态。
+- Git 克隆地址使用当前 `origin`：`https://github.com/mark129873/law_agent_harness.git`；Docker 启动命令改为可从仓库根目录执行，补充 PowerShell 的 `curl.exe` 提示。
+- 只陈述当前事实：SQLite 是唯一已启用数据库 Provider，Web Search/Plugin 仍为 Stub，MySQL 8.0 尚未接入，许可证文件尚未提供；未把二期规划写成现有能力。
+- 验证：全量 pytest 225 passed、1 warning；前端 build 通过；README 本地链接与 Markdown 围栏检查通过；`feature_list.json` 无状态变化且冷热分层未触发。
 
 ## 本轮改动（Session 039：收紧失败路径重试预算）
 - 用户要求仅减少 RAG 无对应文档的恢复次数与主图总体重试预算，不改变架构、节点或 LangGraph 连线。
