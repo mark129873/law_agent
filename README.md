@@ -136,3 +136,7 @@ law_agent/
 │   └── RELIABILITY.md         # 日志、观测和干净环境规范
 └── README.md
 ```
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE) 开源。

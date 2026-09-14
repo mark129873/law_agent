@@ -11,6 +11,12 @@
 - 当前 blocker：无
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md（Session 001~030 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
 
+### Session 044（添加 MIT 开源协议）
+- 日期：2026-09-14
+- 本轮目标：为仓库添加标准 MIT 开源协议并在 README 中声明。
+- 改动：新增根目录 `LICENSE`，版权主体标注为 `law_agent contributors`；README 增加 MIT License 链接。
+- 验证：许可证文件、README 链接和工作区状态检查通过；本轮未修改运行时代码，沿用上一轮全量 pytest 226 passed、1 warning。
+
 ### Session 043（删除低质量 fallback_generator_agent）
 - 日期：2026-09-14
 - 本轮目标：删除实际效果不佳的 `fallback_generator_agent`，避免 grounding 预算耗尽后再次调用 LLM 覆盖已有回答。

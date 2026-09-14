@@ -18,6 +18,11 @@
   - 最近一次真实 E2E 仍为 Session 034：GLM+Milvus 全断言通过，RAG 回答一句精准+【来源】一次通过；闲聊 curl 实测 0 regenerating。
 - 验证后已清理：本轮创建的测试会话/专利法文档已删除，`law_chunks` 集合已 drop，Milvus 三个容器保持运行状态但集合为空；`backend/data/law_agent.db` 仍为 gitignore 的本地数据库文件。
 
+## 本轮改动（Session 044：添加 MIT 开源协议）
+- 新增根目录 `LICENSE`，采用标准 MIT License 文本，版权主体为 `law_agent contributors`。
+- README 增加许可证说明和 `LICENSE` 链接。
+- 本轮只涉及许可证与文档，不改运行时代码；上一轮全量测试结果为 226 passed、1 warning。
+
 ## 本轮改动（Session 043：删除低质量 fallback_generator_agent）
 - 删除 `backend/app/agent/nodes/fallback_generator_agent.py`、`backend/app/agent/prompts/fallback_generator.py` 及主图注册、条件边、节点标签。
 - grounding 未通过且 `max_global_steps` 耗尽时返回 `final`，由已有 `final_answer_node` 整理当前草稿；不再进行额外兜底 LLM 调用，think 事件说明预算收尾原因。
