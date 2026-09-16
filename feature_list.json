@@ -190,7 +190,7 @@
       "name": "Tavily Remote MCP 联网搜索后端",
       "description": "通过 WebSearchPort 与 TavilyMcpSearchClient 接入官方 Remote MCP Streamable HTTP；按钮显式请求才调用 tavily_search，结果经 web_search_entry_node→observation_node→回答生成→grounding→final；支持配置状态、web_sources/web_search_notice SSE、失败不编造、grounding 重试复用结果；每次搜索将完整 MCP 原始响应和规范化结果原子写入永久独立 JSON 日志，脱敏且落盘失败闭合为失败。",
       "status": "passing",
-      "evidence": "2026-09-16：Fake MCP 单测 8、主图 8、API 16 通过；覆盖成功/错误/空结果/异常格式/URL 校验/脱敏/一调用一文件、按钮关闭与 grounding 重试不重复搜索；commit 21a19df。"
+      "evidence": "2026-09-16：Fake MCP 单测 8、主图 8、API 12 通过；覆盖成功/错误/空结果/异常格式/URL 校验/脱敏/一调用一文件、按钮关闭与 grounding 重试不重复搜索；commit 21a19df。"
     },
     {
       "id": "FE-017",
