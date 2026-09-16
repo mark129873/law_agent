@@ -92,7 +92,7 @@
       "name": "Plugin Stub（Web Search 已替换为 Tavily MCP）",
       "description": "plugin_entry_node、plugin_stub_node（NOT_IMPLEMENTED）保留稳定插件边界，禁止动态加载外部代码；Web Search Stub 已删除，联网搜索迁移至 BE-048 的 Tavily Remote MCP 实现。",
       "status": "passing",
-      "evidence": "2026-09-16：Plugin 入口与 Stub 仍仅返回 NOT_IMPLEMENTED/DISABLED，不动态加载外部代码；旧 Web Search Stub 已移除，主图改由 Tavily MCP 能力接管。相关单测与 DDD 守护通过。"
+      "evidence": "2026-09-16：Plugin 入口与 Stub 仍仅返回 NOT_IMPLEMENTED/DISABLED，不动态加载外部代码；旧 Web Search Stub 已移除，主图改由 Tavily MCP 能力接管。相关单测与 DDD 守护通过，commit 21a19df。"
     },
     {
       "id": "BE-038",
@@ -190,14 +190,14 @@
       "name": "Tavily Remote MCP 联网搜索后端",
       "description": "通过 WebSearchPort 与 TavilyMcpSearchClient 接入官方 Remote MCP Streamable HTTP；按钮显式请求才调用 tavily_search，结果经 web_search_entry_node→observation_node→回答生成→grounding→final；支持配置状态、web_sources/web_search_notice SSE、失败不编造、grounding 重试复用结果；每次搜索将完整 MCP 原始响应和规范化结果原子写入永久独立 JSON 日志，脱敏且落盘失败闭合为失败。",
       "status": "passing",
-      "evidence": "2026-09-16：Fake MCP 单测 8、主图 8、API 16 通过；覆盖成功/错误/空结果/异常格式/URL 校验/脱敏/一调用一文件、按钮关闭与 grounding 重试不重复搜索。"
+      "evidence": "2026-09-16：Fake MCP 单测 8、主图 8、API 16 通过；覆盖成功/错误/空结果/异常格式/URL 校验/脱敏/一调用一文件、按钮关闭与 grounding 重试不重复搜索；commit 21a19df。"
     },
     {
       "id": "FE-017",
       "name": "联网搜索界面",
       "description": "对话框新增可保持选中状态的「联网搜索」按钮；开启时检查并显示 TAVILY_API_KEY 配置 tag；消息独立展示「联网搜索内容」折叠区，显示标题、合法网页链接和每条最多 300 字预览，历史消息从 sources 恢复；消费 web_sources/web_search_notice SSE。",
       "status": "passing",
-      "evidence": "2026-09-16：React 状态、SSE 事件解析、按钮选中/配置 tag、网页来源折叠与 300 字防御性截断已实现；npm run build 通过，前端类型检查无错误。"
+      "evidence": "2026-09-16：React 状态、SSE 事件解析、按钮选中/配置 tag、网页来源折叠与 300 字防御性截断已实现；npm run build 通过，前端类型检查无错误；commit 21a19df。"
     }
   ]
 }
