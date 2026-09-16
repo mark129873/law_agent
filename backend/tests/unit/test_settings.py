@@ -116,3 +116,30 @@ def test_langfuse_enabled_switchable_via_env(monkeypatch: pytest.MonkeyPatch) ->
     assert settings.langfuse_enabled is True
     assert settings.langfuse_base_url == "https://jp.cloud.langfuse.com"
     assert settings.langfuse_public_key == "pk-lf-test"
+
+
+def test_tavily_defaults_and_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tavily 配置默认使用 Remote MCP、basic 深度和 5 条结果。"""
+    for name in ("TAVILY_API_KEY", "TAVILY_MCP_URL", "TAVILY_SEARCH_DEPTH", "TAVILY_MAX_RESULTS"):
+        monkeypatch.delenv(name, raising=False)
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert settings.tavily_mcp_url == "https://mcp.tavily.com/mcp/"
+    assert settings.tavily_api_key == ""
+    assert settings.tavily_search_depth == "basic"
+    assert settings.tavily_max_results == 5
+
+    monkeypatch.setenv("TAVILY_MCP_URL", "https://example.test/mcp")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test")
+    monkeypatch.setenv("TAVILY_SEARCH_DEPTH", "advanced")
+    monkeypatch.setenv("TAVILY_MAX_RESULTS", "8")
+    overridden = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert overridden.tavily_mcp_url == "https://example.test/mcp"
+    assert overridden.tavily_api_key == "tvly-test"
+    assert overridden.tavily_search_depth == "advanced"
+    assert overridden.tavily_max_results == 8
+
+
+def test_tavily_max_results_is_bounded() -> None:
+    """避免一次请求把远程结果量配置到不可控范围。"""
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, tavily_max_results=4)  # type: ignore[call-arg]

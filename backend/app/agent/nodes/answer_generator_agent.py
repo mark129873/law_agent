@@ -9,6 +9,10 @@ from app.agent.constants import (
     CAPABILITY_DISABLED,
     CAPABILITY_NOT_IMPLEMENTED,
     CAPABILITY_SUCCESS,
+    CAPABILITY_WEB_SEARCH_CONFIG_REQUIRED,
+    CAPABILITY_WEB_SEARCH_EMPTY,
+    CAPABILITY_WEB_SEARCH_ERROR,
+    CAPABILITY_WEB_SEARCH_LOG_WRITE_FAILED,
 )
 from app.agent.events import emit_event
 from app.agent.prompts.answer_generator import build_answer_messages
@@ -28,10 +32,10 @@ logger = logging.getLogger("app.agent.nodes.answer_generator")
 class AnswerGeneratorAgent:
     """finish 路径的唯一流式出口（架构映射决策 4）。
 
-    四种情形：
+    五种情形：
     1. 直接回答已有完整草稿（direct 能力已流式输出）→ 透传，不再调模型；
-    2. Web/Plugin 未开通（NOT_IMPLEMENTED/DISABLED）→ 流式生成说明性回答；
-    3. 有知识库证据（含部分证据）→ 依据 BE-017 策略流式生成；
+    2. Web/Plugin 能力不可用 → 流式生成说明性回答；
+    3. 有联网或知识库证据 → 使用对应来源生成回答；
     4. 走过检索但无任何命中 → 流式生成"信息不足"声明（BE-017 契约）。
     """
 
@@ -57,14 +61,24 @@ class AnswerGeneratorAgent:
                 ],
             }
 
-        # 未开通能力（Web/Plugin Stub）→ 说明性回答（规则 3，PRODUCT.md §3）
-        if status in (CAPABILITY_NOT_IMPLEMENTED, CAPABILITY_DISABLED):
-            feature = "网络搜索" if state.get("last_capability") == "web_search" else "插件能力"
+        web_failure = {
+            CAPABILITY_WEB_SEARCH_CONFIG_REQUIRED,
+            CAPABILITY_WEB_SEARCH_EMPTY,
+            CAPABILITY_WEB_SEARCH_ERROR,
+            CAPABILITY_WEB_SEARCH_LOG_WRITE_FAILED,
+        }
+        # 外部能力不可用 → 说明性回答，不把错误状态送入法律回答 Prompt。
+        if status in (CAPABILITY_NOT_IMPLEMENTED, CAPABILITY_DISABLED) or status in web_failure:
+            feature = "联网搜索" if state.get("last_capability") == "web_search" else "插件能力"
+            reason = str(
+                capability.get("content")
+                or (f"{feature}尚未开通" if status == CAPABILITY_NOT_IMPLEMENTED else "能力暂不可用")
+            )
             messages = build_capability_notice_messages(
                 question,
-                issues=[f"{feature}功能尚未开通，请告知用户该功能暂不可用。"],
+                issues=[f"{feature}状态：{reason}"],
             )
-            mode = f"not_implemented:{feature}"
+            mode = f"capability_notice:{feature}"
         else:
             # 情形 3/4：依据 BE-017 策略生成（context 为空走信息不足声明）
             messages = build_answer_messages(
@@ -72,8 +86,13 @@ class AnswerGeneratorAgent:
                 context=context,
                 history=state.get("history"),
                 feedback="；".join(state.get("grounding_issues") or []) if is_retry else "",
+                web_search=state.get("last_capability") == "web_search",
             )
-            mode = "rag_answer" if context else "insufficient_answer"
+            mode = (
+                "web_answer"
+                if state.get("last_capability") == "web_search"
+                else ("rag_answer" if context else "insufficient_answer")
+            )
 
         # 打回重生成前必推 regenerating（前端清空已渲染增量，SSE 契约）
         if is_retry:

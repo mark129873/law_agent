@@ -9,7 +9,7 @@
 
 ## 项目简介
 
-Law Agent 意图构建法律助手, 目前第一版已完成知识库问答场景(法条检索), 并预留插件入口(合同&文书审查插件、案件辅助插件)、外部知识补充(网页搜查、外接MCP)以待后续开发。
+Law Agent 意图构建法律助手，已完成知识库问答场景（法条检索），并通过 Tavily Remote MCP 提供可由用户显式开启的联网搜索；合同&文书审查、案件辅助等插件仍保留 Stub 入口，等待后续开发。
 
 用户可以上传文档，系统完成文档解析、清洗、段落感知切分、向量化和 Milvus 入库；用户提问后，Agent 通过 LangGraph 主图与 Local Legal RAG 子图完成问题路由、本地 Legal RAG、依据校验与确定性收尾；检索走 Milvus 稠密向量 + BM25 混合召回（服务端 RRF），本地 Reranker 重排。回答必须能落到知识库来源；没有依据时会明确说明，而不是编造法条。
 
@@ -46,7 +46,7 @@ Frontend (React)  --HTTP/SSE-->  FastAPI
                                       ▲
                     Infrastructure    │    Agent (LangGraph)
                     SQLite / Milvus   │    主图 + legal_rag 子图
-                    Ollama / GLM      │    Web/Plugin Stub
+                    Ollama / GLM      │    Tavily MCP / Plugin Stub
 ```
 
 ### 主图流程

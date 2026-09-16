@@ -3,13 +3,20 @@
 ## 当前已验证状态
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`（当前分支 feature/auto_coder）
 - 标准启动路径：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 226 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
-- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ Reranker 模型统一（BE-046）+ 低质量兜底 Agent 删除（BE-047）全部 passing：主图 + Local Legal RAG 子图 + Web/Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
+- 标准验证路径：`cd backend && uv run pytest tests -q -rs`（当前 242 个自动化测试；本轮 237 passed、5 skipped、1 warning，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
+- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ Reranker 模型统一（BE-046）+ 低质量兜底 Agent 删除（BE-047）+ Tavily Remote MCP 搜索（BE-048/FE-017）全部 passing：主图 + Local Legal RAG 子图 + Tavily Web Search + Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
 - 当前 Reranker：全项目统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；`check_rerank_local.py` 首次下载到根目录 `.model/cross-encoder/ms-marco-MiniLM-L-6-v2` 并执行 CPU 样本打分。本地 `.env` 已切换为该模型并开启 `RERANK_ENABLED=true`；无法使用时仍按既有故障降级契约记录 WARN。
 - 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；grounding 未通过且预算耗尽时直接进入 `final_answer_node`，不再调用额外兜底 LLM；其他重试机制不变
-- 当前最高优先级未完成功能：无——BE-001~047 与 FE-001~016 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
-- 当前 blocker：无
+- 当前最高优先级未完成功能：无——BE-001~048 与 FE-001~017 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
+- 当前 blocker：无代码 blocker；Docker Desktop 未运行导致 5 个 Milvus 集成测试跳过，真实 Tavily Remote MCP smoke test 需部署环境提供 API Key；本轮 CUA 浏览器 inventory helper 不可用，前端以 `npm run build` 和 API/组件契约验证，未完成可见浏览器回归
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md（Session 001~030 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
+
+### Session 045（通过 Tavily Remote MCP 增加联网搜索）
+- 日期：2026-09-16
+- 本轮目标：用户通过「联网搜索」按钮触发 Tavily Remote MCP；搜索结果进入 observation→回答生成→grounding→最终收尾，并为每次搜索独立永久留档。
+- 改动：文档先行同步 PRODUCT/ARCHITECTURE/RELIABILITY；新增 `WebSearchPort`、Tavily Streamable HTTP 适配器、MCP v1 依赖与配置、原始/规范化结果原子 JSON 日志；新增 `use_web_search` 与状态 API、`web_sources`/`web_search_notice` SSE；前端新增持久在线模式按钮、配置 tag、联网来源折叠区、合法 URL 与 300 字预览；移除 Web Search Stub，保留 Plugin Stub；补齐单测、主图和 API 集成测试。
+- 验证：`cd backend && uv run pytest tests -q -rs` → 237 passed、5 skipped、1 warning（总计 242 项）；`cd frontend && npm run build` 通过（tsc + Vite）；`git diff --check` 通过；`feature_list.json` JSON 校验通过。Docker 不可用，5 个 Milvus 测试按既有规则跳过；CUA inventory helper 不可用，未完成可见浏览器实操。
+- 风险/交接：真实 Tavily 调用需在部署环境配置 `TAVILY_API_KEY`；搜索日志写入 `backend/log/web_search/` 后永久保留且已 gitignore，仓库中不应出现搜索日志或密钥；真实 Remote MCP smoke test 尚未执行。
 
 ### Session 044（添加 MIT 开源协议）
 - 日期：2026-09-14

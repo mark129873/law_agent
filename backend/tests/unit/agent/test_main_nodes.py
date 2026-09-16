@@ -83,13 +83,20 @@ def test_query_router_parses_and_defaults():
     result = asyncio.run(QueryRouterAgent(LLMService(StreamingFakeLLM([raw])), CONFIG)(_state(question="被开除了怎么赔")))
     assert result["request_type"] == "local_rag"
     assert result["extracted_conditions"] == {"年限": "7年"}
-    assert result["web_search_enabled"] is False  # 配置默认（一期 Stub）
+    assert result["web_search_requested"] is False  # 默认按钮关闭
 
     # 解析失败 → 原问题透传 + legal_question 默认（宁可多检索）
     result_bad = asyncio.run(QueryRouterAgent(LLMService(StreamingFakeLLM(["坏输出"])), CONFIG)(
         _state(question="原样问题")))
     assert result_bad["normalized_query"] == "原样问题"
     assert result_bad["request_type"] == "local_rag"
+
+    # 按钮关闭但问题明确要求“搜索/最新”时，路由到 Web 能力以便提示开启；
+    # 真正是否调用远程服务仍由 web_search_requested 在入口节点二次守卫。
+    result_web_hint = asyncio.run(QueryRouterAgent(LLMService(StreamingFakeLLM([])), CONFIG)(
+        _state(question="请搜索最新法规")))
+    assert result_web_hint["request_type"] == "web"
+    assert result_web_hint["web_search_requested"] is False
 
 
 # ---- OrchestratorAgent / ActionRouterNode ----

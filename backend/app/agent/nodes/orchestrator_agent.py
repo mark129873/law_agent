@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.agent.config import AgentConfig
-from app.agent.constants import ACTION_FINISH, node_label
+from app.agent.constants import ACTION_FINISH, ACTION_WEB_SEARCH, node_label
 from app.agent.nodes.action_router_node import ACTION_TARGETS
 from app.agent.prompts.orchestrator import build_orchestrator_messages
 from app.agent.schemas import OrchestratorDecision
@@ -42,6 +42,60 @@ class OrchestratorAgent:
                     make_trace(
                         "orchestrator_agent", "success", timer.elapsed_ms(),
                         extra={"forced_finish": True, "global_step_count": step_count},
+                    )
+                ],
+            }
+
+        # 产品开关优先于 LLM 决策：按钮开启时第一次能力必须是 Web Search；
+        # 搜索完成后直接 finish，Grounding 打回也复用同一批结果，避免重复
+        # 产生远程调用和费用。这是确定性护栏，不改变普通 RAG 编排。
+        last_capability = state.get("last_capability") or ""
+        request_type = state.get("request_type") or ""
+        if state.get("web_search_requested") and not last_capability:
+            action = ACTION_WEB_SEARCH
+            reason = "用户已开启联网搜索，执行一次 Tavily MCP 搜索"
+            emit_think("orchestrator_agent", f"编排决策：{node_label(ACTION_TARGETS[action])}——{reason}")
+            return {
+                "current_action": action,
+                "action_reason": reason,
+                "trace": [
+                    make_trace(
+                        "orchestrator_agent",
+                        "success",
+                        timer.elapsed_ms(),
+                        extra={"model": "explicit_ui_mode", "action": action, "global_step_count": step_count},
+                    )
+                ],
+            }
+        if request_type == "web" and not last_capability:
+            action = ACTION_WEB_SEARCH
+            reason = "问题需要联网信息，但联网搜索按钮未开启"
+            emit_think("orchestrator_agent", f"编排决策：{node_label(ACTION_TARGETS[action])}——{reason}")
+            return {
+                "current_action": action,
+                "action_reason": reason,
+                "trace": [
+                    make_trace(
+                        "orchestrator_agent",
+                        "success",
+                        timer.elapsed_ms(),
+                        extra={"model": "explicit_ui_guard", "action": action, "global_step_count": step_count},
+                    )
+                ],
+            }
+        if last_capability == "web_search":
+            action = ACTION_FINISH
+            reason = "联网搜索结果已获取，汇总回答并复用已有结果"
+            emit_think("orchestrator_agent", f"编排决策：{node_label(ACTION_TARGETS[action])}——{reason}")
+            return {
+                "current_action": action,
+                "action_reason": reason,
+                "trace": [
+                    make_trace(
+                        "orchestrator_agent",
+                        "success",
+                        timer.elapsed_ms(),
+                        extra={"model": "web_result_guard", "action": action, "global_step_count": step_count},
                     )
                 ],
             }

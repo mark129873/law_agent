@@ -67,14 +67,36 @@ GROUNDING_GENERAL_SYSTEM_PROMPT = (
     "5. 只输出 JSON 本身，不要任何其他内容。"
 )
 
+GROUNDING_WEB_SYSTEM_PROMPT = (
+    "# 角色\n"
+    "你是法律问答系统的回答校验器。\n"
+    "\n"
+    "# 任务\n"
+    "给定来自联网搜索的网页依据和回答，判断回答是否严格由网页内容支撑。\n"
+    "\n"
+    "# 输出格式\n"
+    "只输出一个合法 JSON 对象（以 { 开始、以 } 结束，不要 markdown 代码块，不要任何解释文字）。\n"
+    '{"passed": true, "unsupported_claims": [], "citation_issues": [], "reason": "一句中文判定理由"}\n'
+    "\n"
+    "# 判定规则\n"
+    "1. 每个具体结论都必须能在网页依据中找到实质出处；\n"
+    "2. 回答引用来源时，标题必须与网页依据标题一致，并使用【来源：网页标题】；\n"
+    "3. 依据中没有的事实、数字或结论必须判 passed=false；\n"
+    "4. 只输出 JSON 本身，不要任何其他内容。"
+)
+
 
 def build_grounding_messages(
     question: str,
     context: str,
     answer: str,
+    web_search: bool = False,
 ) -> list[ChatMessage]:
     """组装校验器的消息列表；context 为空时自动切换为一般对话校验标准。"""
-    system = GROUNDING_RAG_SYSTEM_PROMPT if context else GROUNDING_GENERAL_SYSTEM_PROMPT
+    if web_search:
+        system = GROUNDING_WEB_SYSTEM_PROMPT
+    else:
+        system = GROUNDING_RAG_SYSTEM_PROMPT if context else GROUNDING_GENERAL_SYSTEM_PROMPT
     context_block = context if context else "（空——本次回答未经知识库检索）"
     return [
         ChatMessage(role=MessageRole.SYSTEM, content=system),

@@ -37,12 +37,20 @@ ANSWER_SYSTEM_PROMPT = (
     "禁止输出与本次回答无关的内容。"
 )
 
+WEB_ANSWER_RULES = (
+    "\n\n# 联网搜索补充规则\n"
+    "本次【参考依据】来自 Tavily 联网搜索，不是本地知识库；只能依据给出的网页标题、地址和正文回答。"
+    "回答涉及网页事实时，使用【来源：网页标题】标注，标题必须与依据中的标题一致；"
+    "不得补写依据中没有的事实，不得把搜索结果当作法律意见。"
+)
+
 
 def build_answer_messages(
     question: str,
     context: str,
     history: list[ChatMessage] | None = None,
     feedback: str = "",
+    web_search: bool = False,
 ) -> list[ChatMessage]:
     """组装回答生成的消息列表。
 
@@ -50,9 +58,8 @@ def build_answer_messages(
     "指令+依据+问题"在同一消息内的遵循度更高（BE-017 已验证）。
     feedback 非空时（grounding 打回重答），附加修正指令。
     """
-    messages: list[ChatMessage] = [
-        ChatMessage(role=MessageRole.SYSTEM, content=ANSWER_SYSTEM_PROMPT)
-    ]
+    system_prompt = ANSWER_SYSTEM_PROMPT + (WEB_ANSWER_RULES if web_search else "")
+    messages: list[ChatMessage] = [ChatMessage(role=MessageRole.SYSTEM, content=system_prompt)]
     if history:
         messages.extend(history)
     if context:

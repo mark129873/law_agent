@@ -20,6 +20,8 @@ export interface Message {
   created_at: string
   /** 参考文档来源：仅 RAG 检索有命中的回答携带（后端持久化，历史消息同样可展示） */
   sources?: ReferenceSource[] | null
+  /** 联网搜索的配置/远程失败提示；只在当轮出现，历史来源仍由 sources 恢复 */
+  webSearchNotice?: WebSearchNotice | null
   /**
    * 思考块过程记录（BE-041/BE-042/FE-016）：仅本地展示不持久化，刷新后消失；
    * done 时由 AppContext 把流式过程快照挂到消息上
@@ -62,6 +64,24 @@ export interface ThoughtLine {
 export interface ReferenceSource {
   source: string
   content: string
+  /** web 表示 Tavily 网页来源；缺省值兼容旧的本地 RAG 历史消息 */
+  kind?: 'local' | 'web'
+  /** 网页来源标题与安全的 http(s) URL；本地来源不使用这两个字段 */
+  title?: string
+  url?: string
+  /** 后端为了界面展示而截断了正文（完整正文只在独立日志） */
+  truncated?: boolean
+}
+
+/** 联网搜索状态 tag；code 是稳定机器码，message 是用户可读文案 */
+export interface WebSearchNotice {
+  code: string
+  message: string
+}
+
+/** GET /api/chat/web-search/status 的响应 */
+export interface WebSearchStatus {
+  configured: boolean
 }
 
 /** 文档处理状态：pending/processing 处理中，ready 已入库可检索，failed 处理失败 */
@@ -91,6 +111,8 @@ export interface ApiErrorBody {
 export type ChatStreamEvent =
   | { type: 'delta'; content: string } // 一小段增量回答文本
   | { type: 'sources'; sources: ReferenceSource[] } // RAG 检索命中：参考文档来源（先于当轮 delta）
+  | { type: 'web_sources'; sources: ReferenceSource[] } // Tavily 网页来源（标题、链接、300 字预览）
+  | { type: 'web_search_notice'; code: string; message: string } // 联网搜索配置/失败 tag
   | { type: 'plan'; sub_queries: string[] } // 检索规划产出的全部查询（检索策略展示，重规划时再次出现）
   | { type: 'regenerating' } // 校验未通过，回答将清空重写
   | { type: 'status'; node: string; label: string; phase: 'start' | 'end'; duration_ms?: number } // 节点执行状态（BE-041，浅色过程展示）

@@ -2,7 +2,7 @@
 
 用 Fake 服务构建与生产完全一致的主图（含 legal_rag 子图），覆盖：
 简单法律问题（RAG 成功）/ 一般性对话（直接回答）/ 本地无证据（信息不足）
-/ Web 请求（DISABLED）/ Plugin 请求（NOT_IMPLEMENTED），
+/ Web 请求（按钮关闭时 DISABLED、按钮开启时 Tavily Fake 成功与重试复用）/ Plugin 请求（NOT_IMPLEMENTED），
 并验证 BE-041 状态事件跨子图贯通与事件顺序契约。
 """
 
@@ -20,6 +20,7 @@ from app.domain.entities.message import MessageRole
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
 from app.domain.services.embedding import EmbeddingService
+from app.domain.services.web_search import WEB_SEARCH_SUCCESS, WebSearchItem, WebSearchResult
 
 # 各 LLM 节点系统提示的特征片段
 ROUTER_MARKER = "意图路由器"
@@ -108,6 +109,30 @@ class FakeVectorStore(VectorStore):
 class FakeScorer:
     async def score(self, query: str, documents: list[str]) -> list[float]:
         return [float(len(doc)) for doc in documents]
+
+
+class FakeWebSearchPort:
+    """联网搜索端口 Fake：记录调用次数，验证主图不会重复访问远程 MCP。"""
+
+    configured = True
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    async def search(self, query: str, *, conversation_id: str) -> WebSearchResult:
+        self.calls.append((query, conversation_id))
+        return WebSearchResult(
+            search_id=f"search-{len(self.calls)}",
+            query=query,
+            status=WEB_SEARCH_SUCCESS,
+            results=(
+                WebSearchItem(
+                    title="国家知识产权局：专利法",
+                    url="https://example.com/patent-law",
+                    content="网页中的完整专利法说明。",
+                ),
+            ),
+        )
 
 
 def _build_workflow(scripts: dict[str, list[str]], answer: str = ANSWER_INSUFFICIENT, with_document: bool = True):
@@ -222,6 +247,75 @@ def test_case4_web_request_disabled():
     assert final["capability_status"] == "DISABLED"
     assert "尚未开通" in final["answer"]
     assert all(e.type != "sources" for e in events if e.type not in ("status", "think"))
+
+
+def _build_web_workflow(answer: str, *, max_global_steps: int = 2):
+    """构造按钮明确开启的 Web 主图，使用 Fake 端口隔离远程网络。"""
+    search = FakeWebSearchPort()
+    llm = MarkerFakeLLM({}, answer=answer)
+    workflow = create_qa_workflow(
+        llm,
+        embedding=FakeEmbedding(),
+        vector_store=FakeVectorStore(with_document=False),
+        reranker=RerankerService(FakeScorer()),
+        agent_config=AgentConfig(max_global_steps=max_global_steps),
+        rag_config=LegalRAGConfig(),
+        web_search=search,
+    )
+    return workflow, search
+
+
+def _run_web(workflow, question: str):
+    """以真实工作流适配器的 ainvoke + 事件接收器执行一次 Web 问答。"""
+    async def _run():
+        captured: list = []
+        token = event_emitter_var.set(captured.append)
+        try:
+            final = await workflow.ainvoke(
+                {
+                    "question": question,
+                    "history": [],
+                    "conversation_id": "conv-web",
+                    "web_search_requested": True,
+                }
+            )
+        finally:
+            event_emitter_var.reset(token)
+        return final, captured
+
+    return asyncio.run(_run())
+
+
+def test_case6_explicit_web_search_flows_through_observation_and_answer_chain():
+    """按钮开启：一次 MCP 结果经 web→observation→answer→grounding→final。"""
+    workflow, search = _build_web_workflow(
+        "网页显示专利法说明。【来源：国家知识产权局：专利法】"
+    )
+    final, events = _run_web(workflow, "请搜索专利法最新说明")
+
+    assert len(search.calls) == 1
+    assert search.calls[0] == ("请搜索专利法最新说明", "conv-web")
+    assert final["last_capability"] == "web_search"
+    assert final["capability_status"] == "SUCCESS"
+    assert final["evidence"][0]["source_url"] == "https://example.com/patent-law"
+    assert final["answer"].startswith("网页显示专利法说明")
+    trace_nodes = [item["node"] for item in final["trace"]]
+    assert "observation_node" in trace_nodes
+    business = [event for event in events if event.type not in ("status", "think")]
+    types = [event.type for event in business]
+    assert types.index("web_sources") < types.index("delta")
+    assert business[types.index("web_sources")].sources[0]["url"] == "https://example.com/patent-law"
+
+
+def test_case7_grounding_retry_reuses_web_result_without_second_search():
+    """网页回答被 grounding 打回时，回编排直接复用结果，不再次调用 MCP。"""
+    workflow, search = _build_web_workflow("网页事实但故意不写来源", max_global_steps=4)
+    final, events = _run_web(workflow, "请搜索专利法最新说明")
+
+    assert len(search.calls) == 1
+    assert sum(event.type == "web_sources" for event in events) == 1
+    assert any(event.type == "regenerating" for event in events)
+    assert final["capability_status"] == "SUCCESS"
 
 
 def test_case5_plugin_request_not_implemented():

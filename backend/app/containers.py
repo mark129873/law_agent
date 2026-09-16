@@ -25,6 +25,7 @@ from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
 from app.domain.services.embedding import EmbeddingService
 from app.domain.services.trace_sink import TraceSink
+from app.domain.services.web_search import WebSearchPort
 from app.domain.repositories.database import Database
 from app.infrastructure.database.sqlalchemy.database import SQLAlchemyDatabase, sqlite_url
 from app.infrastructure.document_parser.pdf_parser import PdfParser
@@ -34,6 +35,8 @@ from app.infrastructure.llm.glm import GLMProvider
 from app.infrastructure.llm.ollama import OllamaProvider
 from app.infrastructure.trace.langfuse_sink import LangfuseTraceSinkFactory
 from app.infrastructure.vector_store.milvus import MilvusVectorStore
+from app.infrastructure.web_search.log_writer import WebSearchLogWriter
+from app.infrastructure.web_search.tavily_mcp import TavilyMcpSearchClient
 
 
 def _build_database(settings: Settings) -> Database:
@@ -152,6 +155,23 @@ def _build_trace_sink_factory(settings: Settings) -> Callable[[], TraceSink | No
     )
 
 
+def _build_web_search(settings: Settings) -> WebSearchPort:
+    """构造联网搜索端口的 Tavily Remote MCP 适配器。
+
+    这是依赖注入的唯一基础设施装配点：Agent 只依赖
+    ``WebSearchPort``，因此单元测试可以注入 fake，生产环境才会创建
+    Tavily 的 Streamable HTTP 客户端。日志目录也在这里统一传入，保证
+    搜索结果始终落在与普通结构化日志相同的 backend/log 根目录下。
+    """
+    return TavilyMcpSearchClient(
+        mcp_url=settings.tavily_mcp_url,
+        api_key=settings.tavily_api_key,
+        search_depth=settings.tavily_search_depth,
+        max_results=settings.tavily_max_results,
+        log_dir=settings.resolved_log_dir,
+    )
+
+
 def create_container(settings: Settings | None = None) -> DIContainer:
     """创建并装配应用容器。
 
@@ -168,6 +188,9 @@ def create_container(settings: Settings | None = None) -> DIContainer:
     container.register(VectorStore, lambda c: _build_vector_store(settings), singleton=True)
     # 大模型：按 LLM_PROVIDER 配置注册对应实现（BE-010）
     container.register(LLMProvider, lambda c: _build_llm_provider(settings), singleton=True)
+    # 联网搜索：端口与 Tavily Remote MCP 适配器的映射集中在装配层；
+    # 未配置 API Key 时仍能启动，实际点击搜索后由适配器返回明确状态。
+    container.register(WebSearchPort, lambda c: _build_web_search(settings), singleton=True)
     # 文档处理 Pipeline 与知识库入库服务（BE-011/BE-013）
     container.register(DocumentPipeline, lambda c: _build_document_pipeline(settings), singleton=True)
     container.register(EmbeddingService, lambda c: _build_embedding_service(settings), singleton=True)
@@ -213,6 +236,7 @@ def create_container(settings: Settings | None = None) -> DIContainer:
                 reranker=c.resolve(RerankerService),
                 agent_config=AgentConfig(),
                 rag_config=LegalRAGConfig(),
+                web_search=c.resolve(WebSearchPort),
             ),
             # Langfuse trace 汇工厂（BE-043）：按 LANGFUSE_ENABLED 注入，关闭为 None
             trace_sink_factory=_build_trace_sink_factory(settings),

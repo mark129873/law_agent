@@ -1,12 +1,14 @@
 // 流式问答 API：用 fetch 消费后端的 SSE 流（POST /api/chat/stream）。
 // 为什么不用浏览器自带的 EventSource：它只支持 GET 请求，
 // 而提交问题需要 POST JSON，所以必须用 fetch 手动读取响应字节流。
-import type { ChatStreamEvent, NodeStatus, ReferenceSource } from '../types'
+import type { ChatStreamEvent, NodeStatus, ReferenceSource, WebSearchNotice, WebSearchStatus } from '../types'
+import { request } from './client'
 
 /** 流式问答入参 */
 interface ChatStreamParams {
   conversationId: string
   question: string
+  useWebSearch: boolean
 }
 
 /** 思考内容行负载（BE-042）：与 think SSE 事件字段一致 */
@@ -21,6 +23,10 @@ interface ChatStreamHandlers {
   onDelta: (content: string) => void
   /** RAG 检索有命中时收到参考来源（先于当轮增量，顺序即展示序号；重规划后以最新一批为准） */
   onSources?: (sources: ReferenceSource[]) => void
+  /** Tavily 网页来源：只含标题、URL 与后端 300 字预览 */
+  onWebSources?: (sources: ReferenceSource[]) => void
+  /** 联网搜索配置/失败 tag，不应被拼进回答正文 */
+  onWebSearchNotice?: (notice: WebSearchNotice) => void
   /** 检索规划产出的全部查询（检索策略展示：生成开始前收到，重新规划时会再次收到） */
   onPlan?: (subQueries: string[]) => void
   /** 校验未通过、回答将重新生成（调用方应清空已渲染的增量内容） */
@@ -37,13 +43,18 @@ interface ChatStreamHandlers {
  * 提交问题并持续消费流式回答。
  * 协议（docs/ARCHITECTURE.md 第 7 节）：响应体由若干条 "data: {json}\n\n" 组成，
  * json 的 type 字段区分 status（节点状态）/ think（思考内容）/ plan（检索策略）/
- * sources（参考来源）/ delta（增量文本）/ regenerating（重生成）/ done（结束）/ error（出错）。
+ * sources/web_sources（参考来源）/ web_search_notice（联网 tag）/ delta（增量文本）/
+ * regenerating（重生成）/ done（结束）/ error（出错）。
  */
 export async function streamChat(params: ChatStreamParams, handlers: ChatStreamHandlers): Promise<void> {
   const res = await fetch('/api/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ conversation_id: params.conversationId, question: params.question }),
+    body: JSON.stringify({
+      conversation_id: params.conversationId,
+      question: params.question,
+      use_web_search: params.useWebSearch,
+    }),
   })
 
   // 还没进入流就出错（例如会话不存在返回 404）：响应体是统一错误结构
@@ -74,6 +85,10 @@ export async function streamChat(params: ChatStreamParams, handlers: ChatStreamH
         const event = JSON.parse(line.slice(5)) as ChatStreamEvent
         if (event.type === 'delta') handlers.onDelta(event.content)
         else if (event.type === 'sources') handlers.onSources?.(event.sources)
+        else if (event.type === 'web_sources') handlers.onWebSources?.(event.sources)
+        else if (event.type === 'web_search_notice') {
+          handlers.onWebSearchNotice?.({ code: event.code, message: event.message })
+        }
         else if (event.type === 'plan') handlers.onPlan?.(event.sub_queries)
         else if (event.type === 'regenerating') handlers.onRegenerating?.()
         else if (event.type === 'status')
@@ -87,4 +102,9 @@ export async function streamChat(params: ChatStreamParams, handlers: ChatStreamH
       }
     }
   }
+}
+
+/** 查询联网搜索是否已配置，只返回布尔值；按钮开启时用于立即展示配置 tag。 */
+export function getWebSearchStatus(): Promise<WebSearchStatus> {
+  return request<WebSearchStatus>('/api/chat/web-search/status')
 }

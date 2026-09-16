@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import AsyncIterator, Callable
+from typing import Any, AsyncIterator, Callable
 
 from app.application.services.conversation_service import ConversationService
 from app.domain.entities.llm import ChatMessage
@@ -49,7 +49,11 @@ class ChatService:
         return [ChatMessage(role=m.role, content=m.content) for m in history_entities]
 
     async def stream_answer(
-        self, conversation_id: str, question: str
+        self,
+        conversation_id: str,
+        question: str,
+        *,
+        use_web_search: bool = False,
     ) -> AsyncIterator[QaStreamEvent]:
         """流式问答：走 Agent 图（astream + custom 模式），逐事件产出领域事件。
 
@@ -62,13 +66,18 @@ class ChatService:
         # 埋点规则（RELIABILITY.md）：问答任务开始
         logger.info(
             "Chat task started",
-            extra={"service": "chat", "conversation_id": conversation_id, "question_length": len(question)},
+            extra={
+                "service": "chat",
+                "conversation_id": conversation_id,
+                "question_length": len(question),
+                "use_web_search": use_web_search,
+            },
         )
         history = await self._snapshot_history(conversation_id)
         await self._conversations.add_message(conversation_id, MessageRole.USER, question)
 
         collected: list[str] = []
-        sources: list[dict[str, str]] = []
+        sources: list[dict[str, Any]] = []
         # Langfuse trace（BE-043）：每请求新建 sink 并注入上下文——图任务
         # 经 create_task 继承（节点 span/generation 上报的可见性基础）；
         # 工厂为 None（未启用）时 sink 恒 None，全部上报点跳过
@@ -79,7 +88,13 @@ class ChatService:
                 sink.start_trace(session_id=conversation_id, question=question)
             # 检索与 Prompt 组装都在图节点内完成（图内部唯一实现）
             async for event in self._graph.astream(
-                {"question": question, "history": history}, stream_mode="custom"
+                {
+                    "question": question,
+                    "history": history,
+                    "conversation_id": conversation_id,
+                    "web_search_requested": use_web_search,
+                },
+                stream_mode="custom",
             ):
                 if event.type == "plan":
                     # 规划拆解：仅向下游转发（前端展示检索策略），不参与聚合
@@ -95,6 +110,22 @@ class ChatService:
                     sources = [dict(item) for item in event.sources]
                     if sink is not None:
                         sink.record_event(name="sources", payload={"count": str(len(sources))})
+                    yield event
+                elif event.type == "web_sources":
+                    # 网页来源与本地来源共享 sources 持久化契约，
+                    # 但事件类型单独保留，前端可渲染不同的折叠区。
+                    sources = [dict(item) for item in event.sources]
+                    if sink is not None:
+                        sink.record_event(name="web_sources", payload={"count": str(len(sources))})
+                    yield event
+                elif event.type == "web_search_notice":
+                    # 配置缺失、空结果、远程失败和留档失败必须作为结构化 tag
+                    # 传给 API，不能落入 delta 聚合或伪装成回答内容。
+                    if sink is not None:
+                        sink.record_event(
+                            name="web_search_notice",
+                            payload={"code": event.code, "message": event.message},
+                        )
                     yield event
                 elif event.type == "regenerating":
                     # verify 打回重生成：重置增量聚合，避免两版回答拼接

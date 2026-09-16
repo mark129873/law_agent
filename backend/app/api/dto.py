@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -15,9 +17,20 @@ class CreateConversationRequest(BaseModel):
 
 
 class ChatStreamRequest(BaseModel):
-    """流式问答请求体；question 最少 1 字符由 pydantic 校验兜底。"""
+    """流式问答请求体。
+
+    ``use_web_search`` 是前端按钮的快照，而不是全局配置开关；
+    默认 false 保障兼容旧客户端，也保证按钮未开启时不会访问远程 MCP。
+    """
     conversation_id: str
     question: str = Field(min_length=1)
+    use_web_search: bool = False
+
+
+class WebSearchStatusResponse(BaseModel):
+    """联网搜索配置状态；只返回布尔值，绝不把 API Key 暴露给前端。"""
+
+    configured: bool
 
 
 class ConversationResponse(BaseModel):
@@ -30,15 +43,16 @@ class ConversationResponse(BaseModel):
 class MessageResponse(BaseModel):
     """消息响应：role 以字符串输出，避免枚举类型泄漏到 JSON。
 
-    sources 仅 RAG 回答携带（参考文档展示数据源）；
-    None 序列化为 null，前端据此判断是否渲染「参考文档」按钮。
+    sources 携带本地或网页来源；网页来源只保存前端 300 字预览，
+    完整搜索结果以 backend/log/web_search 下的独立日志为准。
+    None 序列化为 null，前端据此判断是否渲染来源折叠区。
     """
 
     id: str
     role: str
     content: str
     created_at: str
-    sources: list[dict[str, str]] | None = None
+    sources: list[dict[str, Any]] | None = None
 
 
 class DocumentResponse(BaseModel):

@@ -1,7 +1,8 @@
-"""API 层集成测试（BE-019/020/021/022）。
+"""API 层集成测试（BE-019/020/021/022/048）。
 
 测试环境：临时 SQLite + 内存 Fake 向量库 + Fake LLM/Embedding；
-覆盖统一错误结构、会话 CRUD、SSE 流式协议、文档上传入库与删除。
+覆盖统一错误结构、会话 CRUD、SSE 流式协议、Tavily Fake 网页来源与
+配置提示、文档上传入库与删除。
 """
 
 import hashlib
@@ -18,6 +19,7 @@ from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
 from tests.fakes import InMemoryVectorStore
 from app.domain.services.embedding import EmbeddingService
+from app.domain.services.web_search import WEB_SEARCH_SUCCESS, WebSearchItem, WebSearchPort, WebSearchResult
 from app.main import create_app
 
 
@@ -81,6 +83,33 @@ class DeterministicEmbedding(EmbeddingService):
         return self._embed_one(text)
 
 
+class FakeWebSearchPort(WebSearchPort):
+    """API 集成测试用搜索端口：可断言按钮参数是否真正触发搜索。"""
+
+    def __init__(self, configured: bool = True) -> None:
+        self._configured = configured
+        self.calls: list[tuple[str, str]] = []
+
+    @property
+    def configured(self) -> bool:
+        return self._configured
+
+    async def search(self, query: str, *, conversation_id: str) -> WebSearchResult:
+        self.calls.append((query, conversation_id))
+        return WebSearchResult(
+            search_id="api-search-1",
+            query=query,
+            status=WEB_SEARCH_SUCCESS,
+            results=(
+                WebSearchItem(
+                    title="Tavily 测试网页",
+                    url="https://example.com/api-web",
+                    content="API 集成测试中的网页正文。",
+                ),
+            ),
+        )
+
+
 @pytest.fixture
 def client(tmp_path):
     """构建带临时基础设施与 Fake LLM 的完整应用。
@@ -105,12 +134,15 @@ def client(tmp_path):
     # 同一个确定性 embedding，否则向量维度不一致会导致检索报错（曾踩坑）
     embedding = DeterministicEmbedding()
     store = InMemoryVectorStore()
+    web_search = FakeWebSearchPort()
     container.register(LLMProvider, lambda c: llm)
     container.register(EmbeddingService, lambda c: embedding)
     container.register(VectorStore, lambda c: store)
+    container.register(WebSearchPort, lambda c: web_search)
 
     with TestClient(app) as test_client:
         test_client.llm = llm  # type: ignore[attr-defined]
+        test_client.web_search = web_search  # type: ignore[attr-defined]
         yield test_client
 
 
@@ -173,6 +205,81 @@ def test_chat_stream_sse_protocol(client: TestClient) -> None:
     assert [m["role"] for m in messages] == ["user", "assistant"]
     assert messages[1]["content"] == "知识库中暂无相关依据，建议咨询专业律师。"
     assert messages[1]["sources"] is None
+
+
+def test_web_search_status_only_exposes_configuration_flag(client: TestClient) -> None:
+    """配置状态端点只返回 configured，不暴露适配器内部密钥或请求头。"""
+    response = client.get("/api/chat/web-search/status")
+    assert response.status_code == 200
+    assert response.json() == {"configured": True}
+
+
+def test_web_search_button_parameter_emits_and_persists_web_sources(client: TestClient) -> None:
+    """use_web_search=true：SSE 推送网页来源，历史接口保存同一份 300 字预览。"""
+    client.llm._answer = "网页结果支持该说法。【来源：Tavily 测试网页】"  # type: ignore[attr-defined]
+    conversation_id = client.post("/api/conversations", json={"title": "联网"}).json()["id"]
+    with client.stream(
+        "POST",
+        "/api/chat/stream",
+        json={
+            "conversation_id": conversation_id,
+            "question": "搜索最新劳动法信息",
+            "use_web_search": True,
+        },
+    ) as response:
+        events = [
+            json.loads(line[len("data: "):])
+            for line in response.iter_lines()
+            if line.startswith("data: ")
+        ]
+
+    assert response.status_code == 200
+    assert client.web_search.calls == [("搜索最新劳动法信息", conversation_id)]  # type: ignore[attr-defined]
+    business = [event for event in events if event["type"] not in ("status", "think")]
+    web_events = [event for event in business if event["type"] == "web_sources"]
+    assert len(web_events) == 1
+    assert web_events[0]["sources"][0] == {
+        "kind": "web",
+        "source": "Tavily 测试网页",
+        "title": "Tavily 测试网页",
+        "url": "https://example.com/api-web",
+        "content": "API 集成测试中的网页正文。",
+        "truncated": False,
+    }
+    assert business.index(web_events[0]) < next(
+        index for index, event in enumerate(business) if event["type"] == "delta"
+    )
+    saved = client.get(f"/api/conversations/{conversation_id}/messages").json()
+    assert saved[1]["sources"] == web_events[0]["sources"]
+
+
+def test_web_search_button_off_never_calls_mcp_for_search_words(client: TestClient) -> None:
+    """按钮关闭时，即使问题包含“搜索/最新”，也不触发 WebSearchPort。"""
+    conversation_id = client.post("/api/conversations", json={"title": "关闭联网"}).json()["id"]
+    with client.stream(
+        "POST",
+        "/api/chat/stream",
+        json={
+            "conversation_id": conversation_id,
+            "question": "请搜索最新法规",
+            "use_web_search": False,
+        },
+    ) as response:
+        events = [
+            json.loads(line[len("data: "):])
+            for line in response.iter_lines()
+            if line.startswith("data: ")
+        ]
+
+    assert response.status_code == 200
+    assert client.web_search.calls == []  # type: ignore[attr-defined]
+    assert all(event["type"] != "web_sources" for event in events)
+    notices = [event for event in events if event["type"] == "web_search_notice"]
+    assert notices == [{
+        "type": "web_search_notice",
+        "code": "WEB_SEARCH_NOT_ENABLED",
+        "message": "请先开启「联网搜索」按钮",
+    }]
 
 
 def test_chat_stream_emits_sources_and_persists_them(client: TestClient) -> None:

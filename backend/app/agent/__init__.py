@@ -21,6 +21,7 @@ from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
 from app.domain.services.embedding import EmbeddingService
 from app.domain.services.qa_workflow import QaWorkflow
+from app.domain.services.web_search import WebSearchPort
 
 
 def _default_reranker() -> RerankerService:
@@ -42,6 +43,7 @@ def create_qa_workflow(
     reranker: RerankerService | None = None,
     agent_config: AgentConfig | None = None,
     rag_config: LegalRAGConfig | None = None,
+    web_search: WebSearchPort | None = None,
 ) -> QaWorkflow:
     """构建一期 Agent 工作流（主图 + Local Legal RAG 子图）。
 
@@ -59,5 +61,6 @@ def create_qa_workflow(
             reranker=reranker or _default_reranker(),
             agent_config=agent_config,
             rag_config=rag_config,
+            web_search=web_search,
         ).build()
     )

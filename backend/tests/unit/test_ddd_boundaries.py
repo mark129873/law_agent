@@ -20,6 +20,7 @@ _TECH_LIBS = {
     "fastapi", "httpx", "pymilvus", "sqlalchemy", "aiosqlite", "pypdf",
     "langgraph", "pydantic", "pydantic_settings", "uvicorn",
     "langfuse",  # BE-043：Langfuse 可观测平台锁定在 infrastructure/trace/
+    "mcp",  # BE-048：Python MCP SDK 只允许出现在 infrastructure/web_search/
 }
 
 # 全项目只允许在 app/agent/ 内导入 langgraph（工作流引擎隔离区）
@@ -117,3 +118,13 @@ def test_agent_heavy_libs_confined_to_agent_module() -> None:
         if hits and not rel.startswith(_LANGGRAPH_ALLOWED_PREFIX):
             violations.append(f"{rel}: {sorted(hits)}")
     assert not violations, "重型推理库泄漏出 agent 隔离区：\n" + "\n".join(violations)
+
+
+def test_mcp_sdk_confined_to_web_search_infrastructure() -> None:
+    """MCP SDK 必须留在 Tavily 适配器内，Agent/应用层只依赖 WebSearchPort。"""
+    violations = []
+    for py in _iter_app_files():
+        rel = py.relative_to(APP_ROOT).as_posix()
+        if "mcp" in _imports_of(py) and rel != "infrastructure/web_search/tavily_mcp.py":
+            violations.append(rel)
+    assert not violations, "MCP SDK 泄漏到 Tavily 适配器之外：\n" + "\n".join(violations)

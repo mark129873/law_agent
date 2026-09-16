@@ -8,7 +8,8 @@
   langgraph 引擎封在适配器之内（对外契约不随重写变化）。
 
 SSE 事件在节点内推送（单一事实来源）：plan=hybrid_retriever 检索策略、
-sources=rag_result 证据、delta=回答流式、regenerating=重生成前提示。
+sources=rag_result 本地证据、web_sources=联网网页预览、delta=回答流式、
+regenerating=重生成前提示。
 """
 
 from __future__ import annotations
@@ -43,7 +44,8 @@ from app.agent.subgraphs.legal_rag.config import LegalRAGConfig
 from app.agent.subgraphs.legal_rag.graph import build_legal_rag_graph
 from app.agent.plugins import PluginEntryNode, PluginStubNode
 from app.agent.utils.think_utils import emit_think
-from app.agent.web import WebSearchEntryNode, WebSearchStubNode
+from app.agent.web import WebSearchEntryNode
+from app.domain.services.web_search import WebSearchPort
 from app.domain.services.qa_workflow import QaWorkflow
 
 # legal_rag 子图回写主图的键（其余子图内部键不外泄，见 LegalRAGState）
@@ -71,6 +73,7 @@ class AgentGraphBuilder:
         reranker: RerankerService,
         agent_config: AgentConfig | None = None,
         rag_config: LegalRAGConfig | None = None,
+        web_search: WebSearchPort | None = None,
     ) -> None:
         self._llm = llm
         self._planner = planner
@@ -78,6 +81,7 @@ class AgentGraphBuilder:
         self._reranker = reranker
         self._agent_config = agent_config or AgentConfig()
         self._rag_config = rag_config or LegalRAGConfig()
+        self._web_search = web_search
 
     def _make_rag_node(self):
         """构造 legal_rag 子图调用节点：显式输入/输出过滤（BE-038/041）。"""
@@ -109,8 +113,7 @@ class AgentGraphBuilder:
         add_node_traced(builder, "legal_rag_subgraph", self._make_rag_node())
         add_node_traced(builder, "plugin_entry_node", PluginEntryNode())
         add_node_traced(builder, "plugin_stub_node", PluginStubNode())
-        add_node_traced(builder, "web_search_entry_node", WebSearchEntryNode())
-        add_node_traced(builder, "web_search_stub_node", WebSearchStubNode())
+        add_node_traced(builder, "web_search_entry_node", WebSearchEntryNode(self._web_search))
         add_node_traced(builder, "observation_node", ObservationNode())
         add_node_traced(builder, "direct_answer_agent", DirectAnswerAgent(self._llm))
         add_node_traced(builder, "answer_generator_agent", AnswerGeneratorAgent(self._llm))
@@ -127,8 +130,7 @@ class AgentGraphBuilder:
         )
         # 各 Capability → observation → 回编排（受 max_global_steps 预算）
         builder.add_edge("legal_rag_subgraph", "observation_node")
-        builder.add_edge("web_search_entry_node", "web_search_stub_node")
-        builder.add_edge("web_search_stub_node", "observation_node")
+        builder.add_edge("web_search_entry_node", "observation_node")
         builder.add_edge("plugin_entry_node", "plugin_stub_node")
         builder.add_edge("plugin_stub_node", "observation_node")
         builder.add_edge("direct_answer_agent", "observation_node")

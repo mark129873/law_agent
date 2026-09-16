@@ -5,10 +5,18 @@
 // 所有网络请求都发生在 state/api 层，UI 组件不直接 fetch，保证数据访问只有一份实现。
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { Conversation, KnowledgeDocument, Message, NodeStatus, ThoughtLine, ReferenceSource } from '../types'
+import type {
+  Conversation,
+  KnowledgeDocument,
+  Message,
+  NodeStatus,
+  ThoughtLine,
+  ReferenceSource,
+  WebSearchNotice,
+} from '../types'
 import * as conversationsApi from '../api/conversations'
 import * as documentsApi from '../api/documents'
-import { streamChat } from '../api/chat'
+import { getWebSearchStatus, streamChat } from '../api/chat'
 
 /** 侧边栏的两个视图：对话列表 / 知识库管理（PRODUCT.md：两者同处侧边栏，按钮切换） */
 export type SidebarView = 'chat' | 'knowledge'
@@ -39,6 +47,12 @@ interface AppContextValue {
   subQueries: string[] | null
   /** 当前思考块过程记录（BE-041/BE-042/FE-016）：生成中实时更新，完成后快照挂到消息上 */
   thoughts: ThoughtLine[]
+  /** 联网搜索按钮状态：跨会话保持，直到用户再次点击关闭 */
+  webSearchMode: boolean
+  /** 当前联网搜索配置/失败 tag；成功搜索后清除 */
+  webSearchNotice: WebSearchNotice | null
+  /** 切换联网搜索模式；开启时先查询配置状态但不发起实际搜索 */
+  toggleWebSearch: () => Promise<void>
 
   // —— 会话动作 ——
   refreshConversations: () => Promise<void>
@@ -49,7 +63,7 @@ interface AppContextValue {
   /** 删除会话并同步本地列表；删的是当前会话时自动回到"新对话" */
   removeConversation: (id: string) => Promise<void>
   /** 发送提问：必要时先建会话，然后流式接收回答并写入 messages */
-  sendQuestion: (question: string) => Promise<void>
+  sendQuestion: (question: string, useWebSearch?: boolean) => Promise<void>
   clearStreamError: () => void
 
   // —— 知识库状态与动作 ——
@@ -76,6 +90,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const streamingRef = useRef(false)
 
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([])
+
+  // 联网搜索是显式模式而非一次性复选框：按钮状态持续到再次点击关闭，
+  // 因此把它放在 AppContext 而不是单个页面局部，切换会话也不会意外关闭。
+  const [webSearchMode, setWebSearchMode] = useState(false)
+  // status 请求是异步的；用 ref 记录最新按钮状态，避免用户快速点开/关闭
+  // 后，过期响应又把已经关闭的联网搜索 tag 写回界面。
+  const webSearchModeRef = useRef(false)
+  const [webSearchNotice, setWebSearchNotice] = useState<WebSearchNotice | null>(null)
 
   // ———————— 会话动作 ————————
 
@@ -186,9 +208,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const clearStreamError = useCallback(() => setStreamError(null), [])
 
+  /**
+   * 切换联网搜索按钮。
+   * 开启时先调用只读 status 接口，便于用户立即看到是否需要配置 Key；
+   * 真正的 Tavily 请求仍只发生在发送问题且 use_web_search=true 时。
+   */
+  const toggleWebSearch = useCallback(async () => {
+    if (streamingRef.current) return
+    const next = !webSearchMode
+    setWebSearchMode(next)
+    webSearchModeRef.current = next
+    if (!next) {
+      setWebSearchNotice(null)
+      return
+    }
+    try {
+      const status = await getWebSearchStatus()
+      if (webSearchModeRef.current !== next) return
+      setWebSearchNotice(
+        status.configured
+          ? null
+          : { code: 'TAVILY_API_KEY_REQUIRED', message: '需要配置 TAVILY_API_KEY' },
+      )
+    } catch {
+      if (webSearchModeRef.current !== next) return
+      // status 检查失败不阻止按钮切换；发送时后端仍会重新检查并给出正式 tag。
+      setWebSearchNotice({
+        code: 'WEB_SEARCH_STATUS_UNAVAILABLE',
+        message: '暂时无法检查联网搜索配置，发送时将再次检查',
+      })
+    }
+  }, [webSearchMode])
+
   /** 发送提问：必要时先建会话 → 乐观插入本地消息 → 消费 SSE 流增量更新 */
   const sendQuestion = useCallback(
-    async (question: string) => {
+    async (question: string, requestedWebSearch = webSearchMode) => {
       // 生成中不允许重复发送
       if (streamingRef.current) return
       streamingRef.current = true
@@ -227,8 +281,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         //    done 时随助手消息一起写入状态 —— 生成过程中不挂载，
         //    保证「参考文档」按钮只在回答完成后出现（PRODUCT.md 行为约定）。
         let sources: ReferenceSource[] = []
+        let webNotice: WebSearchNotice | null = null
         await streamChat(
-          { conversationId, question },
+          { conversationId, question, useWebSearch: requestedWebSearch },
           {
             onDelta: (content) =>
               setMessages((prev) =>
@@ -236,6 +291,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
               ),
             onSources: (received) => {
               sources = received
+            },
+            onWebSources: (received) => {
+              sources = received
+              // 搜索成功后清除按钮开启时显示的配置提醒。
+              setWebSearchNotice(null)
+            },
+            onWebSearchNotice: (received) => {
+              webNotice = received
+              setWebSearchNotice(received)
+              // 流式期间也立即把 tag 挂到助手消息，不等 done 才显示。
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, webSearchNotice: received } : m)),
+              )
             },
             onPlan: (received) => {
               // 检索策略：生成中并入思考块展示，重新规划时会更新
@@ -268,6 +336,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                         ...m,
                         id: `assistant-${Date.now()}`,
                         sources,
+                        webSearchNotice: webNotice,
                         steps: thoughtsRef.current,
                         subQueries: subQueriesRef.current,
                         thinkingMs: Date.now() - streamStartRef.current,
@@ -294,6 +363,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                       ? {
                           ...m,
                           id: `assistant-${Date.now()}`,
+                          webSearchNotice: webNotice,
                           steps: snapshot,
                           subQueries: null,
                           thinkingMs: Date.now() - startAt,
@@ -315,7 +385,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setIsStreaming(false)
       }
     },
-    [activeId, createConversation],
+    [activeId, createConversation, webSearchMode],
   )
 
   // ———————— 知识库动作 ————————
@@ -391,6 +461,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       clearStreamError,
       subQueries,
       thoughts,
+      webSearchMode,
+      webSearchNotice,
+      toggleWebSearch,
       documents,
       refreshDocuments,
       uploadDocument,
@@ -414,6 +487,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       clearStreamError,
       subQueries,
       thoughts,
+      webSearchMode,
+      webSearchNotice,
+      toggleWebSearch,
       documents,
       refreshDocuments,
       uploadDocument,

@@ -46,6 +46,7 @@
 | `knowledge` | 向量化与入库编排 |
 | `embedding` | 向量生成服务 |
 | `rag` | 检索与上下文构建 |
+| `web_search` | Tavily Remote MCP 搜索调用、搜索结果落盘与失败状态 |
 | `conversation` | 会话生命周期与消息持久化 |
 | `chat` | 问答编排与流式输出 |
 | `llm` | 模型调用 |
@@ -57,9 +58,16 @@
 - **编码**：文件 handler 必须显式 `encoding="utf-8"`，否则 Windows 下中文日志可能乱码。
 - **多进程**：当前部署为单进程（uvicorn 未开 `--workers`），按天轮转安全；若将来启用多 worker，多进程会竞争同一文件，必须改为按 PID 分文件或集中式采集，不得直接沿用当前配置。
 
+### 联网搜索独立留档
+- 每次用户实际触发的 Tavily 搜索都生成一个独立文件：`LOG_DIR/web_search/search-<UTC时间>-<UUID>.log`；文件内容是完整 JSON，而不是仅写摘要。
+- 留档字段至少包括 `search_id`、`timestamp`、`request_id`、`conversation_id`、`query`、`tool_name`、脱敏后的参数、`status`、`duration_ms`、完整 MCP `content`/`structured_content`、完整规范化结果和错误信息。
+- 搜索日志永久保留，不参与 `app.log` 的按天轮转，也不由测试干净环境自动删除；需要清理时由运维人工执行。`backend/log/` 仍必须保持 gitignore。
+- 写入采用“临时文件 + 原子替换”，文件名使用 UTC 时间和 UUID，避免并发搜索互相覆盖。API Key 与 Authorization 只放在 MCP 请求头，禁止写入搜索日志、结构化日志、SSE 或前端。
+- 搜索结果未成功落盘时，搜索能力返回失败状态并向用户发出提示，不把未留档的数据继续作为成功答案展示；该失败必须同时记录 ERROR（含堆栈）。
+
 ### 使用约定（重要，曾踩坑）
 - `extra` 的键**禁止使用 LogRecord 保留字段**（`message`、`filename`、`name` 等）——重名会使日志调用自身抛 `KeyError`，曾导致业务 404 变成 500（由 API 集成测试在 `LOG_LEVEL=INFO` 下抓出）。
-- **密钥禁止进日志**：`GLM_API_KEY` 等敏感值不得出现在任何日志字段中；日志只允许记录模型名、消息数、长度等非敏感元数据。
+- **密钥禁止进日志**：`GLM_API_KEY`、`TAVILY_API_KEY` 等敏感值不得出现在任何日志字段中；日志只允许记录模型名、工具名、消息数、长度等非敏感元数据。
 - **脱敏兜底**：`JsonFormatter` 对 `api_key`、`token`、`password`、`authorization`、`secret` 等敏感键名做黑名单处理（值替换为 `***`），作为"密钥禁止进日志"约定的机械保障，防止误写。
 
 ### 日志级别
@@ -81,7 +89,7 @@ LOG_LEVEL=ERROR  # 仅输出 ERROR
 - 取值优先级：进程环境变量 > `backend/.env` > 默认值。
 
 ### 各服务日志埋点规则
-按上方级别表在必要位置埋点：重要业务事件记 INFO、数据缺失但不影响主流程记 WARN、程序运行失败记 ERROR（必须带堆栈）。示例——DocumentService：上传记录文件大小与元数据、大小超限异常、删除输出剩余数量、元数据更新、文件未找到类错误；QaService：问答任务开始、检索结果（命中数与最高相似度）、回答生成（首 token 延迟/总耗时/长度——推理模型首字延迟是已知痛点必须可度量）、流式异常中断（区分模型侧与网络侧）、会话历史清空。
+按上方级别表在必要位置埋点：重要业务事件记 INFO、数据缺失但不影响主流程记 WARN、程序运行失败记 ERROR（必须带堆栈）。示例——DocumentService：上传记录文件大小与元数据、大小超限异常、删除输出剩余数量、元数据更新、文件未找到类错误；QaService：问答任务开始、检索结果（命中数与最高相似度）、回答生成（首 token 延迟/总耗时/长度——推理模型首字延迟是已知痛点必须可度量）、流式异常中断（区分模型侧与网络侧）、会话历史清空；WebSearch：搜索开始/完成/失败分别记录 `search_id`、结果数、耗时和留档路径，失败必须带堆栈。
 
 ## Langfuse 链路追踪（BE-043）
 

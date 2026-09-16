@@ -2,7 +2,7 @@
 // 职责边界：本组件只负责"长什么样"，提问与流式回答的逻辑都在
 // AppContext 的 sendQuestion 里（state 层），页面代码保持简单易读。
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp } from '@phosphor-icons/react'
+import { ArrowUp, Globe } from '@phosphor-icons/react'
 import { useAppStore } from '../state/AppContext'
 import MessageBlock from '../components/MessageBlock'
 
@@ -24,6 +24,9 @@ export default function ChatPage() {
     subQueries,
     thoughts,
     sendQuestion,
+    webSearchMode,
+    webSearchNotice,
+    toggleWebSearch,
   } = useAppStore()
 
   const [draft, setDraft] = useState('')
@@ -49,7 +52,7 @@ export default function ChatPage() {
     if (!text || isStreaming) return
     setDraft('')
     requestAnimationFrame(autoResize) // 等输入框内容清空后再重算高度
-    await sendQuestion(text)
+    await sendQuestion(text, webSearchMode)
   }
 
   return (
@@ -127,8 +130,14 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* 输入区：自适应高度输入框 + 发送按钮 */}
+      {/* 输入区：自适应高度输入框 + 联网搜索模式按钮 + 发送按钮 */}
       <div className="shrink-0 px-6 pb-5">
+        {webSearchNotice && (
+          <div className="mx-auto mb-2 flex w-full max-w-3xl items-center gap-1.5 px-2 text-[11px] text-ink-faint">
+            <Globe size={13} className="shrink-0 text-accent" aria-hidden />
+            <span className="rounded-full bg-accent-soft px-2 py-1 text-accent">{webSearchNotice.message}</span>
+          </div>
+        )}
         <div className="mx-auto flex w-full max-w-3xl items-end gap-2 rounded-2xl border border-line bg-elevated p-2 shadow-sm transition focus-within:border-accent">
           <textarea
             ref={textareaRef}
@@ -148,6 +157,22 @@ export default function ChatPage() {
               }
             }}
           />
+          {/* 联网搜索模式按钮：选中态持续显示，直到用户再次点击关闭。 */}
+          <button
+            type="button"
+            onClick={() => void toggleWebSearch()}
+            disabled={isStreaming}
+            aria-label="联网搜索"
+            aria-pressed={webSearchMode}
+            title={webSearchMode ? '关闭联网搜索' : '开启联网搜索'}
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition active:scale-[0.98] motion-reduce:active:scale-100 ${
+              webSearchMode
+                ? 'border-accent bg-accent-soft text-accent'
+                : 'border-transparent bg-elevated text-ink-faint hover:border-line hover:text-ink-soft'
+            } ${isStreaming ? 'cursor-not-allowed opacity-50' : ''}`}
+          >
+            <Globe size={17} weight={webSearchMode ? 'fill' : 'regular'} />
+          </button>
           <button
             type="button"
             onClick={() => void handleSend()}

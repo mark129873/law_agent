@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 from app.domain.entities.conversation import utc_now
 
@@ -39,4 +40,4 @@ class Message:
     # 每项 {"source": 文件名, "content": 命中内容}。
     # 为什么放实体而非独立表：来源与消息同生命周期（随消息读写/级联删除），
     # 且只被整体读取整体展示，值对象集合作为消息的一部分最简单（YAGNI）。
-    sources: list[dict[str, str]] | None = None
+    sources: list[dict[str, Any]] | None = None

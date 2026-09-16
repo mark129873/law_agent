@@ -4,7 +4,7 @@
 -本文档只描述**架构与实现**（分层、数据流、配置、契约、测试体系）；用户可见的行为需求见 docs/PRODUCT.md
 -实现变更不得改变 PRODUCT.md 描述的用户可见行为；行为要变，先改 PRODUCT.md，再改实现
 -后端 Python 3.11（uv 管理环境，.venv 虚拟环境）+ FastAPI（接口全异步）+ LangGraph，LLM 支持 Ollama 本地部署与 GLM API（详细技术栈见 §1 末尾）
--Agent 模块一期重写（2026-09）：主图轻量编排 + 独立 Local Legal RAG 子图 + Web/Plugin Stub 入口，设计依据一期技术稿核心内容已并入本文档 §12（30 条强制约束 + 设计 §号速查）；统一重排采用 `cross-encoder/ms-marco-MiniLM-L-6-v2`（CrossEncoder，模型失败时降级 RRF；显式关闭时按配置正常使用 RRF）
+-Agent 模块一期重写（2026-09）：主图轻量编排 + 独立 Local Legal RAG 子图 + Tavily Remote MCP Web Search / Plugin Stub 入口，设计依据一期技术稿核心内容已并入本文档 §12（30 条强制约束 + 设计 §号速查）；统一重排采用 `cross-encoder/ms-marco-MiniLM-L-6-v2`（CrossEncoder，模型失败时降级 RRF；显式关闭时按配置正常使用 RRF）
 -数据库此版本支持sqlite3, 后续版本支持mysql8.0根据配置进行切换, 做好数据库接口层抽象
 -数据库实现统一走 SQLAlchemy 2.0 async ORM（声明式模型 + Data Mapper 映射），SQLite 是当前唯一已启用的 Provider，MySQL 8.0 接入只需换 URL 与异步驱动
 -向量数据库使用 Milvus（standalone 部署，backend/docker-compose.yml 编排 etcd + minio + milvus），稠密向量与稀疏 BM25 混合检索由 Milvus 服务端 hybrid_search 完成（BE-029），业务代码经 VectorStore 端口访问，不感知具体实现
@@ -90,7 +90,8 @@ backend/
 │   │   ├── prompts/            # 主图 6 Prompt（意图路由/编排/直接回答/回答生成/校验/能力说明）
 │   │   ├── services/           # LLMService（结构化输出容错）/ MilvusService / RerankerService / CitationService
 │   │   ├── subgraphs/legal_rag/  # Local Legal RAG 子图：graph + state/config/schemas + nodes 10 + prompts 6
-│   │   ├── web/ plugins/       # Web Search / Plugin 一期 Stub（仅 NOT_IMPLEMENTED/DISABLED 入口）
+│   │   ├── web/                # Web Search 能力节点（通过领域端口调用 Tavily Remote MCP）
+│   │   ├── plugins/            # Plugin 一期 Stub（仅 NOT_IMPLEMENTED/DISABLED 入口）
 │   │   └── utils/              # query 汇总 / dedup / evidence 转换 / trace / timing 纯函数
 │   │
 │   ├── common/                 # 横切基础设施：di.py 轻量容器 / logging.py 结构化 JSON 日志（stdout + backend/log 落盘）
@@ -102,7 +103,7 @@ backend/
 │   ├── unit/                   # 单元测试：纯逻辑与抽象层，无外部 IO
 │   ├── integration/            # 集成测试：真实 SQLite/Milvus（服务不可达时跳过）/MockTransport/完整应用
 │   └── data_source/            # RAG 测试数据源（真实法律文档）
-├── log/                        # 运行日志（app.log + 按天轮转，gitignore，启动自动创建）
+├── log/                        # 运行日志（app.log + web_search 独立搜索日志，gitignore）
 ├── scripts/                    # 手工验证脚本（Ollama 流式 / 真实 embedding / E2E）
 ├── pyproject.toml / uv.lock
 └── .env                        # 本地敏感配置（gitignore，模板见 .env.example）
@@ -133,7 +134,7 @@ frontend/                        # 前端独立项目（React + TS + Vite）
 ```
 
 ### 前端数据流
-前端数据流要点：提问经 `AppContext.sendQuestion`（无会话先建会话，title=提问截短 20 字）乐观插入消息后由 `api/chat.ts` 消费 SSE 增量写回；助手消息经 react-markdown 渲染（不解析原始 HTML，无 XSS），流式中未闭合标记短暂显示为字面字符；带 `sources` 的消息（含历史恢复）渲染「参考文档」折叠列表，来源内容按纯文本渲染；图标统一 `@phosphor-icons/react`，不引第二套图标族
+前端数据流要点：提问经 `AppContext.sendQuestion`（无会话先建会话，title=提问截短 20 字）乐观插入消息后由 `api/chat.ts` 消费 SSE 增量写回；助手消息经 react-markdown 渲染（不解析原始 HTML，无 XSS），流式中未闭合标记短暂显示为字面字符；本地来源渲染「参考文档」折叠列表，联网来源渲染独立的「联网搜索内容」折叠列表；联网来源只接收每条最多 300 字的预览与合法网页地址，完整内容只在后端搜索日志中保留；图标统一 `@phosphor-icons/react`，不引第二套图标族
 
 ## 3. 分层架构与领域端口
 
@@ -151,7 +152,8 @@ frontend/                        # 前端独立项目（React + TS + Vite）
 | `LLMProvider` | domain/repositories/llm_provider.py | OllamaProvider / GLMProvider |
 | `DocumentParser` | domain/services/document_parser.py | TextParser（txt/md 多编码回退）/ PdfParser（pypdf） |
 | `EmbeddingService` | domain/services/embedding.py | OllamaEmbeddingService（/api/embed 批量） |
-| `QaWorkflow` | domain/services/qa_workflow.py | LangGraph 工作流（agent/，`create_qa_workflow` 工厂：主图 + legal_rag 子图 + Web/Plugin Stub） |
+| `WebSearchPort` | domain/services/web_search.py | TavilyMcpSearchClient（Remote MCP Streamable HTTP 适配器） |
+| `QaWorkflow` | domain/services/qa_workflow.py | LangGraph 工作流（agent/，`create_qa_workflow` 工厂：主图 + legal_rag 子图 + Web MCP / Plugin Stub） |
 
 ### ORM 使用约定（BE-025，精要）
 - **两套模型、一层映射（Data Mapper）**：ORM 模型（models.py）只属于 infrastructure，领域实体保持纯 dataclass，`mappers.py` 显式双向映射；仓储出口只返回领域实体，ORM 模型不得越过 infrastructure 边界（测试锁定）。
@@ -166,14 +168,24 @@ frontend/                        # 前端独立项目（React + TS + Vite）
 
 ### RAG 问答全链路（流式）
 ```text
-POST /api/chat/stream {conversation_id, question}
+POST /api/chat/stream {conversation_id, question, use_web_search}
   ▼ ChatService：历史快照 → 保存用户消息 → QaWorkflow 端口 astream（图执行见 §5）
   ▼ 节点经 emit_event（ContextVar 注入队列）推领域事件（QaStreamEvent）
-  ▼ SSE：status* / plan / sources / delta* / regenerating / done | error
-  ▼ 流正常结束：完整回答与参考来源一起持久化为 assistant 消息（异常中断不落库）
+  ▼ SSE：status* / plan / sources / web_sources / web_search_notice / delta* / regenerating / done | error
+  ▼ 流正常结束：完整回答与来源预览一起持久化为 assistant 消息（异常中断不落库）
 ```
 - **所有 LLM 问答必须走图**：唯一问答入口是 SSE 流式接口；检索、Prompt 组装、模型调用只有一份实现，禁止图外直连 LLMProvider 问答。图引擎的 `ainvoke`（测试/脚本经 `run_qa`）与流式共用同一节点实例。
 - ChatService 只依赖 `QaWorkflow` 端口，负责会话持久化，不直接依赖 RAG/LLM。
+
+### Web Search 能力（Tavily Remote MCP）
+
+- 前端请求中的 `use_web_search` 是唯一的联网触发信号；不再配置 `WEB_SEARCH_ENABLED`。按钮关闭时不调用远程服务。
+- `web_search_entry_node` 依赖领域层 `WebSearchPort`，由 `containers.py` 注入 infrastructure 层的 `TavilyMcpSearchClient`；Agent 节点不直接访问 MCP SDK。
+- 适配器使用 Tavily Remote MCP 的 Streamable HTTP 地址（默认 `https://mcp.tavily.com/mcp/`），通过 `Authorization: Bearer <TAVILY_API_KEY>` 认证，调用 `tavily_search`。每次提交建立一次异步 MCP 会话并只调用一次搜索；Grounding 重试复用主图中的结果。
+- 搜索结果先转换为统一 `CapabilityResult`，再由 `observation_node` 写入 evidence/citations，并发出 `web_sources` 事件；回答生成、Grounding 和 `final_answer_node` 继续使用同一份完整 evidence。
+- `web_sources` 对外只发送 `{kind: "web", source, title, url, content, truncated}`，其中 `content` 最多 300 字；消息持久化沿用 `sources` JSON，旧的本地来源结构保持兼容。
+- 缺少 `TAVILY_API_KEY`、按钮未开启、远程调用失败或搜索日志落盘失败时，发出 `web_search_notice`（code + message），回答不得假造外部内容。
+- 每次搜索尝试在 `LOG_DIR/web_search/` 生成一个 `search-<UTC时间>-<UUID>.log`。文件为完整 JSON，保存 query、request_id、conversation_id、MCP 原始 content/structured content、完整规范化结果、状态、耗时和错误；认证信息永不落盘。该目录不轮转、不自动删除，仅允许人工清理。
 
 ### 文档入库全链路
 ```text
@@ -217,7 +229,6 @@ graph TD;
 	plugin_entry_node(plugin_entry_node)
 	plugin_stub_node(plugin_stub_node)
 	web_search_entry_node(web_search_entry_node)
-	web_search_stub_node(web_search_stub_node)
 	observation_node(observation_node)
 	direct_answer_agent(direct_answer_agent)
 	answer_generator_agent(answer_generator_agent)
@@ -240,8 +251,7 @@ graph TD;
 	plugin_entry_node --> plugin_stub_node;
 	plugin_stub_node --> observation_node;
 	query_router_agent --> orchestrator_agent;
-	web_search_entry_node --> web_search_stub_node;
-	web_search_stub_node --> observation_node;
+	web_search_entry_node --> observation_node;
 	final_answer_node --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
@@ -249,7 +259,7 @@ graph TD;
 ```
 
 - **顶层循环**：query_router（规范化+意图+请求类型）→ orchestrator（决定下一能力，受 `max_global_steps=2` 预算，超限强制 finish）→ action_router（§46.1 确定性映射）→ Capability → observation（CapabilityResult 归一、步数+1）→ orchestrator；finish 后 answer_generator → grounding_checker → final_answer。
-- **Capability**：legal_rag 子图（检索）；web_search / plugin（一期 Stub，仅 NOT_IMPLEMENTED/DISABLED，替换 Stub 即接入二期实现，主图零重构）；direct_answer（一般性对话直接流式回答，D2——法律事实型问题默认走检索）。
+- **Capability**：legal_rag 子图（检索）；web_search（按钮显式触发的 Tavily Remote MCP 搜索）；plugin（仍为 NOT_IMPLEMENTED/DISABLED Stub）；direct_answer（一般性对话直接流式回答，D2——法律事实型问题默认走检索）。
 - **回答收尾链**：answer_generator 是 finish 路径唯一流式出口（direct 已有完整草稿时透传）；grounding_checker 规则档先行（有依据必须【来源：…】、检索无命中必须声明信息不足、direct 路径只查编造引用）+ LLM judge 档；未通过且预算内回 orchestrator，预算耗尽直接进入确定性的 `final_answer_node`，不再追加一次兜底 LLM 生成。grounding 每次执行递增 global_step_count（防打回回路绕过预算）。
 
 ### Local Legal RAG 子图（agent/subgraphs/legal_rag/，设计 §4）
@@ -278,7 +288,7 @@ retrieval_planner_agent（检索计划，四类策略多选）
 ### 事件机制与 SSE 映射
 
 - 所有节点经 `with_node_status` 包装（建造者层统一，节点零改动）：起止推 `status` 事件（中文 label 映射表在 agent/constants.py）+ 结构化日志；事件发射统一走 `emit_event`（ContextVar 注入队列，跨子图贯通，图外安全丢弃）。
-- SSE 事件（字段只增不改）：`status`（节点执行状态，前端浅色过程展示）→ `plan`（本轮全部检索查询，检索策略展示，重规划后覆盖）→ `sources`（最终采用证据，先于当轮 delta）→ `delta`*（回答流式）→（打回时 `regenerating` 后重复 plan?→sources→delta）→ `done`/`error`。
+- SSE 事件（字段只增不改）：`status`（节点执行状态，前端浅色过程展示）→ `plan`（本轮全部检索查询，检索策略展示，重规划后覆盖）→ `sources`/`web_sources`（对应能力的最终来源，先于当轮 delta）或 `web_search_notice`（配置、远程调用或留档失败）→ `delta`*（回答流式）→（打回时 `regenerating` 后复用已获取 web 结果，不重复调用 Tavily）→ `done`/`error`。
 - regenerating 规则：任何节点再次开始流式输出前，若 answer_draft 已存在必先推 regenerating（前端清空已渲染增量）。
 
 ### 法律问答策略（agent/prompts/answer_generator.py，BE-017）
@@ -303,6 +313,10 @@ retrieval_planner_agent（检索计划，四类策略多选）
 | `LANGFUSE_ENABLED` | true / false | false（BE-043：Langfuse 链路追踪开关，关闭零导入零开销） |
 | `LANGFUSE_BASE_URL` | Langfuse 服务地址 | https://cloud.langfuse.com |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Langfuse 项目密钥 | 空（开启但缺失 → WARN 降级关闭，不阻断业务） |
+| `TAVILY_MCP_URL` | Tavily Remote MCP Streamable HTTP 地址 | `https://mcp.tavily.com/mcp/` |
+| `TAVILY_API_KEY` | Tavily API Key（仅环境变量或 `.env`） | 空（请求时提示配置，不阻断启动） |
+| `TAVILY_SEARCH_DEPTH` | basic / fast / advanced / ultra-fast | basic |
+| `TAVILY_MAX_RESULTS` | 5~20 | 5 |
 | `HOST` / `PORT` / `LOG_LEVEL` | — | 0.0.0.0 / 8000 / INFO |
 
 - **思考模式开关**：qwen3.5 / glm-4.5 等推理模型默认先"思考"再回答，首字延迟曾达 30~40s；关闭时 Ollama 带 `think: false`、GLM 带 `thinking: {"type": "disabled"}`。
@@ -318,7 +332,8 @@ retrieval_planner_agent（检索计划，四类策略多选）
 |------|------|------|
 | POST / GET | /api/conversations | 创建对话（title 可选）/ 对话列表（创建时间正序） |
 | GET / DELETE | /api/conversations/{id}(/messages) | 会话消息 / 删除会话（级联消息） |
-| POST | /api/chat/stream | 提交问题，SSE 流式回答 |
+| POST | /api/chat/stream | 提交问题，SSE 流式回答；请求体含 `conversation_id`、`question`、可选 `use_web_search`（默认 false） |
+| GET | /api/chat/web-search/status | 返回 `{configured: boolean}`，仅用于按钮提示，不暴露 API Key |
 | POST / GET / DELETE | /api/documents({id}) | 上传 PDF/TXT/MD（multipart）/ 列表 / 删除（级联向量） |
 | GET | /api/health | 健康检查 |
 
@@ -329,12 +344,14 @@ Chat 流式协议（SSE，`data: {json}\n\n`）：
 {"type": "think", "node": "evidence_grader_agent", "label": "评估证据充分性", "text": "证据评估：已有证据充分，10 条证据支撑回答"}
 {"type": "plan", "sub_queries": ["原始问题", "子查询一", "扩展术语"]}
 {"type": "sources", "sources": [{"source": "文件名", "content": "命中内容"}]}
+{"type": "web_sources", "sources": [{"kind": "web", "source": "网页标题", "title": "网页标题", "url": "https://example.com", "content": "网页摘要（最多 300 字）", "truncated": true}]}
+{"type": "web_search_notice", "code": "TAVILY_API_KEY_REQUIRED", "message": "需要配置 TAVILY_API_KEY"}
 {"type": "delta", "content": "增量文本"}
 {"type": "regenerating"}
 {"type": "done", "conversation_id": "..."}
 {"type": "error", "message": "..."}
 ```
-- 事件顺序：`status`（每个节点起止各一帧，与业务事件交织）→ `think`（节点内过程内容行，与 status 交织，同一节点可多条）→ `plan`（每轮检索规划推一次，携带全部检索查询，重规划后覆盖）→ `sources`（每轮检索有命中时一次，以最终一批为准）→ `delta`（每轮生成一批）→（校验打回时 `regenerating` 后重复）→ `done`/`error`。字段只增不改，向后兼容（旧前端静默忽略新事件）。
+- 事件顺序：`status`（每个节点起止各一帧，与业务事件交织）→ `think`（节点内过程内容行，与 status 交织，同一节点可多条）→ `plan`（每轮检索规划推一次，携带全部检索查询，重规划后覆盖）→ `sources`/`web_sources`（对应能力有来源时一次）→ `web_search_notice`（联网搜索配置或执行失败时）→ `delta`（每轮生成一批）→（校验打回时 `regenerating` 后重复）→ `done`/`error`。字段只增不改，向后兼容（旧前端静默忽略新事件）。
 - `status`（BE-041）：node=节点名、label=中文标签（agent/constants.py 映射）、phase=start/end、end 帧带 duration_ms；前端以浅色小字实时展示工作过程，done 后保留，新提问重新开始。
 - `think`（BE-042）：node=产生节点、label=中文标签、text=过程内容文本（决策输出/运行细节/流转说明）；**后端发事件前经 `truncate_text(120)` 统一截断**（契约保证 ≤120 字，JSON 结构化输出先拼成中文句子）；与 status 互补——status 表节点起止，think 表过程内容；前端聚合进「思考」块（生成中默认展开，完成后收起为一行）。
 - `regenerating`：前端须清空已渲染增量（否则两版回答拼接）；`done` 后回答与 sources 已持久化，`GET .../messages` 原样返回（旧库自动 ALTER 迁移），历史消息同样可展示参考文档。
@@ -360,20 +377,20 @@ npm run build                                      # tsc 类型检查 + 生产�
 
 | 层级 | 位置 | 数量 | 验证内容 |
 |------|------|------|---------|
-| 单元 | tests/unit/ | 156（含 agent 99） | DI 容器、配置（含 Langfuse 开关默认值）、DDD 边界守护（AST，含 langgraph/langfuse 隔离区）、日志契约、Agent utils 纯函数（含思考内容截断/发射 BE-042）、LLM 结构化输出容错与 generation 采集（BE-043）、Langfuse sink 契约与降级（假客户端）、ChatService trace 生命周期（BE-043）、Reranker 排序/主动关闭/故障降级、RAG 子图 10 节点、主图 8 节点、Stub、状态包装器（status+span）、回答策略、端口契约（内存 Fake）、文档 Pipeline 与解析器 |
-| 集成 | tests/integration/（除 API） | 70（含 agent 12） | 真实 SQLite（持久化/级联/事务/迁移/ORM 契约/排序契约）、首次启动自愈、真实 Milvus 混合检索（不可达时跳过）、legal_rag 子图全场景（简单/多变体/恢复循环/预算耗尽/检索故障/事件序列）、主图 E2E 五 case（设计 §50：RAG 成功/直接回答/证据不足/Web DISABLED/Plugin NOT_IMPLEMENTED）、LLM/Embedding/RAG |
-| 接口 | tests/integration/test_api.py | 9 | 完整应用（临时 SQLite + Fake 向量库/LLM）：会话 CRUD、统一错误、SSE 协议（status/plan 先行、过滤 status 后原序不变）、文档上传删除、x-request-id |
+| 单元 | tests/unit/ | 167 | DI 容器、配置（含 Langfuse/Tavily 默认值）、DDD 边界守护（AST，含 langgraph/langfuse/MCP 隔离区）、日志契约、WebSearchPort 与 Tavily 响应归一/脱敏/独立日志、Agent utils、LLM 结构化输出、Langfuse sink、ChatService trace、Reranker、RAG 子图、主图、Stub、状态包装器、回答策略、端口契约、文档 Pipeline 与解析器 |
+| 集成 | tests/integration/（除 API） | 63 | 真实 SQLite、首次启动自愈、真实 Milvus 混合检索（不可达时跳过）、legal_rag 子图全场景、Tavily Fake MCP 主图路径（结果经 observation、失败不重试）、主图既有场景、LLM/Embedding/RAG |
+| 接口 | tests/integration/test_api.py | 12 | 完整应用（临时 SQLite + Fake 向量库/LLM/WebSearchPort）：会话 CRUD、统一错误、SSE 协议（含 web_sources/web_search_notice）、文档上传删除、x-request-id、联网来源持久化 |
 | 端到端 | scripts/（手工运行） | 3 脚本 | 真实 uvicorn + 真实 Milvus/LLM：上传→入库→流式 RAG 问答引用原文→检索策略/状态事件→持久化 |
 
-- 自动化合计 226 个，`uv run pytest` 全量运行无需外部服务（Fake 遵循领域端口，与生产实现互换验证同一契约；Langfuse 以假客户端锁契约）；唯一例外 test_milvus_vector_store.py 需真实 Milvus，不可达时自动跳过。
+- 自动化合计 242 个，`uv run pytest` 本轮为 **237 passed、5 skipped、1 warning**；无需外部服务的部分使用 Fake 遵循领域端口，与生产实现互换验证同一契约，Langfuse 以假客户端锁契约；唯一例外 test_milvus_vector_store.py 的 5 例需真实 Milvus，不可达时自动跳过。
 - Agent 测试的 Fake 体系：脚本化 LLMProvider（按系统提示特征分流输出）、Fake Embedding/VectorStore/RerankScorer——rerank 真实模型不进自动化测试，仅真实 E2E 验证。
-- E2E 脚本依赖真实服务，不纳入 pytest（保持自动化封闭性）；结论记录于 feature_list.json 各功能 evidence。测试数据源：tests/data_source/（专利法 TXT + MD 等）。
+- 自动化测试使用 Fake WebSearchPort，不依赖真实 Tavily 网络；真实 Remote MCP 只作为配置 Key 后的手工 smoke test。E2E 脚本依赖真实服务，不纳入 pytest；结论记录于 feature_list.json 各功能 evidence。测试数据源：tests/data_source/（专利法 TXT + MD 等）。
 
 ## 10. 扩展点与预留
 
 - **MySQL 8.0**：ORM 已统一表结构与 DML，接入只剩安装 `aiomysql` 驱动 + `containers.py` 加 `mysql+aiomysql://…` URL 分支并启用 `DbProvider.MYSQL`；需补真实实例集成验证与迁移方案（Alembic autogenerate 可直接消费现有声明式模型）。
 - **Milvus**：容器内存上限（backend/docker-compose.yml）milvus 2GB / etcd 256MB / minio 256MB（合计 2.5GB ≈ 4GB WSL2 的 62%，防无界增长拖垮宿主机）；`MILVUS_URI` 默认 http://127.0.0.1:19530。
-- **Web Search（二期）**：把 `agent/web/web_search_stub_node` 替换为 web_research_subgraph 并在 AgentGraphBuilder 改接节点即可，主图路由接口不变；`suggested_external_queries` 已从 RAG 子图透传到主图 state 备用。
+- **Web Search**：`agent/web/web_search_entry_node` 通过 `WebSearchPort` 调用 Tavily Remote MCP；若未来增加多轮 web research，只扩展该能力内部节点/子图，主图仍使用统一 `CapabilityResult` 与 observation 接口；`suggested_external_queries` 继续作为后续扩展预留。
 - **Plugin / Skill Runtime（二期）**：把 `agent/plugins/plugin_stub_node` 替换为 runtime 实现，约束同上；一期 Stub 不做任何动态加载。
 - **新文档格式**：实现 `DocumentParser` 策略并注册进工厂；**新 LLM Provider**：实现 `LLMProvider`（chat + stream + model_name）+ 容器加分支，密钥仅环境注入；**新 Agent 节点**：实现节点类并在 AgentGraphBuilder/build_legal_rag_graph 接线 + constants.py 登记中文标签（status 事件文案）。
 - **Rerank**：统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；GPU 机器设 `RERANKER_DEVICE=cuda`，CPU 机器使用 `cpu`。`rerank_max_candidates=20` 控制精排输入规模。`RERANK_ENABLED=false` 是可观测的主动关闭状态，证据仍按 Milvus RRF 序输出；只有 CrossEncoder 加载/推理异常才记为 `reranker_degraded`。
@@ -397,7 +414,7 @@ normalized_query / intent / request_type / extracted_conditions；action / reaso
 JSON 纪律（以 { 开始以 } 结束、禁 markdown 代码块）；JSON 示例统一加"值仅为格式示意"防锚定；answer_generator 补【来源：文件名】格式硬约束与简洁约束；grounding 降误判（实质一致即可/无关数字不算法律数据/宁可放行）；direct_answer 禁输出法条编号与精确法律数据。验证口径：Langfuse regenerating 打回率 RAG 2→0、闲聊 3→0。
 
 ### think 事件节点→内容清单（BE-042）
-query_router=意图判定；orchestrator=编排决策；strategy_router=选中策略；hybrid_retriever=查询数与命中数；evidence_ranking=重排启用/主动关闭/故障降级与保留条数；evidence_grader=评估结论；recovery_planner=恢复计划；grounding_checker=校验判定+理由与预算收尾说明；web/plugin stub=未开通说明；final_answer=引用来源条数；observation / direct_answer / answer_generator 不发（避免与回答本体重复）。
+query_router=意图判定；orchestrator=编排决策；strategy_router=选中策略；hybrid_retriever=查询数与命中数；evidence_ranking=重排启用/主动关闭/故障降级与保留条数；evidence_grader=评估结论；recovery_planner=恢复计划；grounding_checker=校验判定+理由与预算收尾说明；web=联网搜索状态/结果；plugin stub=未开通说明；final_answer=引用来源条数；observation / direct_answer / answer_generator 不发（避免与回答本体重复）。
 
 ## 12. 一期设计约束与 § 号速查（原 legal_agent_phase1_technical_design.md 承载，该稿已删除，此处为唯一权威）
 
@@ -405,20 +422,20 @@ query_router=意图判定；orchestrator=编排决策；strategy_router=选中�
 
 ### 30 条强制实现约束（原设计 §53，逐条保留编号——代码按约束号引用）
 
-1. 所有模块都必须位于 `agent/` 目录。 2. 带 LLM 的 Node 用 `_agent` 后缀。 3. 确定性 Node 用 `_node` 后缀。 4. Main Graph 与 Local RAG 分别构建。 5. Local RAG 作为独立 Subgraph 接入 Main Graph。 6. Local RAG 不得调用 Web Search。 7. Local RAG 不得调用 Plugin。 8. Web Search 本期只能 Stub。 9. Plugin/Skill 本期只能 Stub。 10. 不实现 Relax Filter。 11. Dense+BM25+RRF 合并在 `hybrid_retriever_node`。 12. Evidence Aggregation+Reranker 合并在 `evidence_ranking_node`。 13. `evidence_grader_agent` 必须独立。 14. `strategy_router_node` 同时服务 Initial Retrieval 与 Recovery。 15. Retrieval Strategy 必须允许多选。 16. SubQuery 必须进入同一个 Hybrid Retrieval。 17. 多 Query 必须优先异步并发。 18. 最终 Rerank 必须使用 `original_query`。 19. RAG Recovery Loop 必须受 `max_retries` 控制。 20. Main Agent Loop 必须受 `max_global_steps` 控制。 21. LLM Planner/Grader 优先使用 Structured Output。 22. Prompt 与 Node 文件分离。 23. 外部依赖通过 `services/` 封装。 24. 不允许节点直接初始化多个重复 LLM Client。 25. 不允许业务节点直接访问底层 Milvus SDK。 26. 不允许将 Plugin/Web 实现偷偷加入一期。 27. 必须有 Unit/Integration/E2E Test。 28. 必须支持 Mock Service。 29. 必须统一记录 Node Trace。 30. 每个 Capability 必须返回统一 `CapabilityResult`。
+1. 所有模块都必须位于 `agent/` 目录。 2. 带 LLM 的 Node 用 `_agent` 后缀。 3. 确定性 Node 用 `_node` 后缀。 4. Main Graph 与 Local RAG 分别构建。 5. Local RAG 作为独立 Subgraph 接入 Main Graph。 6. Local RAG 不得调用 Web Search。 7. Local RAG 不得调用 Plugin。 8. Web Search 必须经领域端口调用 Remote MCP。 9. Plugin/Skill 本期只能 Stub。 10. 不实现 Relax Filter。 11. Dense+BM25+RRF 合并在 `hybrid_retriever_node`。 12. Evidence Aggregation+Reranker 合并在 `evidence_ranking_node`。 13. `evidence_grader_agent` 必须独立。 14. `strategy_router_node` 同时服务 Initial Retrieval 与 Recovery。 15. Retrieval Strategy 必须允许多选。 16. SubQuery 必须进入同一个 Hybrid Retrieval。 17. 多 Query 必须优先异步并发。 18. 最终 Rerank 必须使用 `original_query`。 19. RAG Recovery Loop 必须受 `max_retries` 控制。 20. Main Agent Loop 必须受 `max_global_steps` 控制。 21. LLM Planner/Grader 优先使用 Structured Output。 22. Prompt 与 Node 文件分离。 23. 外部依赖通过 `services/` 封装。 24. 不允许节点直接初始化多个重复 LLM Client。 25. 不允许业务节点直接访问底层 Milvus SDK。 26. Web Search 只能由显式按钮请求触发，不得绕过端口或偷偷自动联网。 27. 必须有 Unit/Integration/E2E Test。 28. 必须支持 Mock Service。 29. 必须统一记录 Node Trace。 30. 每个 Capability 必须返回统一 `CapabilityResult`。
 
 ### 设计 §号速查（仅收录代码引用过的章节；「现落点」为权威实现位置）
 
 | § | 核心内容 | 现落点 |
 |---|---------|--------|
-| §2/2.1~2.4 | 架构原则：`_agent`/`_node` 命名、主图与子图分离、Web/Plugin 仅入口、顶层循环与恢复循环分离 | 本文档 §5 + 上表约束 2~9 |
+| §2/2.1~2.4 | 架构原则：`_agent`/`_node` 命名、主图与子图分离、Web 经端口接入、Plugin 仅保留 Stub、顶层循环与恢复循环分离 | 本文档 §5 + 上表约束 2~9 |
 | §3/§4/§56 | 主图与 RAG 子图最终拓扑 | 本文档 §5（mermaid） |
 | §5 | 推荐目录结构 | 本文档 §2 |
 | §6/§7 | 主图/RAG State 字段定义 | `agent/state.py`、`subgraphs/legal_rag/state.py` |
 | §8/§9 | 结构化输出 Schema：QueryRouterOutput/OrchestratorDecision/GroundingCheck；RetrievalPlan/EvidenceGrade/RecoveryPlan | `agent/schemas.py`、`legal_rag/schemas.py` |
 | §10 | CapabilityResult 统一结构（capability/status/content/evidence/citations/metadata） | `agent/schemas.py` + observation_node |
 | §11~14 | query_router（安全默认 legal_question）/orchestrator（预算+强制 finish）/action_router（确定性映射）/observation（归一+步数+1） | `agent/nodes/` 同名文件 |
-| §15/§16 | Web/Plugin Stub：仅 NOT_IMPLEMENTED/DISABLED，无真实实现 | `agent/web/`、`agent/plugins/` |
+| §15/§16 | Web Search 经领域端口调用 Tavily Remote MCP；Plugin 仍为 NOT_IMPLEMENTED/DISABLED | `agent/web/`、`agent/plugins/`、`domain/services/web_search.py` |
 | §17~20 | direct_answer（唯一流式出口）/answer_generator（四情形）/grounding_checker（规则档+judge）/final_answer（Citation 编号） | `agent/nodes/` 同名文件 |
 | §21~26 | retrieval_planner 四类策略多选+target_evidence；strategy_router 归一；改写 ≤2/拆分 ≤5/扩展 ≤3；查询汇总去重排除已检索截断 ≤8 | `legal_rag/nodes/` + `config.py` |
 | §27~31 | hybrid_retriever（单查询重试 1 次）；多 Query asyncio.gather 并发；Milvus 服务端 Dense+BM25+RRF；dense/bm25/hybrid_top_k 参数 | `legal_rag/nodes/` + `services/milvus_service.py` |
@@ -431,6 +448,6 @@ query_router=意图判定；orchestrator=编排决策；strategy_router=选中�
 | §47 | 错误处理矩阵：Milvus 节点内重试 1 次→全失败置 RETRIEVAL_ERROR、禁无限 loop；Reranker 降级 RRF 序记 degraded；LLM 结构化输出解析重试 1 次→安全默认（Planner=original、Grader=insufficient 防误判充分） | 各节点/service 实现 + 测试锁定 |
 | §48 | 节点 Trace 统一字段（node/status/duration_ms + LLM model/latency + RAG query/candidate/dedup/rerank/retry 计数） | `utils/trace_utils.py` + Langfuse |
 | §49 | 性能约束：检索查询 ≤8、hybrid top-k=20、原始候选 ≈160、rerank top-10；不把全量候选直接送 Answer LLM | `legal_rag/config.py` |
-| §50 | 测试策略：主图 E2E 5 case（RAG 成功/直接回答/证据不足/Web DISABLED/Plugin NOT_IMPLEMENTED） | `tests/integration/agent/` |
+| §50 | 测试策略：主图 E2E 覆盖 RAG 成功/直接回答/证据不足/Tavily MCP 联网搜索/按钮关闭/grounding 重试复用/Plugin NOT_IMPLEMENTED | `tests/integration/agent/` |
 | §51 | Mock 要求：Fake 服务遵循领域端口，与生产实现互换验证同一契约 | `tests/fakes.py` |
-| §54/§55 | 完成标准（10 条路径全部可运行）；二期扩展=替换 Stub、主图零重构 | 本文档 §5/§10 |
+| §54/§55 | 完成标准（联网搜索与既有主图路径均可运行）；二期扩展=扩展 Web research 或替换 Plugin Stub，主图零重构 | 本文档 §5/§10 |

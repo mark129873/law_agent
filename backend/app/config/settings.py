@@ -12,6 +12,7 @@ from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 项目根锚点：backend/ 目录（本文件位于 backend/app/config/）。
@@ -143,6 +144,15 @@ class Settings(BaseSettings):
     # 项目密钥：敏感配置，只经 .env/环境变量注入，禁止提交仓库与写入日志
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
+
+    # ---- Tavily Remote MCP 联网搜索 ----
+    # 联网是否触发由每次 HTTP 请求的 use_web_search 决定，
+    # 这里不再增加全局 WEB_SEARCH_ENABLED，避免配置与前端按钮状态漂移。
+    tavily_mcp_url: str = "https://mcp.tavily.com/mcp/"
+    # 敏感配置只从环境变量或 backend/.env 注入，任何日志都不得记录其值。
+    tavily_api_key: str = ""
+    tavily_search_depth: str = "basic"
+    tavily_max_results: int = Field(default=5, ge=5, le=20)
 
     @property
     def resolved_sqlite_db_path(self) -> str:

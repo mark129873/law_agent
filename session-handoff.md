@@ -2,21 +2,34 @@
 
 ## 当前已验证
 - 现在明确可用的部分：
-  - **Agent 模块一期重写 + 思考块 + Langfuse trace + 全量 Prompt 优化 + 精排状态语义修复 + Reranker 模型统一 + 低质量兜底 Agent 删除全部 passing（BE-032~047 + FE-001~016；BE-030 deprecated）**：主图 14 节点 + RAG 子图 10 节点 + 服务层 + status/think 双事件 + 豆包式思考块 + Langfuse 三级追踪 + 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾。
+  - **Agent 模块一期重写 + 思考块 + Langfuse trace + 全量 Prompt 优化 + 精排状态语义修复 + Reranker 模型统一 + 低质量兜底 Agent 删除 + Tavily Remote MCP 搜索全部 passing（BE-032~048 + FE-001~017；BE-030 deprecated）**：主图含 14 个业务节点 + RAG 子图 10 节点 + Tavily Web Search + Plugin Stub + 服务层 + status/think 双事件 + 豆包式思考块 + Langfuse 三级追踪 + 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾。
+  - **Tavily Remote MCP 搜索（BE-048/FE-017）**：按钮状态通过 `use_web_search` 传递；`WebSearchPort` → Tavily Streamable HTTP `tavily_search` → `observation_node` → Answer/grounding/final；只在按钮开启时实际联网，搜索结果以 300 字网页预览经 `web_sources` 展示，完整原始/规范化数据写入 `backend/log/web_search/search-<UTC>-<UUID>.log`，落盘失败 fail-closed。
   - **全量 Prompt 优化（BE-044，本轮新增）**：12 个 Prompt 统一五段结构（角色/任务/格式/规则/纪律）+ JSON 纪律（禁 markdown 代码块）+ 示例值防锚定标注 + answer_generator 明确【来源：文件名】格式硬约束 + grounding 降误判（实质一致即可/无关数字不算法律数据/宁可放行）。**编排器"不 finish"误诊修正**（Langfuse 时间线取证：闲聊打回真凶是重复执行 direct_answer，非 judge）——regenerating：RAG 2→0、闲聊 3→0；RAG 回答从 65 字重复堆砌变一句精准+来源标注。
   - **Langfuse trace（BE-043，本轮新增）**：domain TraceSink/TraceSpan 端口 + trace_sink_var（ContextVar）；infrastructure/trace/langfuse_sink.py（langfuse 4.15.2）；ChatService 记 trace 生命周期与流程事件、with_node_status 压/弹节点 span（子图嵌套）、LLMService 三路径记 generation；.env 开关 LANGFUSE_ENABLED（默认 false，缺密钥 WARN 降级，全方法吞异常）。
   - **真实云端验证通过**（jp.cloud.langfuse.com，用户 .env 预置密钥）：E2E trace 含 29 节点 span / 11 generation（model+Prompt+输出）/ 15 think + 2 regenerating 事件。
   - **精排状态语义修复（BE-045）**：`RERANK_ENABLED=false` 被识别为主动关闭，使用 RRF 但不再显示“精排不可用”；CrossEncoder 真失败仍保留 degraded/WARN；启动日志记录 `rerank_enabled` 与 `reranker_device`。
   - **Reranker 模型统一（BE-046）**：生产配置、检查脚本、`.env.example`、README 和架构文档统一为 `cross-encoder/ms-marco-MiniLM-L-6-v2`；检查脚本下载到根目录 `.model` 后从本地目录加载并执行样本打分。
-  - **测试体系**：自动化 226 个（unit 156 含 agent 99 / integration 70 含 agent 12 与 API 9）；test_milvus_vector_store.py 5 例需真实 Milvus（不可达自动跳过）。
-- 最近一轮实际跑过的验证（2026-09-14，Session 041）：
-  - Milvus 集合重置后全量 `uv run pytest tests -q -rs` → **226 passed, 1 warning**；相关精排测试 37 passed。
+  - **测试体系**：自动化 242 个（unit 167 / integration 75，其中 API 12）；test_milvus_vector_store.py 5 例需真实 Milvus（不可达自动跳过）。
+- 最近一轮实际跑过的验证（2026-09-16，Session 045）：
+  - 全量 `uv run pytest tests -q -rs` → **237 passed, 5 skipped, 1 warning**；新增 WebSearch 单测、主图链路与 API SSE/持久化测试均通过。
+  - `frontend/npm run build` → **tsc + Vite 构建通过**；`git diff --check` 与 `feature_list.json` JSON 校验通过。
+  - Docker Desktop 当前不可用，5 个 Milvus 测试按既有规则跳过；CUA 浏览器 inventory helper 不可用，未完成可见浏览器回归；真实 Tavily smoke test 需部署 Key，未发送真实请求。
+  - 既有后端/前端启动路径未改变：`backend` 仍按 Docker + uvicorn 启动，`frontend` 仍按 Vite 启动；搜索日志目录已 gitignore，当前仓库没有未跟踪搜索日志或密钥。
   - 真实后端启动日志确认 `rerank_enabled=false`；上传专利法 TXT 后提问“发明专利权的保护期限是多少年？”返回“二十年”、第四十二条来源 10 条，SSE 思考文案为“证据按融合排序完成（精排已关闭）”。
   - `frontend/npm run build` 通过；本次改动涉及后端 SSE 文案，无需前端代码改动。
   - 当前本地 `.env` 已切换为 MiniLM 本地目录并开启 `RERANK_ENABLED=true`；旧 Qwen3 性能记录仅属于 Session 041 的历史验证，不再是当前启动配置。
   - README 本地相对链接 5 个均有效，2 个 Mermaid 代码块与全部 Markdown 围栏闭合；配置、API、仓库地址和功能边界已对照当前代码核验。
   - 最近一次真实 E2E 仍为 Session 034：GLM+Milvus 全断言通过，RAG 回答一句精准+【来源】一次通过；闲聊 curl 实测 0 regenerating。
 - 验证后已清理：本轮创建的测试会话/专利法文档已删除，`law_chunks` 集合已 drop，Milvus 三个容器保持运行状态但集合为空；`backend/data/law_agent.db` 仍为 gitignore 的本地数据库文件。
+
+## 本轮改动（Session 045：通过 Tavily Remote MCP 增加联网搜索）
+- 文档先行同步 `docs/PRODUCT.md`、`docs/ARCHITECTURE.md`、`docs/RELIABILITY.md`，并同步 README、Mermaid 图、`feature_list.json`、`progress.md`。
+- 后端新增 `WebSearchPort`、Tavily Remote MCP Streamable HTTP 适配器与 MCP v1 依赖（`mcp>=1.28,<2`）；新增 `TAVILY_API_KEY`、`TAVILY_MCP_URL`、搜索深度/条数配置、状态 API、`use_web_search` 请求参数、`web_sources`/`web_search_notice` SSE。
+- 每次搜索在 `backend/log/web_search/` 独立生成完整 JSON `.log`，临时文件 + 原子替换、递归脱敏、永久保留；日志写入失败返回失败 tag，不将内存结果作为成功来源继续展示。
+- 主图接线为 QueryRouter → Orchestrator → Web Search → observation → Orchestrator → Answer → Grounding → Final；按钮关闭时关键词只触发“请先开启按钮”提示，不调用 MCP；grounding 重试复用已获取结果。
+- 前端新增持久在线模式按钮、配置 tag、网页来源折叠区、合法 URL、300 字预览和历史来源恢复；保留 Plugin Stub，删除旧 Web Search Stub。
+- 验证：全量后端 **237 passed、5 skipped、1 warning**；前端 `npm run build` 通过；浏览器可见回归因 CUA inventory helper 不可用未完成；真实 Tavily smoke test 未执行。
+- 交接风险：部署前需配置 `TAVILY_API_KEY`；真实远程服务响应形状仍需一次非生产 smoke test 观察，不能把未配置环境的本地 Fake 验证当成远程可达证明。
 
 ## 本轮改动（Session 044：添加 MIT 开源协议）
 - 新增根目录 `LICENSE`，采用标准 MIT License 文本，版权主体为 `law_agent contributors`。
@@ -78,7 +91,7 @@
 - 已知缺陷：无
 - 未验证路径：
   - Langfuse 自托管实例未验证（用户用云版；开关口径一致）
-  - Ollama LLM 路径真实 E2E、MySQL 8.0、Web Search 二期（既有未验证项）
+  - Ollama LLM 路径真实 E2E、MySQL 8.0、Tavily Remote MCP 真实 smoke test（需部署 Key；本轮仅 Fake 验证）
 - 下一轮会话需要注意的风险：
   - **pymilvus load_dotenv 副作用升级**：.env 现含 LANGFUSE_ENABLED=true，会灌入测试进程环境——新增 API/集成测试时必须在 Settings 显式 `langfuse_enabled=False`（test_api 夹具已示范），否则测试触真实观测平台
   - **langfuse v4 查询口径**：验证/导出要用 `api.trace.get(id)` 完整详情或 observations.get_many 带 fields——get_many 裸调不返回 input/output/model，别误判为上报缺失
@@ -88,14 +101,14 @@
   - 既有风险不变：每问题 LLM 调用 5~8 次；BE-017 字面锚点三方联动
   - **ADR 体系已删除（Session 035）**：注释/文档不得再新增 ADR-XXXX 引用；架构决策统一引用 docs/ARCHITECTURE.md
   - **Windows 端口清理**：停 uvicorn/npm 后子进程可能残留占端口，需 netstat 找 PID + taskkill //F
-- 下一步最佳动作（需用户决定）：失败查询链路优化（已量化：最坏 20 次 LLM/24 检索/3 重排；方案=恢复轮经济模式+零新增早退+同能力防重入护栏+预算参数可配）；可选产品增强（会话重命名/停止按钮/CORS 收敛）；MySQL 8.0 接入；Web Search 二期立项
+- 下一步最佳动作（需用户决定）：部署环境配置 `TAVILY_API_KEY` 后执行一次非生产 Remote MCP smoke test；或继续失败查询链路优化（已量化：最坏 20 次 LLM/24 检索/3 重排；方案=恢复轮经济模式+零新增早退+同能力防重入护栏+预算参数可配）；可选产品增强（会话重命名/停止按钮/CORS 收敛）；MySQL 8.0 接入
 - 这一步中哪些东西不要动：后端 API 契约（§7 SSE）；领域层零技术依赖（langfuse 已入守护名单，只允许 infrastructure/trace）；**trace_sink_var 的注入时机（必须在图任务创建前 set）**；**LangfuseTraceSink 全方法吞异常原则**；双预算常量；BE-017 字面锚点联动
 
 ## 命令
 - Milvus 启动：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone`
 - 后端启动：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 干净环境重置（两步）：删除 `backend/data/` + `uv run python scripts/reset_milvus.py`
-- 后端验证：`cd backend && uv run pytest tests -q`（全量 226 个；Milvus 未启动时 5 例自动跳过）
+- 后端验证：`cd backend && uv run pytest tests -q -rs`（全量 242 项；本轮 237 passed、5 skipped；Milvus 未启动时 5 例自动跳过）
 - 前端构建/启动：`cd frontend && npm run build` / `npm run dev`
 - 端到端：启动服务器后 `PYTHONPATH=backend uv run --with httpx python backend/scripts/verify_real_e2e.py`
 - Langfuse 云端查证：`api.trace.list / api.trace.get(id)`（完整详情含 observations IO）

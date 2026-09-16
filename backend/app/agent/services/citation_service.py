@@ -22,8 +22,15 @@ class CitationService:
         for item in evidence:
             document_id = str(item.get("document_id") or "")
             chunk_id = str(item.get("chunk_id") or "")
-            key = chunk_id or f"{document_id}:{item.get('metadata', {}).get('chunk_index', '')}" \
-                or f"hash:{content_hash(str(item.get('content') or ''))}"
+            chunk_index = item.get("metadata", {}).get("chunk_index", "")
+            if chunk_id:
+                key = chunk_id
+            elif document_id or chunk_index != "":
+                key = f"{document_id}:{chunk_index}"
+            else:
+                # Web 来源没有 document/chunk id，必须按正文哈希去重，
+                # 不能把所有网页错误地合并成同一个空 id。
+                key = f"hash:{content_hash(str(item.get('content') or ''))}"
             if key in seen:
                 continue
             seen.add(key)
@@ -35,6 +42,7 @@ class CitationService:
                     chunk_id=chunk_id,
                     title=str(item.get("title") or ""),
                     source_name=str(item.get("source_name") or "") or None,
+                    source_url=str(item.get("source_url") or "") or None,
                     article_number=metadata.get("article_number"),
                     metadata={},
                 )
