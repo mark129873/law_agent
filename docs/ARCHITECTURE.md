@@ -384,7 +384,7 @@ npm run build                                      # tsc 类型检查 + 生产�
 
 - 自动化合计 242 个，`uv run pytest` 本轮为 **237 passed、5 skipped、1 warning**；无需外部服务的部分使用 Fake 遵循领域端口，与生产实现互换验证同一契约，Langfuse 以假客户端锁契约；唯一例外 test_milvus_vector_store.py 的 5 例需真实 Milvus，不可达时自动跳过。
 - Agent 测试的 Fake 体系：脚本化 LLMProvider（按系统提示特征分流输出）、Fake Embedding/VectorStore/RerankScorer——rerank 真实模型不进自动化测试，仅真实 E2E 验证。
-- 自动化测试使用 Fake WebSearchPort，不依赖真实 Tavily 网络；真实 Remote MCP 只作为配置 Key 后的手工 smoke test。E2E 脚本依赖真实服务，不纳入 pytest；结论记录于 feature_list.json 各功能 evidence。测试数据源：tests/data_source/（专利法 TXT + MD 等）。
+- 自动化测试使用 Fake WebSearchPort，不依赖真实 Tavily 网络；真实 Remote MCP 通过配置 Key 后的手工 smoke test 验证。2026-09-16 实测返回 5 条来源，SSE/持久化/独立日志及按钮关闭不触网断言通过。E2E 脚本依赖真实服务，不纳入 pytest；结论记录于 feature_list.json 各功能 evidence。测试数据源：tests/data_source/（专利法 TXT + MD 等）。
 
 ## 10. 扩展点与预留
 
