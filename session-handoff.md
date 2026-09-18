@@ -1,5 +1,19 @@
 # 会话交接
 
+## Session 048：测试数据同步与真实 RAG 基线（2026-09-18）
+
+### 本轮已完成
+- 同步用户删除的两份测试文本：评测案例从 24 条调整为 23 条；真实 E2E 脚本不再引用已删除专利法 Markdown；pytest 数据集测试校验所有 expected source 文件真实存在。
+- 使用 5 份当前测试文档导入独立 Milvus 集合 `law_agent_eval`。
+- 真实 workflow 报告：`20260918T132908Z-cabbe758`，23 条中 10 条完成、13 条因 GLM `ConnectError`/HTTP 400 失败；完成样本 Hit@5 90%、MRR 0.8333。
+- API/SSE 冒烟最近一次 2/2 通过：`api-smoke-20260918T133249Z-0ddb95`。
+- 新增脱敏摘要 `docs/evaluation-baseline.md`，并同步 README、feature_list、progress。
+
+### 验证与结论
+- Milvus 恢复后 `uv run pytest tests -q -rs`：254 passed、1 warning；评测单测 12 passed。
+- `compileall`、CLI help、`npm run build`、`git diff --check` 通过。
+- BE-049 仍为 `in_progress`：检索完成样本可形成基线，但模型调用失败率过高，不能把本次结果标为质量门禁通过。
+
 ## Session 047：跳过 Milvus 的离线收尾（2026-09-18）
 
 ### 本轮已完成
@@ -14,10 +28,10 @@
 ## Session 046：RAG 评测演示文档与双入口运行器（2026-09-18）
 
 ### 本轮已完成
-- 新增 `backend/tests/evaluation/rag_cases.jsonl`，共 24 条案例：本地事实、多条件、证据不足、对抗前提和 direct control。
+- 新增 `backend/tests/evaluation/rag_cases.jsonl`，共 23 条案例：本地事实、多条件、证据不足、对抗前提和 direct control；已移除已删除的 `民事诉讼法2021.md` 对应案例。
 - `QaWorkflow` 已在 `app/containers.py` 统一注册，ChatService 与评测器复用同一工作流；Milvus 集合名支持 `MILVUS_COLLECTION_NAME`，评测默认要求 `law_agent_eval*` 隔离集合。
 - 新增 `app/evaluation/`：JSONL 校验、Recall/Hit@K、MRR、引用精确率/召回率、grounding/状态匹配、节点耗时、脱敏错误、结构化 LLM Judge、JSON/Markdown 报告。
-- 新增 `scripts/evaluate_rag.py`：`prepare` 通过文档 API 重置并导入 7 份测试文档；`workflow` 直调真实 QaWorkflow；`api-smoke` 验证真实 HTTP/SSE 事件顺序、来源持久化和错误边界。
+- 新增 `scripts/evaluate_rag.py`：`prepare` 通过文档 API 重置并导入当前 5 份测试文档；`workflow` 直调真实 QaWorkflow；`api-smoke` 验证真实 HTTP/SSE 事件顺序、来源持久化和错误边界。
 - 文档定位统一为 RAG 评测演示文档，已同步 `README.md`、`docs/ARCHITECTURE.md`、`docs/PRODUCT.md`、`docs/RELIABILITY.md`、`.env.example`。
 
 ### 本轮验证与未完成
@@ -46,7 +60,7 @@ uv run python scripts/evaluate_rag.py api-smoke --base-url http://127.0.0.1:8000
   - **真实云端验证通过**（jp.cloud.langfuse.com，用户 .env 预置密钥）：E2E trace 含 29 节点 span / 11 generation（model+Prompt+输出）/ 15 think + 2 regenerating 事件。
   - **精排状态语义修复（BE-045）**：`RERANK_ENABLED=false` 被识别为主动关闭，使用 RRF 但不再显示“精排不可用”；CrossEncoder 真失败仍保留 degraded/WARN；启动日志记录 `rerank_enabled` 与 `reranker_device`。
   - **Reranker 模型统一（BE-046）**：生产配置、检查脚本、`.env.example`、README 和架构文档统一为 `cross-encoder/ms-marco-MiniLM-L-6-v2`；检查脚本下载到根目录 `.model` 后从本地目录加载并执行样本打分。
-  - **测试体系**：自动化 249 个；本轮评测单测 12 个，`test_milvus_vector_store.py` 5 例需真实 Milvus。
+  - **测试体系**：自动化 254 个；本轮评测单测 12 个，`test_milvus_vector_store.py` 5 例本轮已实际执行。
 - 最近一轮实际跑过的验证（2026-09-16，Session 045 补充）：
   - Docker/Milvus 可用时全量 `uv run pytest tests -q -rs` → **242 passed, 1 warning**；5 个 Milvus 用例均实际执行。
   - `frontend/npm run build` → **tsc + Vite 构建通过**；`git diff --check` 与 `feature_list.json` JSON 校验通过。

@@ -1,7 +1,7 @@
 """BE-012/021 真实数据端到端验证脚本（一期 Agent 重写后复验）。
 
 针对 tests/data_source 中的真实法律文档：
-上传（txt + md）→ 入库 ready → 一期 Agent 全链路问答：
+上传专利法 txt → 入库 ready → 一期 Agent 全链路问答：
 检索策略（plan）→ 参考来源（sources）→ 流式回答引用专利法条文；
 校验 SSE 事件契约（plan 先行、status 事件贯通、sources 随回答持久化）。
 """
@@ -26,15 +26,7 @@ async def main() -> None:
         )
         print("upload txt:", resp.status_code, resp.json().get("status"), "chunks_ready" if resp.status_code == 201 else resp.text[:200])
 
-        # 2. 上传 md 测试文件
-        md = open(os.path.join(data_source, "中华人民共和国专利法（要点笔记）.md"), "rb").read()
-        resp = await client.post(
-            f"{BASE}/api/documents",
-            files={"file": ("中华人民共和国专利法（要点笔记）.md", md, "text/markdown")},
-        )
-        print("upload md:", resp.status_code, resp.json().get("status") if resp.status_code == 201 else resp.text[:200])
-
-        # 3. 新建会话并流式提问（一期主图 + legal_rag 子图全链路）
+        # 2. 新建会话并流式提问（一期主图 + legal_rag 子图全链路）
         conversation_id = (await client.post(f"{BASE}/api/conversations", json={"title": "专利法咨询"})).json()["id"]
         answer = []
         sources = []
@@ -79,7 +71,7 @@ async def main() -> None:
         assert "query_router_agent" in status_nodes, "主图节点应有 status 事件（BE-041）"
         assert "hybrid_retriever_node" in status_nodes, "子图节点 status 事件应上浮（ContextVar 机制）"
 
-        # 4. 消息已持久化，且 assistant 消息携带参考来源（刷新后前端仍可展示）
+        # 3. 消息已持久化，且 assistant 消息携带参考来源（刷新后前端仍可展示）
         messages = (await client.get(f"{BASE}/api/conversations/{conversation_id}/messages")).json()
         print("persisted messages:", [m["role"] for m in messages])
         assert messages[1]["sources"], "持久化的 assistant 消息应带 sources"

@@ -133,6 +133,7 @@ uv run python scripts/evaluate_rag.py api-smoke --base-url http://127.0.0.1:8000
 评测结果写入 `backend/log/evaluation/`，包含 `report.json` 和 `report.md`；原始结果不提交 Git。
 工作流评测读取真实 `QaWorkflow` 内部证据，HTTP 冒烟验证 SSE 顺序、来源持久化和错误边界。
 LLM Judge 可通过 `EVAL_JUDGE_PROVIDER` 与 `EVAL_JUDGE_MODEL` 独立配置。
+最近一次脱敏真实基线见 [`docs/evaluation-baseline.md`](docs/evaluation-baseline.md)。
 
 ## 项目结构
 

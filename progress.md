@@ -3,13 +3,18 @@
 ## 当前已验证状态
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`（当前分支 feature/auto_coder）
 - 标准启动路径：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 标准验证路径：`cd backend && uv run pytest tests -q -rs`（当前 249 个自动化测试；本轮环境 Docker/Milvus 不可达，结果为 249 passed、5 skipped、1 warning）；启动后 `curl http://127.0.0.1:8000/api/health`
+- 标准验证路径：`cd backend && uv run pytest tests -q -rs`（当前 254 个自动化测试；Milvus 恢复后本轮结果为 254 passed、1 warning）；启动后 `curl http://127.0.0.1:8000/api/health`
 - Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ Reranker 模型统一（BE-046）+ 低质量兜底 Agent 删除（BE-047）+ Tavily Remote MCP 搜索（BE-048/FE-017）全部 passing：主图 + Local Legal RAG 子图 + Tavily Web Search + Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
 - 当前 Reranker：全项目统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；`check_rerank_local.py` 首次下载到根目录 `.model/cross-encoder/ms-marco-MiniLM-L-6-v2` 并执行 CPU 样本打分。本地 `.env` 已切换为该模型并开启 `RERANK_ENABLED=true`；无法使用时仍按既有故障降级契约记录 WARN。
 - 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；grounding 未通过且预算耗尽时直接进入 `final_answer_node`，不再调用额外兜底 LLM；其他重试机制不变
-- 当前最高优先级未完成功能：BE-049 RAG 端到端评测已实现代码、数据集和测试，仍待 Docker/Milvus/真实模型环境完成一次隔离集合运行并生成基线分数；其余 BE-001~048 与 FE-001~017 保持 passing 或 deprecated
-- 当前 blocker：本轮环境 Docker Desktop/Milvus 不可达，隔离集合真实运行在初始化阶段失败；无代码 blocker。前端未改动，沿用既有 `npm run build` 与 API/组件契约验证。
+- 当前最高优先级未完成功能：BE-049 RAG 端到端评测代码、数据集、真实隔离集合运行和脱敏基线已具备；仍需处理真实 GLM 调用稳定性后才能把质量门禁标为 passing；其余 BE-001~048 与 FE-001~017 保持 passing 或 deprecated
+- 当前 blocker：Milvus、Embedding 和 API/SSE 均已恢复；真实 workflow 23 条中 13 条出现 GLM `ConnectError`/HTTP 400，当前属于外部模型调用稳定性 blocker，不把失败样本计入检索质量分数。前端未改动，沿用既有 `npm run build` 与 API/组件契约验证。
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md、progress-archive-031-040.md（Session 001~040 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
+
+### Session 048（测试数据同步与真实 RAG 基线）（2026-09-18）
+- 用户删除了 `中华人民共和国专利法（要点笔记）.md` 和 `民事诉讼法2021.md`；已删除评测数据集中对应的民事诉讼案例，真实 E2E 脚本不再上传已删 Markdown，pytest 数据集测试改为 23 条并校验来源文件存在。
+- 当前导入 5 份测试文档到 `law_agent_eval`；真实 workflow 报告 `20260918T132908Z-cabbe758`：23 条中 10 条完成、13 条 GLM `ConnectError`/HTTP 400，完成样本 Hit@5 90%、MRR 0.8333；API/SSE 冒烟报告 `api-smoke-20260918T133249Z-0ddb95` 2/2 通过。
+- Milvus 恢复后全量 `uv run pytest tests -q -rs` 为 254 passed、1 warning；评测基线摘要已写入 `docs/evaluation-baseline.md`。BE-049 保持 `in_progress`，未把外部模型失败伪装为 passing。
 
 ### Session 047（跳过 Milvus 的离线收尾）（2026-09-18）
 - 本轮动作：按用户要求关闭 Docker Desktop，跳过 Milvus 真实运行；不生成虚构的 RAG 基线分数。
@@ -19,7 +24,7 @@
 ### Session 046（RAG 评测演示文档与双入口运行器）
 - 日期：2026-09-18
 - 本轮目标：实现 RAG 端到端评测演示文档配套的真实工作流评测、HTTP/SSE 冒烟、可配置 Judge、指标和 JSON/Markdown 报告。
-- 改动：新增 24 条法律 JSONL 数据集；容器统一注册 `QaWorkflow`；新增 Recall/Hit@K、MRR、引用精确率/召回率、状态/grounding、节点耗时和 LLM Judge；新增独立 Milvus 集合与 Judge 配置；新增 `scripts/evaluate_rag.py` 的 `prepare`、`workflow`、`api-smoke` 三个入口；报告写入 gitignore 的 `backend/log/evaluation/`。
+- 改动：新增 23 条法律 JSONL 数据集（与当前保留的 5 份测试文本同步）；容器统一注册 `QaWorkflow`；新增 Recall/Hit@K、MRR、引用精确率/召回率、状态/grounding、节点耗时和 LLM Judge；新增独立 Milvus 集合与 Judge 配置；新增 `scripts/evaluate_rag.py` 的 `prepare`、`workflow`、`api-smoke` 三个入口；报告写入 gitignore 的 `backend/log/evaluation/`。
 - 文档：同步 ARCHITECTURE、PRODUCT、RELIABILITY、README 和 `.env.example`；定位统一为 RAG 评测演示文档，不新增前端页面。
 - 验证：新增评测单测 12 passed；首次全量测试为 246 passed、5 skipped（Milvus 不可达）、1 warning；设置隔离集合后真实 workflow 尝试在 Milvus 初始化阶段因 `127.0.0.1:19530` 不可达失败，未生成虚构基线分数。后续离线收尾结果见 Session 047。
 - 风险/交接：需要启动 Milvus、Embedding/LLM、Reranker 后，按 README 的独立集合和 SQLite 配置执行 prepare → workflow → api-smoke；真实运行后再提交脱敏汇总基线，并把 BE-049 标为 passing。

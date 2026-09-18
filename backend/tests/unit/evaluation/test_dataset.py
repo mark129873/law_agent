@@ -11,8 +11,8 @@ def test_repository_evaluation_dataset_is_complete_and_versioned() -> None:
     path = Path(__file__).resolve().parents[2] / "evaluation" / "rag_cases.jsonl"
     cases = load_cases(path)
 
-    assert len(cases) == 24
-    assert len({case.id for case in cases}) == 24
+    assert len(cases) == 23
+    assert len({case.id for case in cases}) == 23
     assert dataset_sha256(path)
     assert {case.category for case in cases} == {
         "local_factual",
@@ -21,6 +21,11 @@ def test_repository_evaluation_dataset_is_complete_and_versioned() -> None:
         "adversarial",
         "direct_control",
     }
+
+    data_source = path.parents[1] / "data_source"
+    available_sources = {item.name for item in data_source.iterdir() if item.is_file()}
+    expected_sources = {source for case in cases for source in case.expected_sources}
+    assert expected_sources <= available_sources
 
 
 def test_dataset_rejects_duplicate_ids(tmp_path: Path) -> None:
@@ -33,4 +38,3 @@ def test_dataset_rejects_duplicate_ids(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="重复 id"):
         load_cases(path)
-

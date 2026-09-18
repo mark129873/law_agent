@@ -18,7 +18,7 @@ async def prepare_corpus(
     reset_eval: bool,
     data_dir: str | Path | None = None,
 ) -> dict[str, Any]:
-    """通过公开文档 API 清理并重新导入仓库内 7 份测试文档。
+    """通过公开文档 API 清理并重新导入当前仓库测试数据源中的文档。
 
     不直接 drop Milvus collection：运行中的服务可能缓存集合状态，
     通过文档删除接口可以同时清理 SQLite 元数据和向量内容。
@@ -91,11 +91,14 @@ async def _smoke_question(
     _raise_http(messages, "读取评测消息")
     message_items = messages.json()
     assistant_sources = message_items[-1].get("sources") if message_items else None
+    has_plan = "plan" in types
 
     checks = {
         "status_seen": "status" in types,
-        "status_before_plan": _before(types, "status", "plan"),
-        "plan_before_delta": _before(types, "plan", "delta"),
+        # 有本地证据的 RAG 路径必须展示检索计划；证据不足/直接回答路径
+        # 可以跳过 plan，但仍需保证 delta 与 done 的顺序完整。
+        "status_before_plan": _before(types, "status", "plan") if has_plan else not require_sources,
+        "plan_before_delta": _before(types, "plan", "delta") if has_plan else not require_sources,
         "delta_seen": "delta" in types,
         "done_last": bool(types) and types[-1] == "done",
         "sources_when_expected": bool(sources) if require_sources else not sources,
