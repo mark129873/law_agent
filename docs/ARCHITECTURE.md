@@ -305,11 +305,14 @@ retrieval_planner_agent（检索计划，四类策略多选）
 | `LLM_PROVIDER` | ollama / glm | ollama |
 | `PLANNER_PROVIDER` | follow / ollama / glm | follow（跟随 LLM_PROVIDER） |
 | `PLANNER_MODEL` | 模型名 | 空（用所选 Provider 的默认模型） |
+| `EVAL_JUDGE_PROVIDER` | follow / ollama / glm | follow（默认复用主 LLM） |
+| `EVAL_JUDGE_MODEL` | 模型名 | 空（用主 LLM；非空时可独立指定 Judge） |
 | `LLM_ENABLE_THINKING` | true / false | false |
 | `RERANK_ENABLED` | true / false | true（CPU 且无 CUDA 实测较慢；false 表示主动使用 RRF 融合序，不应视为模型故障） |
 | `RERANKER_MODEL_PATH` | HF 模型 id 或本地快照绝对路径 | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
 | `RERANKER_DEVICE` | cpu / cuda | cpu |
 | `MILVUS_URI` | — | http://127.0.0.1:19530 |
+| `MILVUS_COLLECTION_NAME` | Milvus 集合名 | `law_chunks` |
 | `LANGFUSE_ENABLED` | true / false | false（BE-043：Langfuse 链路追踪开关，关闭零导入零开销） |
 | `LANGFUSE_BASE_URL` | Langfuse 服务地址 | https://cloud.langfuse.com |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Langfuse 项目密钥 | 空（开启但缺失 → WARN 降级关闭，不阻断业务） |
@@ -395,6 +398,29 @@ npm run build                                      # tsc 类型检查 + 生产�
 - **新文档格式**：实现 `DocumentParser` 策略并注册进工厂；**新 LLM Provider**：实现 `LLMProvider`（chat + stream + model_name）+ 容器加分支，密钥仅环境注入；**新 Agent 节点**：实现节点类并在 AgentGraphBuilder/build_legal_rag_graph 接线 + constants.py 登记中文标签（status 事件文案）。
 - **Rerank**：统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；GPU 机器设 `RERANKER_DEVICE=cuda`，CPU 机器使用 `cpu`。`rerank_max_candidates=20` 控制精排输入规模。`RERANK_ENABLED=false` 是可观测的主动关闭状态，证据仍按 Milvus RRF 序输出；只有 CrossEncoder 加载/推理异常才记为 `reranker_degraded`。
 - **前端**：遵循 §7 API 契约与 SSE 协议；开发期统一请求相对路径 `/api/...` 由 Vite 代理，前端代码不感知后端地址。
+
+### 10.1 RAG 端到端评测（BE-049）
+
+评测系统是开发者侧能力，不改变终端用户问答 API。它使用现有测试法律文档、
+`QaWorkflow`、真实 Embedding、Milvus、Reranker 和 LLM，形成一套可复现的质量基线。
+
+评测分为两个入口：
+
+1. **工作流直调**：直接调用 `QaWorkflow.ainvoke()`，读取 `answer`、`rag_status`、
+   `evidence`、`citations`、`grounding_passed` 和节点 trace，用于计算检索与回答指标；
+2. **HTTP/SSE 冒烟**：通过真实 `/api/chat/stream` 验证会话、SSE 事件顺序、来源持久化和
+   错误脱敏。完整评测问题不重复走 HTTP，避免额外模型成本。
+
+评测数据集为 `backend/tests/evaluation/rag_cases.jsonl`，每条记录包含问题、期望状态、
+期望来源、答案要点和是否必须引用。检索指标使用来源文件名匹配，不依赖随机生成的 chunk ID。
+
+评测报告同时输出 JSON 与 Markdown，包含数据集版本、Git commit、模型配置、Recall@K、MRR、
+引用精确率/召回率、grounding 结果、LLM Judge 分数、失败案例和延迟统计。真实 LLM Judge
+可通过 `EVAL_JUDGE_PROVIDER` / `EVAL_JUDGE_MODEL` 独立配置；未配置时回退主 LLM。
+
+评测使用独立的 `MILVUS_COLLECTION_NAME`，默认业务集合 `law_chunks` 不参与评测清理。
+原始报告写入 `backend/log/evaluation/`，不进入 Git；仅提交数据集、运行器、测试和经过真实验证的
+汇总报告。
 
 ## 11. Prompt 与事件硬约束契约（BE-042/044，原 plan.md 承载，此处为唯一权威清单）
 

@@ -24,6 +24,7 @@ from app.config.settings import PlannerProvider, Settings, VectorStoreProvider, 
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
 from app.domain.services.embedding import EmbeddingService
+from app.domain.services.qa_workflow import QaWorkflow
 from app.domain.services.trace_sink import TraceSink
 from app.domain.services.web_search import WebSearchPort
 from app.domain.repositories.database import Database
@@ -72,6 +73,7 @@ def _build_vector_store(settings: Settings) -> VectorStore:
         rag_cfg = LegalRAGConfig()
         return MilvusVectorStore(
             settings.milvus_uri,
+            collection_name=settings.milvus_collection_name,
             dense_top_k=rag_cfg.dense_top_k,
             bm25_top_k=rag_cfg.bm25_top_k,
             rrf_k=rag_cfg.rrf_k,
@@ -81,16 +83,32 @@ def _build_vector_store(settings: Settings) -> VectorStore:
 
 def _build_llm_provider(settings: Settings) -> LLMProvider:
     """按配置构造大模型 Provider（工厂函数，BE-010）。"""
-    if settings.llm_provider.value == "ollama":
-        return OllamaProvider(settings.ollama_base_url, settings.ollama_model, settings.llm_enable_thinking)
-    if settings.llm_provider.value == "glm":
+    provider = settings.llm_provider.value
+    model = settings.ollama_model if provider == "ollama" else settings.glm_model
+    return _build_named_llm_provider(settings, provider, model)
+
+
+def _build_named_llm_provider(settings: Settings, provider: str, model: str) -> LLMProvider:
+    """按 Provider 名称构造模型，供主模型和评测 Judge 共用。"""
+    if provider == "ollama":
+        return OllamaProvider(settings.ollama_base_url, model, settings.llm_enable_thinking)
+    if provider == "glm":
         if not settings.glm_api_key:
             # 密钥缺失时尽早失败，而不是等到第一次请求才报 401
-            raise ValueError("LLM_PROVIDER=glm 但未配置 GLM_API_KEY 环境变量")
+            raise ValueError("模型 Provider=glm 但未配置 GLM_API_KEY 环境变量")
         return GLMProvider(
-            settings.glm_base_url, settings.glm_api_key, settings.glm_model, settings.llm_enable_thinking
+            settings.glm_base_url, settings.glm_api_key, model, settings.llm_enable_thinking
         )
-    raise NotImplementedError(f"大模型 Provider '{settings.llm_provider.value}' 尚未实现")
+    raise NotImplementedError(f"大模型 Provider '{provider}' 尚未实现")
+
+
+def build_evaluation_judge_provider(settings: Settings, primary: LLMProvider) -> LLMProvider:
+    """构造评测 Judge；默认复用主模型，显式配置后才建立独立模型。"""
+    if settings.eval_judge_provider == PlannerProvider.FOLLOW and not settings.eval_judge_model:
+        return primary
+    provider = settings.llm_provider.value if settings.eval_judge_provider == PlannerProvider.FOLLOW else settings.eval_judge_provider.value
+    default_model = settings.ollama_model if provider == "ollama" else settings.glm_model
+    return _build_named_llm_provider(settings, provider, settings.eval_judge_model or default_model)
 
 
 def _build_planner(settings: Settings, container: DIContainer) -> LLMProvider:
@@ -212,6 +230,21 @@ def create_container(settings: Settings | None = None) -> DIContainer:
     )
     # 统一重排服务（BE-033：本地 MiniLM CrossEncoder，懒加载）
     container.register(RerankerService, lambda c: _build_reranker(settings), singleton=True)
+    # 问答工作流作为领域端口注册，ChatService 与评测器复用同一个装配结果。
+    container.register(
+        QaWorkflow,
+        lambda c: create_qa_workflow(
+            c.resolve(LLMProvider),
+            embedding=c.resolve(EmbeddingService),
+            vector_store=c.resolve(VectorStore),
+            planner=_build_planner(settings, c),
+            reranker=c.resolve(RerankerService),
+            agent_config=AgentConfig(),
+            rag_config=LegalRAGConfig(),
+            web_search=c.resolve(WebSearchPort),
+        ),
+        singleton=True,
+    )
     container.register(
         DocumentService,
         lambda c: DocumentService(
@@ -226,18 +259,8 @@ def create_container(settings: Settings | None = None) -> DIContainer:
         ChatService,
         lambda c: ChatService(
             conversation_service=c.resolve(ConversationService),
-            # 唯一的问答执行体：经 agent 包工厂构建，langgraph 类型不外泄；
-            # 一期重写后依赖端口组合（LLM + Embedding + VectorStore + Reranker）
-            qa_graph=create_qa_workflow(
-                c.resolve(LLMProvider),
-                embedding=c.resolve(EmbeddingService),
-                vector_store=c.resolve(VectorStore),
-                planner=_build_planner(settings, c),
-                reranker=c.resolve(RerankerService),
-                agent_config=AgentConfig(),
-                rag_config=LegalRAGConfig(),
-                web_search=c.resolve(WebSearchPort),
-            ),
+            # 与评测器复用同一个领域工作流装配，确保两条入口不会漂移。
+            qa_graph=c.resolve(QaWorkflow),
             # Langfuse trace 汇工厂（BE-043）：按 LANGFUSE_ENABLED 注入，关闭为 None
             trace_sink_factory=_build_trace_sink_factory(settings),
         ),

@@ -102,6 +102,8 @@ class Settings(BaseSettings):
     # ---- 向量数据库 Provider（Milvus，见 backend/docker-compose.yml）----
     vector_store_provider: VectorStoreProvider = VectorStoreProvider.MILVUS
     milvus_uri: str = "http://127.0.0.1:19530"
+    # 业务默认集合与评测集合通过配置隔离，避免评测清理正式知识库。
+    milvus_collection_name: str = "law_chunks"
 
     # ---- 大模型 Provider ----
     llm_provider: LlmProvider = LlmProvider.OLLAMA
@@ -123,6 +125,12 @@ class Settings(BaseSettings):
     # 连接配置构造独立实例（模型名可用 planner_model 单独覆盖）
     planner_provider: PlannerProvider = PlannerProvider.FOLLOW
     planner_model: str = ""  # 空串表示用所选 Provider 的默认对话模型
+
+    # ---- RAG 评测 Judge（BE-049）----
+    # follow 且模型名为空时复用主 LLM；填写模型名或显式选择 Provider
+    # 时构造独立 Judge，避免把评测逻辑写进问答工作流。
+    eval_judge_provider: PlannerProvider = PlannerProvider.FOLLOW
+    eval_judge_model: str = ""
 
     # ---- Agent 服务（一期重写 BE-033）----
     # Rerank 总开关：默认开启（设计 §32 统一重排）。如果部署环境暂时

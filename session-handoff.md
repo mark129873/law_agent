@@ -1,15 +1,52 @@
 # 会话交接
 
+## Session 047：跳过 Milvus 的离线收尾（2026-09-18）
+
+### 本轮已完成
+- 按用户要求关闭 Docker Desktop；不删除容器、镜像或卷，也不执行恢复出厂。
+- 在不依赖 Milvus 的前提下完成评测模块验证：评测单测 12 passed，全量后端 249 passed、5 skipped、1 warning。
+- `compileall`、评测 CLI help、`frontend/npm run build`、`git diff --check` 均通过。
+
+### 当前状态
+- BE-049 代码与离线验证已完成，真实 `QaWorkflow` / Milvus / Embedding / LLM / Judge 基线尚未生成。
+- 继续执行真实评测前，需先恢复 Docker/Milvus；完成后再运行下方 Session 046 的 `prepare → workflow → api-smoke`。
+
+## Session 046：RAG 评测演示文档与双入口运行器（2026-09-18）
+
+### 本轮已完成
+- 新增 `backend/tests/evaluation/rag_cases.jsonl`，共 24 条案例：本地事实、多条件、证据不足、对抗前提和 direct control。
+- `QaWorkflow` 已在 `app/containers.py` 统一注册，ChatService 与评测器复用同一工作流；Milvus 集合名支持 `MILVUS_COLLECTION_NAME`，评测默认要求 `law_agent_eval*` 隔离集合。
+- 新增 `app/evaluation/`：JSONL 校验、Recall/Hit@K、MRR、引用精确率/召回率、grounding/状态匹配、节点耗时、脱敏错误、结构化 LLM Judge、JSON/Markdown 报告。
+- 新增 `scripts/evaluate_rag.py`：`prepare` 通过文档 API 重置并导入 7 份测试文档；`workflow` 直调真实 QaWorkflow；`api-smoke` 验证真实 HTTP/SSE 事件顺序、来源持久化和错误边界。
+- 文档定位统一为 RAG 评测演示文档，已同步 `README.md`、`docs/ARCHITECTURE.md`、`docs/PRODUCT.md`、`docs/RELIABILITY.md`、`.env.example`。
+
+### 本轮验证与未完成
+- 首次 `uv run pytest tests -q -rs`：246 passed、5 skipped（Milvus 不可达）、1 warning；后续离线收尾全量结果为 249 passed、5 skipped、1 warning。
+- `uv run pytest tests/unit/evaluation -q -rs`：12 passed；`compileall`、CLI help、`git diff --check` 通过。
+- 使用 `MILVUS_COLLECTION_NAME=law_agent_eval` 尝试真实 workflow，初始化阶段因 `127.0.0.1:19530` 无法连接失败；没有生成或填写虚构的 RAG 基线分数。
+- BE-049 仍为 `in_progress`。启动 Docker/Milvus、Embedding/LLM、Reranker 后，按 README 执行 `prepare → workflow → api-smoke`，确认报告内容后再改为 `passing`。
+
+### 下一轮直接执行
+```powershell
+cd backend
+$env:MILVUS_COLLECTION_NAME="law_agent_eval"
+$env:SQLITE_DB_PATH="data/law_agent_eval.db"
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+uv run python scripts/evaluate_rag.py prepare --base-url http://127.0.0.1:8000 --reset-eval
+uv run python scripts/evaluate_rag.py workflow --cases tests/evaluation/rag_cases.jsonl
+uv run python scripts/evaluate_rag.py api-smoke --base-url http://127.0.0.1:8000
+```
+
 ## 当前已验证
 - 现在明确可用的部分：
-  - **Agent 模块一期重写 + 思考块 + Langfuse trace + 全量 Prompt 优化 + 精排状态语义修复 + Reranker 模型统一 + 低质量兜底 Agent 删除 + Tavily Remote MCP 搜索全部 passing（BE-032~048 + FE-001~017；BE-030 deprecated）**：主图含 14 个业务节点 + RAG 子图 10 节点 + Tavily Web Search + Plugin Stub + 服务层 + status/think 双事件 + 豆包式思考块 + Langfuse 三级追踪 + 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾。
+  - **Agent 模块一期重写 + 思考块 + Langfuse trace + 全量 Prompt 优化 + 精排状态语义修复 + Reranker 模型统一 + 低质量兜底 Agent 删除 + Tavily Remote MCP 搜索全部 passing（BE-032~048 + FE-001~017；BE-030 deprecated）**：主图含 14 个业务节点 + RAG 子图 10 节点 + Tavily Web Search + Plugin Stub + 服务层 + status/think 双事件 + 豆包式思考块 + Langfuse 三级追踪 + 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾。BE-049 评测运行器已实现但真实基线待补。
   - **Tavily Remote MCP 搜索（BE-048/FE-017）**：按钮状态通过 `use_web_search` 传递；`WebSearchPort` → Tavily Streamable HTTP `tavily_search` → `observation_node` → Answer/grounding/final；只在按钮开启时实际联网，搜索结果以 300 字网页预览经 `web_sources` 展示，完整原始/规范化数据写入 `backend/log/web_search/search-<UTC>-<UUID>.log`，落盘失败 fail-closed；真实 Remote MCP 已返回 5 条来源并完成 SSE/持久化验收。
   - **全量 Prompt 优化（BE-044，本轮新增）**：12 个 Prompt 统一五段结构（角色/任务/格式/规则/纪律）+ JSON 纪律（禁 markdown 代码块）+ 示例值防锚定标注 + answer_generator 明确【来源：文件名】格式硬约束 + grounding 降误判（实质一致即可/无关数字不算法律数据/宁可放行）。**编排器"不 finish"误诊修正**（Langfuse 时间线取证：闲聊打回真凶是重复执行 direct_answer，非 judge）——regenerating：RAG 2→0、闲聊 3→0；RAG 回答从 65 字重复堆砌变一句精准+来源标注。
   - **Langfuse trace（BE-043，本轮新增）**：domain TraceSink/TraceSpan 端口 + trace_sink_var（ContextVar）；infrastructure/trace/langfuse_sink.py（langfuse 4.15.2）；ChatService 记 trace 生命周期与流程事件、with_node_status 压/弹节点 span（子图嵌套）、LLMService 三路径记 generation；.env 开关 LANGFUSE_ENABLED（默认 false，缺密钥 WARN 降级，全方法吞异常）。
   - **真实云端验证通过**（jp.cloud.langfuse.com，用户 .env 预置密钥）：E2E trace 含 29 节点 span / 11 generation（model+Prompt+输出）/ 15 think + 2 regenerating 事件。
   - **精排状态语义修复（BE-045）**：`RERANK_ENABLED=false` 被识别为主动关闭，使用 RRF 但不再显示“精排不可用”；CrossEncoder 真失败仍保留 degraded/WARN；启动日志记录 `rerank_enabled` 与 `reranker_device`。
   - **Reranker 模型统一（BE-046）**：生产配置、检查脚本、`.env.example`、README 和架构文档统一为 `cross-encoder/ms-marco-MiniLM-L-6-v2`；检查脚本下载到根目录 `.model` 后从本地目录加载并执行样本打分。
-  - **测试体系**：自动化 242 个（unit 167 / integration 75，其中 API 12）；test_milvus_vector_store.py 5 例需真实 Milvus。
+  - **测试体系**：自动化 249 个；本轮评测单测 12 个，`test_milvus_vector_store.py` 5 例需真实 Milvus。
 - 最近一轮实际跑过的验证（2026-09-16，Session 045 补充）：
   - Docker/Milvus 可用时全量 `uv run pytest tests -q -rs` → **242 passed, 1 warning**；5 个 Milvus 用例均实际执行。
   - `frontend/npm run build` → **tsc + Vite 构建通过**；`git diff --check` 与 `feature_list.json` JSON 校验通过。
