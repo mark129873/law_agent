@@ -25,7 +25,7 @@ Law Agent 意图构建法律助手，已完成知识库问答场景（法条检�
 | 后端 | Python 3.11 · FastAPI（全异步）· uv · LangGraph |
 | 数据 | SQLAlchemy 2.0 Async + SQLite（当前启用；MySQL 预留端口） |
 | 检索 | Milvus Cloud（默认）或 Milvus Standalone（dense + 稀疏 BM25，服务端 `hybrid_search` + RRF） |
-| 模型 | Ollama 本地 或 智谱 GLM API；Embedding 默认 Ollama `nomic-embed-text` |
+| 模型 | Ollama 本地、智谱 GLM API 或 DeepSeek API；Embedding 默认 Ollama `nomic-embed-text` |
 | 重排 | `cross-encoder/ms-marco-MiniLM-L-6-v2`（CrossEncoder）；关闭或失败时使用 RRF 序 |
 | 观测 | 结构化 JSON 日志 + 可选 Langfuse 三级 trace |
 
@@ -46,7 +46,7 @@ Frontend (React)  --HTTP/SSE-->  FastAPI
                                       ▲
                     Infrastructure    │    Agent (LangGraph)
                     SQLite / Milvus   │    主图 + legal_rag 子图
-                    Ollama / GLM      │    Tavily MCP / Plugin Stub
+                 Ollama / GLM / DeepSeek│    Tavily MCP / Plugin Stub
 ```
 
 ### 主图流程
@@ -62,7 +62,7 @@ Frontend (React)  --HTTP/SSE-->  FastAPI
 - Python `>=3.11`, 以及环境变量管理工具 [uv]
 - Milvus Cloud Endpoint + API Key（默认）；或 Docker Desktop / Docker Compose（本地 standalone）
 - Node.js 与 npm
-- Ollama，或可访问的 GLM API
+- Ollama，或可访问的 GLM/DeepSeek API
 
 ### 1. 克隆项目并创建配置
 ```bash
@@ -76,13 +76,14 @@ cp backend/.env.example backend/.env
 
 ```dotenv
 MILVUS_CLOUD_URI=https://<cluster-endpoint>
+MILVUS_PROVIDER=cloud
 MILVUS_CLOUD_TOKEN=<zilliz-api-key>
 MILVUS_COLLECTION_NAME=law_chunks
 ```
 
-`MILVUS_CLOUD_TOKEN` 使用 Zilliz Cloud API Key 原文，不要加 `Bearer`。如果同时存在云端和本地变量，云端变量优先。
+`MILVUS_CLOUD_TOKEN` 使用 Zilliz Cloud API Key 原文，不要加 `Bearer`。`MILVUS_PROVIDER` 默认是 `cloud`，不会根据 URI 是否存在自动推断。
 
-如需改用本地 standalone，再填写 `MILVUS_URI=http://127.0.0.1:19530` 和可选的 `MILVUS_TOKEN`，并启动：
+如需改用本地 standalone，设置 `MILVUS_PROVIDER=local`，再填写 `MILVUS_URI=http://127.0.0.1:19530` 和可选的 `MILVUS_TOKEN`，并启动：
 
 ```bash
 docker compose -f backend/docker-compose.yml up -d
@@ -111,7 +112,7 @@ ollama serve
 ollama pull qwen3.5:4b
 ollama pull nomic-embed-text:latest
 ```
-若使用 GLM, 默认模型为 `glm-4.5-air`，需将 `backend/.env` 中的 `LLM_PROVIDER` 改为 `glm`，并设置 `GLM_API_KEY`。
+若使用 GLM，设置 `LLM_PROVIDER=glm` 和 `GLM_API_KEY`；若使用 DeepSeek，设置 `LLM_PROVIDER=deepseek` 和 `DEEPSEEK_API_KEY`，默认模型为 `deepseek-chat`，思考模式固定关闭。
 
 
 ### 5. 启动前端
@@ -157,7 +158,7 @@ law_agent/
 │   │   ├── api/              # FastAPI 路由、DTO、异常处理
 │   │   ├── application/      # 问答、会话、文档、知识库应用服务
 │   │   ├── domain/           # 实体、Repository 和领域端口
-│   │   ├── infrastructure/   # SQLite、Milvus、Ollama、GLM、Langfuse 实现
+│   │   ├── infrastructure/   # SQLite、Milvus、Ollama、GLM、DeepSeek、Langfuse 实现
 │   │   ├── agent/             # LangGraph 主图、RAG 子图、Prompt、Agent 服务
 │   │   └── containers.py      # 唯一依赖装配点
 │   ├── tests/                 # unit / integration / API 测试

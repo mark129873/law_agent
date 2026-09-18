@@ -235,13 +235,15 @@ def _settings_snapshot(settings: Settings, primary_model: str, judge_model: str)
         "llm_provider": settings.llm_provider.value,
         "llm_model": primary_model,
         "embedding_model": settings.ollama_embedding_model,
-        "milvus_uri": settings.milvus_uri,
+        "milvus_provider": settings.milvus_provider.value,
+        "milvus_uri": settings.resolved_milvus_uri,
         "milvus_collection_name": settings.milvus_collection_name,
         "rerank_enabled": settings.rerank_enabled,
         "reranker_model_path": settings.reranker_model_path,
         "eval_judge_provider": settings.eval_judge_provider.value,
         "eval_judge_model": judge_model,
         "glm_api_key_configured": bool(settings.glm_api_key),
+        "deepseek_api_key_configured": bool(settings.deepseek_api_key),
     }
 
 

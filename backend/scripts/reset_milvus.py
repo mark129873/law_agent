@@ -32,15 +32,19 @@ def main() -> None:
     args = parser.parse_args()
 
     settings = get_settings()
-    if settings.milvus_token and not args.yes:
+    if not settings.resolved_milvus_uri:
+        raise SystemExit(
+            f"MILVUS_PROVIDER={settings.milvus_provider.value} 但未配置对应的 Milvus URI。"
+        )
+    if settings.resolved_milvus_token and not args.yes:
         raise SystemExit(
             "当前 Milvus 配置带有认证信息，可能是云端正式数据；"
             "确认目标后请使用 --yes。"
         )
 
-    client_kwargs: dict[str, str] = {"uri": settings.milvus_uri}
-    if settings.milvus_token:
-        client_kwargs["token"] = settings.milvus_token
+    client_kwargs: dict[str, str] = {"uri": settings.resolved_milvus_uri}
+    if settings.resolved_milvus_token:
+        client_kwargs["token"] = settings.resolved_milvus_token
     client = MilvusClient(**client_kwargs)
     collection = settings.milvus_collection_name
     if client.has_collection(collection):

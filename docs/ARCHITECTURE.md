@@ -3,7 +3,7 @@
 ## 0. 简单描述
 -本文档只描述**架构与实现**（分层、数据流、配置、契约、测试体系）；用户可见的行为需求见 docs/PRODUCT.md
 -实现变更不得改变 PRODUCT.md 描述的用户可见行为；行为要变，先改 PRODUCT.md，再改实现
--后端 Python 3.11（uv 管理环境，.venv 虚拟环境）+ FastAPI（接口全异步）+ LangGraph，LLM 支持 Ollama 本地部署与 GLM API（详细技术栈见 §1 末尾）
+-后端 Python 3.11（uv 管理环境，.venv 虚拟环境）+ FastAPI（接口全异步）+ LangGraph，LLM 支持 Ollama 本地部署、GLM API 与 DeepSeek API（详细技术栈见 §1 末尾）
 -Agent 模块一期重写（2026-09）：主图轻量编排 + 独立 Local Legal RAG 子图 + Tavily Remote MCP Web Search / Plugin Stub 入口，设计依据一期技术稿核心内容已并入本文档 §12（30 条强制约束 + 设计 §号速查）；统一重排采用 `cross-encoder/ms-marco-MiniLM-L-6-v2`（CrossEncoder，模型失败时降级 RRF；显式关闭时按配置正常使用 RRF）
 -数据库此版本支持sqlite3, 后续版本支持mysql8.0根据配置进行切换, 做好数据库接口层抽象
 -数据库实现统一走 SQLAlchemy 2.0 async ORM（声明式模型 + Data Mapper 映射），SQLite 是当前唯一已启用的 Provider，MySQL 8.0 接入只需换 URL 与异步驱动
@@ -35,7 +35,7 @@
                │
                ▼
       ┌──────────────────────────────────┐
-      │ LLM：Ollama 本地 / GLM API        │
+      │ LLM：Ollama / GLM API / DeepSeek  │
       │ Rerank：本地 MiniLM CrossEncoder   │
       └──────────────────────────────────┘
 ```
@@ -71,7 +71,7 @@ backend/
 │   ├── infrastructure/         # 基础设施实现（实现领域端口）
 │   │   ├── database/sqlalchemy/ # SQLAlchemyDatabase（models/mappers/types/database 四件套，约定见 §3）；方言无关，MySQL 靠 URL 切换
 │   │   ├── vector_store/       # MilvusVectorStore（dense+sparse 单集合，服务端 hybrid_search）
-│   │   ├── llm/                # OllamaProvider / GLMProvider
+│   │   ├── llm/                # OllamaProvider / GLMProvider / DeepSeekProvider
 │   │   ├── document_parser/    # PdfParser（pypdf）/ TextParser（txt/md，多编码回退）
 │   │   ├── embedding/          # OllamaEmbeddingService（/api/embed 批量）
 │   │   └── trace/              # LangfuseTraceSink（BE-043：trace→节点 span→LLM generation 三级上报；开关降级）
@@ -149,7 +149,7 @@ frontend/                        # 前端独立项目（React + TS + Vite）
 | `Database` / `TransactionContext` | domain/repositories/database.py | SQLAlchemyDatabase（方言无关，MySQL 靠 URL 切换） |
 | `ConversationRepository` / `MessageRepository` / `DocumentRepository` | domain/repositories/ | SQLAlchemyDatabase 内置仓库（ORM Session + Data Mapper） |
 | `VectorStore` | domain/repositories/vector_store.py | MilvusVectorStore（默认 Milvus Cloud，dense+sparse 单集合，服务端 hybrid_search） |
-| `LLMProvider` | domain/repositories/llm_provider.py | OllamaProvider / GLMProvider |
+| `LLMProvider` | domain/repositories/llm_provider.py | OllamaProvider / GLMProvider / DeepSeekProvider |
 | `DocumentParser` | domain/services/document_parser.py | TextParser（txt/md 多编码回退）/ PdfParser（pypdf） |
 | `EmbeddingService` | domain/services/embedding.py | OllamaEmbeddingService（/api/embed 批量） |
 | `WebSearchPort` | domain/services/web_search.py | TavilyMcpSearchClient（Remote MCP Streamable HTTP 适配器） |
@@ -302,19 +302,23 @@ retrieval_planner_agent（检索计划，四类策略多选）
 |-------|------|------|
 | `DB_PROVIDER` | sqlite / mysql | sqlite |
 | `VECTOR_STORE_PROVIDER` | milvus（当前唯一已启用 Provider） | milvus |
-| `LLM_PROVIDER` | ollama / glm | ollama |
-| `PLANNER_PROVIDER` | follow / ollama / glm | follow（跟随 LLM_PROVIDER） |
+| `LLM_PROVIDER` | ollama / glm / deepseek | ollama |
+| `DEEPSEEK_BASE_URL` | DeepSeek API 地址 | https://api.deepseek.com |
+| `DEEPSEEK_MODEL` | DeepSeek 对话模型 | `deepseek-chat` |
+| `DEEPSEEK_API_KEY` | DeepSeek API Key（仅环境变量或 `.env`） | 空（`LLM_PROVIDER=deepseek` 时必填） |
+| `PLANNER_PROVIDER` | follow / ollama / glm / deepseek | follow（跟随 LLM_PROVIDER） |
 | `PLANNER_MODEL` | 模型名 | 空（用所选 Provider 的默认模型） |
-| `EVAL_JUDGE_PROVIDER` | follow / ollama / glm | follow（默认复用主 LLM） |
+| `EVAL_JUDGE_PROVIDER` | follow / ollama / glm / deepseek | follow（默认复用主 LLM） |
 | `EVAL_JUDGE_MODEL` | 模型名 | 空（用主 LLM；非空时可独立指定 Judge） |
 | `LLM_ENABLE_THINKING` | true / false | false |
 | `RERANK_ENABLED` | true / false | true（CPU 且无 CUDA 实测较慢；false 表示主动使用 RRF 融合序，不应视为模型故障） |
 | `RERANKER_MODEL_PATH` | HF 模型 id 或本地快照绝对路径 | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
 | `RERANKER_DEVICE` | cpu / cuda | cpu |
-| `MILVUS_CLOUD_URI` | Milvus Cloud 集群 Endpoint（优先） | 空；未设置时回退 `MILVUS_URI` |
-| `MILVUS_CLOUD_TOKEN` | Milvus Cloud API Key（优先） | 空 |
-| `MILVUS_URI` | standalone Endpoint（兼容/回退） | http://127.0.0.1:19530 |
-| `MILVUS_TOKEN` | standalone 或兼容服务 token | 空 |
+| `MILVUS_PROVIDER` | Milvus 部署形态选择：`cloud` / `local` | `cloud` |
+| `MILVUS_CLOUD_URI` | Milvus Cloud 集群 Endpoint（`cloud` 时使用） | 空 |
+| `MILVUS_CLOUD_TOKEN` | Milvus Cloud API Key（`cloud` 时使用） | 空 |
+| `MILVUS_URI` | standalone Endpoint（`local` 时使用） | http://127.0.0.1:19530 |
+| `MILVUS_TOKEN` | standalone 或兼容服务 token（`local` 时使用） | 空 |
 | `MILVUS_COLLECTION_NAME` | Milvus 集合名 | `law_chunks` |
 | `LANGFUSE_ENABLED` | true / false | false（BE-043：Langfuse 链路追踪开关，关闭零导入零开销） |
 | `LANGFUSE_BASE_URL` | Langfuse 服务地址 | https://cloud.langfuse.com |
@@ -325,8 +329,8 @@ retrieval_planner_agent（检索计划，四类策略多选）
 | `TAVILY_MAX_RESULTS` | 5~20 | 5 |
 | `HOST` / `PORT` / `LOG_LEVEL` | — | 0.0.0.0 / 8000 / INFO |
 
-- **思考模式开关**：qwen3.5 / glm-4.5 等推理模型默认先"思考"再回答，首字延迟曾达 30~40s；关闭时 Ollama 带 `think: false`、GLM 带 `thinking: {"type": "disabled"}`。
-- **敏感配置**：`GLM_API_KEY`、`MILVUS_CLOUD_TOKEN` 等密钥只经环境变量或本地 `.env` 注入，禁止提交仓库、禁止写入日志；Milvus token 只用于 `MilvusClient` 认证，结构化日志仅记录是否启用认证。
+- **思考模式开关**：qwen3.5 / glm-4.5 等推理模型默认先"思考"再回答，首字延迟曾达 30~40s；关闭时 Ollama 带 `think: false`、GLM 带 `thinking: {"type": "disabled"}`，DeepSeek 固定带 `thinking: {"type": "disabled"}`。
+- **敏感配置**：`GLM_API_KEY`、`DEEPSEEK_API_KEY`、`MILVUS_CLOUD_TOKEN` 等密钥只经环境变量或本地 `.env` 注入，禁止提交仓库、禁止写入日志；Milvus token 只用于 `MilvusClient` 认证，结构化日志仅记录是否启用认证。
 - **路径锚定与自愈**：相对路径统一锚定 `backend/`；`backend/data/` 不存在时建连接前自动创建父目录（BE-026），清空后可直接启动。
 - **切换 Provider**：仅改配置，业务代码零修改。
 
@@ -375,7 +379,7 @@ cd frontend
 npm install && npm run dev                         # http://localhost:5173（/api 代理到 8000）
 npm run build                                      # tsc 类型检查 + 生产构建
 ```
-- 默认启动读取 `MILVUS_CLOUD_URI` + `MILVUS_CLOUD_TOKEN` 连接 Milvus Cloud；若未配置云端变量，才回退到 `MILVUS_URI` + `MILVUS_TOKEN` 的 standalone 地址。需要本地 standalone 时，再执行 `docker compose up -d`。
+- 默认启动读取 `MILVUS_PROVIDER=cloud` 对应的 `MILVUS_CLOUD_URI` + `MILVUS_CLOUD_TOKEN`；只有显式设置 `MILVUS_PROVIDER=local` 才读取 `MILVUS_URI` + `MILVUS_TOKEN`。需要本地 standalone 时，再执行 `docker compose up -d`。
 - 启动时 lifespan 自动：SQLite connect + init_schema（幂等建表）、Milvus connect（集合不存在时首次入库懒建）；均为幂等操作，重复启动安全（BE-026 首次启动自愈）。
 - 日志：单行 JSON（timestamp/level/service/request_id/message/data），stdout + `backend/log/app.log`（按天轮转保留 30 天），每响应带 `x-request-id`；详见 docs/RELIABILITY.md。
 
@@ -395,7 +399,7 @@ npm run build                                      # tsc 类型检查 + 生产�
 ## 10. 扩展点与预留
 
 - **MySQL 8.0**：ORM 已统一表结构与 DML，接入只剩安装 `aiomysql` 驱动 + `containers.py` 加 `mysql+aiomysql://…` URL 分支并启用 `DbProvider.MYSQL`；需补真实实例集成验证与迁移方案（Alembic autogenerate 可直接消费现有声明式模型）。
-- **Milvus**：默认面向 Milvus Cloud；需要离线或本地开发时可显式设置 `MILVUS_URI` 并启动 `backend/docker-compose.yml` 的 standalone（milvus 2GB / etcd 256MB / minio 256MB）。云端与 standalone 共用 `MilvusClient` 适配器和集合协议。
+- **Milvus**：默认面向 Milvus Cloud；需要离线或本地开发时显式设置 `MILVUS_PROVIDER=local` 与 `MILVUS_URI`，再启动 `backend/docker-compose.yml` 的 standalone（milvus 2GB / etcd 256MB / minio 256MB）。云端与 standalone 共用 `MilvusClient` 适配器和集合协议。
 - **Web Search**：`agent/web/web_search_entry_node` 通过 `WebSearchPort` 调用 Tavily Remote MCP；若未来增加多轮 web research，只扩展该能力内部节点/子图，主图仍使用统一 `CapabilityResult` 与 observation 接口；`suggested_external_queries` 继续作为后续扩展预留。
 - **Plugin / Skill Runtime（二期）**：把 `agent/plugins/plugin_stub_node` 替换为 runtime 实现，约束同上；一期 Stub 不做任何动态加载。
 - **新文档格式**：实现 `DocumentParser` 策略并注册进工厂；**新 LLM Provider**：实现 `LLMProvider`（chat + stream + model_name）+ 容器加分支，密钥仅环境注入；**新 Agent 节点**：实现节点类并在 AgentGraphBuilder/build_legal_rag_graph 接线 + constants.py 登记中文标签（status 事件文案）。

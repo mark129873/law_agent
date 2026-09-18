@@ -1,7 +1,7 @@
-"""Ollama 与 GLM Provider 测试。
+"""Ollama、GLM 与 DeepSeek Provider 测试。
 
-为什么用 httpx.MockTransport：GLM 真实调用需要 API Key（当前环境未配置），
-Ollama 真实调用则作为独立 smoke 验证单独运行；协议级测试证明两个
+为什么用 httpx.MockTransport：云端模型真实调用需要 API Key，
+Ollama 真实调用则作为独立 smoke 验证单独运行；协议级测试证明各个
 Provider 的请求构造、响应解析与流式拆包逻辑正确，可随时替换真实服务。
 """
 
@@ -12,6 +12,7 @@ import pytest
 
 from app.domain.entities.llm import ChatMessage, LlmParams
 from app.domain.entities.message import MessageRole
+from app.infrastructure.llm.deepseek import DeepSeekProvider
 from app.infrastructure.llm.glm import GLMProvider
 from app.infrastructure.llm.ollama import OllamaProvider
 
@@ -82,6 +83,46 @@ async def test_glm_stream_parses_sse() -> None:
     provider = GLMProvider("http://mock", "test-key", "glm-4-flash", transport=httpx.MockTransport(handler))
     chunks = [chunk async for chunk in provider.stream([ChatMessage(role=MessageRole.USER, content="问题")])]
     assert chunks == ["依据", "如下"]
+
+
+@pytest.mark.asyncio
+async def test_deepseek_chat_disables_thinking() -> None:
+    """DeepSeek 请求必须显式关闭 thinking，并解析 OpenAI 兼容响应。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert request.url.path == "/chat/completions"
+        assert request.headers["Authorization"] == "Bearer test-key"
+        assert payload["model"] == "deepseek-chat"
+        assert payload["thinking"] == {"type": "disabled"}
+        assert payload["stream"] is False
+        return httpx.Response(200, json={"choices": [{"message": {"content": "DeepSeek 回答"}}]})
+
+    provider = DeepSeekProvider(
+        "http://mock", "test-key", "deepseek-chat", transport=httpx.MockTransport(handler)
+    )
+    assert await provider.chat([ChatMessage(role=MessageRole.USER, content="问题")]) == "DeepSeek 回答"
+
+
+@pytest.mark.asyncio
+async def test_deepseek_stream_parses_sse() -> None:
+    """DeepSeek 流式响应只向领域层产出最终答案 content。"""
+    sse = (
+        'data: {"choices": [{"delta": {"content": "第一段"}}]}\n\n'
+        'data: {"choices": [{"delta": {"reasoning_content": "不会透传"}}]}\n\n'
+        'data: {"choices": [{"delta": {"content": "第二段"}}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)["thinking"] == {"type": "disabled"}
+        return httpx.Response(200, content=sse.encode("utf-8"))
+
+    provider = DeepSeekProvider(
+        "http://mock", "test-key", "deepseek-chat", transport=httpx.MockTransport(handler)
+    )
+    chunks = [chunk async for chunk in provider.stream([ChatMessage(role=MessageRole.USER, content="问题")])]
+    assert chunks == ["第一段", "第二段"]
 
 
 @pytest.mark.asyncio

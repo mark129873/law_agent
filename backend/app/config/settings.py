@@ -1,6 +1,6 @@
 """统一配置管理。
 
-为什么这么做：BE-002 的目标是让 SQLite/MySQL、Milvus、Ollama/GLM
+为什么这么做：BE-002 的目标是让 SQLite/MySQL、Milvus、Ollama/GLM/DeepSeek
 等 Provider 全部通过配置切换，业务代码不出现任何具体实现的名字；
 用 pydantic-settings 统一读取环境变量与 .env，同时获得类型校验，
 避免错误配置在运行中段才暴露。
@@ -12,7 +12,7 @@ from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import AliasChoices, Field
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 项目根锚点：backend/ 目录（本文件位于 backend/app/config/）。
@@ -49,11 +49,19 @@ class VectorStoreProvider(str, Enum):
     MILVUS = "milvus"
 
 
+class MilvusProvider(str, Enum):
+    """Milvus 部署形态选择。"""
+
+    CLOUD = "cloud"
+    LOCAL = "local"
+
+
 class LlmProvider(str, Enum):
     """大模型 Provider 枚举。"""
 
     OLLAMA = "ollama"
     GLM = "glm"
+    DEEPSEEK = "deepseek"
 
 
 class PlannerProvider(str, Enum):
@@ -67,13 +75,14 @@ class PlannerProvider(str, Enum):
     FOLLOW = "follow"
     OLLAMA = "ollama"
     GLM = "glm"
+    DEEPSEEK = "deepseek"
 
 
 class Settings(BaseSettings):
     """应用运行配置。
 
     所有字段都可以通过同名环境变量或 backend/.env 覆盖；
-    敏感字段（GLM_API_KEY）没有默认值之外的持久化来源，只从环境注入。
+    敏感字段（GLM_API_KEY、DEEPSEEK_API_KEY）没有默认值之外的持久化来源，只从环境注入。
     """
 
     model_config = SettingsConfigDict(
@@ -101,18 +110,15 @@ class Settings(BaseSettings):
     sqlite_db_path: str = "data/law_agent.db"
     mysql_url: str = ""  # 仅 db_provider=mysql 时使用
 
-    # ---- 向量数据库 Provider（Milvus Cloud 默认，standalone 可回退）----
+    # ---- 向量数据库 Provider（Milvus 默认，部署形态独立选择）----
     vector_store_provider: VectorStoreProvider = VectorStoreProvider.MILVUS
-    # 认证配置优先读取 MILVUS_CLOUD_*：这样默认部署直接连接云端，
-    # 旧的 MILVUS_* 变量仍保留给本地 standalone 或兼容服务。
-    milvus_uri: str = Field(
-        default="http://127.0.0.1:19530",
-        validation_alias=AliasChoices("MILVUS_CLOUD_URI", "MILVUS_URI"),
-    )
-    milvus_token: str = Field(
-        default="",
-        validation_alias=AliasChoices("MILVUS_CLOUD_TOKEN", "MILVUS_TOKEN"),
-    )
+    # 默认云端；本地 standalone 必须显式设置 MILVUS_PROVIDER=local，
+    # 避免因某一组 URI 缺失而意外连错部署环境。
+    milvus_provider: MilvusProvider = MilvusProvider.CLOUD
+    milvus_cloud_uri: str = ""
+    milvus_cloud_token: str = ""
+    milvus_uri: str = "http://127.0.0.1:19530"
+    milvus_token: str = ""
     # 业务默认集合与评测集合通过配置隔离，避免评测清理正式知识库。
     milvus_collection_name: str = "law_chunks"
 
@@ -126,13 +132,17 @@ class Settings(BaseSettings):
     glm_model: str = "glm-4-flash"
     # 敏感配置：只通过环境变量注入，禁止写入任何文件或日志
     glm_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-chat"
+    # 敏感配置：只通过环境变量注入，禁止写入任何文件或日志
+    deepseek_api_key: str = ""
     # 思考模式开关：qwen3.5/glm-4.5 等推理模型默认会先"思考"再回答，
     # 显著拉长首字延迟（真实环境曾达 30~40s）；默认关闭以获得即时流式输出
     llm_enable_thinking: bool = False
 
     # ---- 规划器 Provider（BE-030 统一规划工作流）----
     # 规划节点把问题拆解为子查询，对模型能力最敏感；
-    # follow=复用主 LLM Provider 实例，ollama/glm=按主 Provider 的
+    # follow=复用主 LLM Provider 实例，ollama/glm/deepseek=按所选 Provider 的
     # 连接配置构造独立实例（模型名可用 planner_model 单独覆盖）
     planner_provider: PlannerProvider = PlannerProvider.FOLLOW
     planner_model: str = ""  # 空串表示用所选 Provider 的默认对话模型
@@ -182,6 +192,16 @@ class Settings(BaseSettings):
     def resolved_log_dir(self) -> str:
         """日志目录的实际路径（相对路径锚定到 backend/）。"""
         return _anchor_path(self.log_dir)
+
+    @property
+    def resolved_milvus_uri(self) -> str:
+        """返回 MILVUS_PROVIDER 选择后的 Endpoint。"""
+        return self.milvus_cloud_uri if self.milvus_provider is MilvusProvider.CLOUD else self.milvus_uri
+
+    @property
+    def resolved_milvus_token(self) -> str:
+        """返回 MILVUS_PROVIDER 选择后的认证 token。"""
+        return self.milvus_cloud_token if self.milvus_provider is MilvusProvider.CLOUD else self.milvus_token
 
 
 @lru_cache

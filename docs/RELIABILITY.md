@@ -67,7 +67,7 @@
 
 ### 使用约定（重要，曾踩坑）
 - `extra` 的键**禁止使用 LogRecord 保留字段**（`message`、`filename`、`name` 等）——重名会使日志调用自身抛 `KeyError`，曾导致业务 404 变成 500（由 API 集成测试在 `LOG_LEVEL=INFO` 下抓出）。
-- **密钥禁止进日志**：`GLM_API_KEY`、`TAVILY_API_KEY`、`MILVUS_CLOUD_TOKEN` 等敏感值不得出现在任何日志字段中；日志只允许记录模型名、工具名、消息数、长度、Milvus 是否使用认证等非敏感元数据。
+- **密钥禁止进日志**：`GLM_API_KEY`、`DEEPSEEK_API_KEY`、`TAVILY_API_KEY`、`MILVUS_CLOUD_TOKEN` 等敏感值不得出现在任何日志字段中；日志只允许记录模型名、工具名、消息数、长度、Milvus 是否使用认证等非敏感元数据。
 - **脱敏兜底**：`JsonFormatter` 对 `api_key`、`token`、`password`、`authorization`、`secret` 等敏感键名做黑名单处理（值替换为 `***`），作为"密钥禁止进日志"约定的机械保障，防止误写。
 
 ### 日志级别

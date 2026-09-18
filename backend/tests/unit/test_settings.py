@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from app.config.settings import (
     DbProvider,
     LlmProvider,
+    MilvusProvider,
     Settings,
     VectorStoreProvider,
 )
@@ -25,13 +26,15 @@ def test_default_settings_use_current_generation_providers(monkeypatch: pytest.M
     # pymilvus 导入时会 load_dotenv 把 backend/.env 写进进程环境（BE-029 引入），
     # .env 的 LLM_PROVIDER 会污染 _env_file=None 的默认值断言，一并清除
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
-    for name in ("MILVUS_CLOUD_URI", "MILVUS_CLOUD_TOKEN", "MILVUS_URI", "MILVUS_TOKEN"):
+    for name in ("MILVUS_PROVIDER", "MILVUS_CLOUD_URI", "MILVUS_CLOUD_TOKEN", "MILVUS_URI", "MILVUS_TOKEN"):
         monkeypatch.delenv(name, raising=False)
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     assert settings.db_provider is DbProvider.SQLITE
     assert settings.vector_store_provider is VectorStoreProvider.MILVUS
+    assert settings.milvus_provider is MilvusProvider.CLOUD
+    assert settings.milvus_cloud_uri == ""
     assert settings.milvus_uri == "http://127.0.0.1:19530"
-    assert settings.milvus_token == ""
+    assert settings.resolved_milvus_uri == ""
     assert settings.llm_provider is LlmProvider.OLLAMA
     # BE-027：日志默认 INFO（保证"重要业务事件"默认可见），并落盘 backend/log/
     assert settings.log_level == "INFO"
@@ -46,28 +49,35 @@ def test_providers_switchable_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MILVUS_CLOUD_TOKEN", raising=False)
     monkeypatch.setenv("DB_PROVIDER", "mysql")
     monkeypatch.setenv("LLM_PROVIDER", "glm")
+    monkeypatch.setenv("MILVUS_PROVIDER", "local")
     monkeypatch.setenv("MILVUS_URI", "http://127.0.0.1:19531")
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     assert settings.db_provider is DbProvider.MYSQL
     assert settings.llm_provider is LlmProvider.GLM
-    assert settings.milvus_uri == "http://127.0.0.1:19531"
+    assert settings.milvus_provider is MilvusProvider.LOCAL
+    assert settings.resolved_milvus_uri == "http://127.0.0.1:19531"
 
 
-def test_milvus_cloud_config_takes_priority(monkeypatch: pytest.MonkeyPatch) -> None:
-    """云端 URI/API Key 优先于旧的本地 standalone 配置。"""
+def test_milvus_provider_selects_explicit_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Milvus 只按独立 Provider 配置选择，不根据 URI 是否存在猜测。"""
     monkeypatch.setenv("MILVUS_URI", "http://127.0.0.1:19530")
     monkeypatch.setenv("MILVUS_TOKEN", "local-token")
     monkeypatch.setenv("MILVUS_CLOUD_URI", "https://cloud.example")
     monkeypatch.setenv("MILVUS_CLOUD_TOKEN", "cloud-api-key")
+    monkeypatch.setenv("MILVUS_PROVIDER", "cloud")
 
-    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    cloud = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert cloud.resolved_milvus_uri == "https://cloud.example"
+    assert cloud.resolved_milvus_token == "cloud-api-key"
 
-    assert settings.milvus_uri == "https://cloud.example"
-    assert settings.milvus_token == "cloud-api-key"
+    monkeypatch.setenv("MILVUS_PROVIDER", "local")
+    local = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert local.resolved_milvus_uri == "http://127.0.0.1:19530"
+    assert local.resolved_milvus_token == "local-token"
 
 
 def test_sensitive_config_from_env_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    """GLM_API_KEY 必须来自环境变量，默认值为空且不落盘。
+    """GLM/DeepSeek API Key 必须来自环境变量，默认值为空且不落盘。
 
     为什么先 delenv：pymilvus 在 import 时会调用 load_dotenv 把
     backend/.env 整体灌入进程环境（第三方行为），导致即使
@@ -75,17 +85,35 @@ def test_sensitive_config_from_env_only(monkeypatch: pytest.MonkeyPatch) -> None
     本用例验证的是"未提供环境变量时默认为空"，因此先清除。
     """
     monkeypatch.delenv("GLM_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     assert settings.glm_api_key == ""
+    assert settings.deepseek_api_key == ""
     monkeypatch.setenv("GLM_API_KEY", "test-secret-key")
     settings_with_key = Settings(_env_file=None)  # type: ignore[call-arg]
     assert settings_with_key.glm_api_key == "test-secret-key"
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-test-key")
+    assert Settings(_env_file=None).deepseek_api_key == "deepseek-test-key"  # type: ignore[call-arg]
+
+
+def test_deepseek_provider_configurable_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DeepSeek Provider、Endpoint 和模型名可由环境变量切换。"""
+    monkeypatch.setenv("LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://deepseek.example")
+    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-test")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert settings.llm_provider is LlmProvider.DEEPSEEK
+    assert settings.deepseek_base_url == "https://deepseek.example"
+    assert settings.deepseek_model == "deepseek-test"
 
 
 def test_invalid_provider_rejected() -> None:
     """非法 Provider 取值应在构造配置时立即失败，而不是运行中段才暴露。"""
     with pytest.raises(ValidationError):
         Settings(_env_file=None, db_provider="oracle")  # type: ignore[call-arg]
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, milvus_provider="guess")  # type: ignore[call-arg]
 
 
 def test_removed_chroma_provider_rejected() -> None:

@@ -1,9 +1,21 @@
 # 会话交接
 
+## Session 050：Milvus 显式部署选择与 DeepSeek（2026-09-18）
+
+### 本轮已完成
+- 新增独立 `MILVUS_PROVIDER=cloud|local` 配置，默认 `cloud`；选择 cloud 时只读取 `MILVUS_CLOUD_URI/TOKEN`，选择 local 时只读取 `MILVUS_URI/TOKEN`。
+- 新增 `DeepSeekProvider`，主模型、Planner、评测 Judge 均可通过 Provider 配置选择；请求固定 `thinking.type=disabled`。
+- 同步 `.env.example`、README、ARCHITECTURE、PRODUCT、RELIABILITY、init、feature_list 与运行记录。
+
+### 验证与结论
+- 定向测试 29 passed；全量测试 255 passed、5 skipped、1 warning。
+- 当前 `.env` 的 cloud Milvus 初始化成功；DeepSeek `deepseek-chat` 实际调用返回非空答案；未提交 `.env` 或密钥。
+- 当前 BE-049 的 GLM 稳定性 blocker 不变；本轮未改前端和评测逻辑。
+
 ## Session 049：Milvus Cloud 默认连接（2026-09-18）
 
 ### 本轮已完成
-- `Settings` 优先读取 `MILVUS_CLOUD_URI` / `MILVUS_CLOUD_TOKEN`，`MilvusVectorStore` 将 API Key 传入 `MilvusClient(token=...)`；旧 `MILVUS_URI` / `MILVUS_TOKEN` 保留给 standalone 回退。
+- `Settings` 优先读取 `MILVUS_CLOUD_URI` / `MILVUS_CLOUD_TOKEN`，并把 API Key 传入 `MilvusVectorStore`；旧 `MILVUS_URI` / `MILVUS_TOKEN` 保留给 standalone 回退。
 - README、`.env.example`、ARCHITECTURE、PRODUCT、RELIABILITY、init 和 feature_list 已同步；`reset_milvus.py` 对带认证配置要求 `--yes`，防止默认云端误删集合。
 - 保留 `tmp/milvus_cloud_smoke.py` 与 `tmp/milvus_lite_smoke.py` 作为独立手工验证脚本，不读取项目业务代码。
 

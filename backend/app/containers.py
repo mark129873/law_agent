@@ -32,6 +32,7 @@ from app.infrastructure.database.sqlalchemy.database import SQLAlchemyDatabase, 
 from app.infrastructure.document_parser.pdf_parser import PdfParser
 from app.infrastructure.document_parser.text_parser import TextParser
 from app.infrastructure.embedding.ollama_embedding import OllamaEmbeddingService
+from app.infrastructure.llm.deepseek import DeepSeekProvider
 from app.infrastructure.llm.glm import GLMProvider
 from app.infrastructure.llm.ollama import OllamaProvider
 from app.infrastructure.trace.langfuse_sink import LangfuseTraceSinkFactory
@@ -71,13 +72,18 @@ def _build_vector_store(settings: Settings) -> VectorStore:
     """
     if settings.vector_store_provider == VectorStoreProvider.MILVUS:
         rag_cfg = LegalRAGConfig()
+        uri = settings.resolved_milvus_uri
+        if not uri:
+            raise ValueError(
+                f"MILVUS_PROVIDER={settings.milvus_provider.value} 但未配置对应的 Milvus URI"
+            )
         return MilvusVectorStore(
-            settings.milvus_uri,
+            uri,
             collection_name=settings.milvus_collection_name,
             dense_top_k=rag_cfg.dense_top_k,
             bm25_top_k=rag_cfg.bm25_top_k,
             rrf_k=rag_cfg.rrf_k,
-            token=settings.milvus_token,
+            token=settings.resolved_milvus_token,
         )
     raise NotImplementedError(f"向量库 Provider '{settings.vector_store_provider.value}' 尚未实现")
 
@@ -85,8 +91,19 @@ def _build_vector_store(settings: Settings) -> VectorStore:
 def _build_llm_provider(settings: Settings) -> LLMProvider:
     """按配置构造大模型 Provider（工厂函数，BE-010）。"""
     provider = settings.llm_provider.value
-    model = settings.ollama_model if provider == "ollama" else settings.glm_model
+    model = _default_llm_model(settings, provider)
     return _build_named_llm_provider(settings, provider, model)
+
+
+def _default_llm_model(settings: Settings, provider: str) -> str:
+    """返回指定 Provider 的默认对话模型名。"""
+    if provider == "ollama":
+        return settings.ollama_model
+    if provider == "glm":
+        return settings.glm_model
+    if provider == "deepseek":
+        return settings.deepseek_model
+    raise NotImplementedError(f"大模型 Provider '{provider}' 尚未实现")
 
 
 def _build_named_llm_provider(settings: Settings, provider: str, model: str) -> LLMProvider:
@@ -100,6 +117,11 @@ def _build_named_llm_provider(settings: Settings, provider: str, model: str) -> 
         return GLMProvider(
             settings.glm_base_url, settings.glm_api_key, model, settings.llm_enable_thinking
         )
+    if provider == "deepseek":
+        if not settings.deepseek_api_key:
+            raise ValueError("模型 Provider=deepseek 但未配置 DEEPSEEK_API_KEY 环境变量")
+        # DeepSeek 当前业务约定固定关闭思考，不复用全局 LLM_ENABLE_THINKING。
+        return DeepSeekProvider(settings.deepseek_base_url, settings.deepseek_api_key, model)
     raise NotImplementedError(f"大模型 Provider '{provider}' 尚未实现")
 
 
@@ -108,7 +130,7 @@ def build_evaluation_judge_provider(settings: Settings, primary: LLMProvider) ->
     if settings.eval_judge_provider == PlannerProvider.FOLLOW and not settings.eval_judge_model:
         return primary
     provider = settings.llm_provider.value if settings.eval_judge_provider == PlannerProvider.FOLLOW else settings.eval_judge_provider.value
-    default_model = settings.ollama_model if provider == "ollama" else settings.glm_model
+    default_model = _default_llm_model(settings, provider)
     return _build_named_llm_provider(settings, provider, settings.eval_judge_model or default_model)
 
 
@@ -116,7 +138,7 @@ def _build_planner(settings: Settings, container: DIContainer) -> LLMProvider:
     """按配置构造规划器（工厂函数，BE-030）。
 
     follow=复用主 LLM Provider 实例（零额外连接）；
-    ollama/glm=按主 Provider 的连接配置构造独立实例，
+    ollama/glm/deepseek=按所选 Provider 的连接配置构造独立实例，
     模型名可用 PLANNER_MODEL 单独覆盖。
     为什么规划器可能用不同模型：任务分解对模型能力最敏感，
     本地小模型规划质量不稳，强模型规划 + 快模型执行是常见组合。
@@ -124,12 +146,9 @@ def _build_planner(settings: Settings, container: DIContainer) -> LLMProvider:
     if settings.planner_provider == PlannerProvider.FOLLOW:
         return container.resolve(LLMProvider)
     model = settings.planner_model  # 空串由各分支回退到该 Provider 默认模型
-    if settings.planner_provider == PlannerProvider.OLLAMA:
-        return OllamaProvider(settings.ollama_base_url, model or settings.ollama_model, settings.llm_enable_thinking)
-    if settings.planner_provider == PlannerProvider.GLM:
-        if not settings.glm_api_key:
-            raise ValueError("PLANNER_PROVIDER=glm 但未配置 GLM_API_KEY 环境变量")
-        return GLMProvider(settings.glm_base_url, settings.glm_api_key, model or settings.glm_model, settings.llm_enable_thinking)
+    if settings.planner_provider in (PlannerProvider.OLLAMA, PlannerProvider.GLM, PlannerProvider.DEEPSEEK):
+        provider = settings.planner_provider.value
+        return _build_named_llm_provider(settings, provider, model or _default_llm_model(settings, provider))
     raise NotImplementedError(f"规划器 Provider '{settings.planner_provider.value}' 尚未实现")
 
 

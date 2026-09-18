@@ -1,6 +1,6 @@
 {
   "project": "legal-knowledge-agent",
-  "description": "法律知识库与助手 Agent：基于 LangGraph 一期重写的问答 Agent（主图编排 + Local Legal RAG 独立子图 + Tavily Remote MCP Web Search + Plugin Stub 入口），支持四类检索查询变体（原始/改写/子问题/术语扩展）fan-out 并发生成、Milvus 服务端混合检索（稠密+稀疏 BM25，RRF 融合）多 Query 并发召回、统一重排（cross-encoder/ms-marco-MiniLM-L-6-v2，可降级 RRF）、证据评估与本地恢复循环、grounding 双规则校验与确定性收尾；节点执行状态以 SSE status 事件流式展示（Codex 风格浅色过程行），检索策略全量展示；支持多会话、历史消息、流式回答、参考文档、联网搜索与对话删除。后端 Python 3.11.15 + FastAPI + SQLAlchemy 2.0 async（当前 SQLite）+ Milvus standalone + sentence-transformers + MCP SDK；前端 React + TypeScript + Vite + Tailwind CSS，交互与视觉风格参考 Codex Web。架构决策见 docs/ARCHITECTURE.md。",
+  "description": "法律知识库与助手 Agent：基于 LangGraph 一期重写的问答 Agent（主图编排 + Local Legal RAG 独立子图 + Tavily Remote MCP Web Search + Plugin Stub 入口），支持四类检索查询变体（原始/改写/子问题/术语扩展）fan-out 并发生成、Milvus 服务端混合检索（稠密+稀疏 BM25，RRF 融合）多 Query 并发召回、统一重排（cross-encoder/ms-marco-MiniLM-L-6-v2，可降级 RRF）、证据评估与本地恢复循环、grounding 双规则校验与确定性收尾；节点执行状态以 SSE status 事件流式展示（Codex 风格浅色过程行），检索策略全量展示；支持多会话、历史消息、流式回答、参考文档、联网搜索与对话删除。后端 Python 3.11.15 + FastAPI + SQLAlchemy 2.0 async（当前 SQLite）+ Milvus Cloud/standalone + sentence-transformers + MCP SDK；前端 React + TypeScript + Vite + Tailwind CSS，交互与视觉风格参考 Codex Web。架构决策见 docs/ARCHITECTURE.md。",
   "rules": {
     "single_active_feature": true,
     "passing_requires_evidence": true,
@@ -208,10 +208,17 @@
     },
     {
       "id": "BE-050",
-      "name": "Milvus Cloud 默认连接",
-      "description": "MilvusVectorStore 支持 Milvus Cloud Endpoint + API Key（token）认证；Settings 优先读取 MILVUS_CLOUD_URI/MILVUS_CLOUD_TOKEN，Milvus 仍为默认向量库 Provider，并保留 MILVUS_URI/MILVUS_TOKEN 的 standalone 回退；云端重置脚本要求显式确认。",
+      "name": "Milvus 云端/本地显式选择",
+      "description": "MilvusVectorStore 支持 Milvus Cloud Endpoint + API Key（token）认证；Settings 通过独立 MILVUS_PROVIDER 选择 cloud 或 local，默认 cloud，不根据 URI 是否存在自动回退；云端重置脚本要求显式确认。",
       "status": "passing",
-      "evidence": "2026-09-18（Session 049）：真实项目装配连接 Zilliz Cloud 成功，authenticated=true；应用启动与 /api/health 通过；定向 14 passed、全量 250 passed/5 skipped/1 warning；云端重置需 --yes。"
+      "evidence": "2026-09-18：MILVUS_PROVIDER 默认 cloud、local 显式切换；云端初始化成功，255 passed/5 skipped/1 warning；未配置所选 URI 时启动即报清晰错误。"
+    },
+    {
+      "id": "BE-051",
+      "name": "DeepSeek LLM Provider",
+      "description": "新增 DeepSeek OpenAI 兼容 Chat Completions Provider，支持主模型、Planner 与评测 Judge 通过环境变量选择；使用 DEEPSEEK_API_KEY 认证，思考模式固定关闭。",
+      "status": "passing",
+      "evidence": "2026-09-18：DeepSeek chat/stream 协议测试通过，thinking=disabled；当前 DEEPSEEK_API_KEY 实测 deepseek-chat 返回非空答案，容器主模型选择测试通过。"
     }
   ]
 }
