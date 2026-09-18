@@ -77,6 +77,7 @@ def _build_vector_store(settings: Settings) -> VectorStore:
             dense_top_k=rag_cfg.dense_top_k,
             bm25_top_k=rag_cfg.bm25_top_k,
             rrf_k=rag_cfg.rrf_k,
+            token=settings.milvus_token,
         )
     raise NotImplementedError(f"向量库 Provider '{settings.vector_store_provider.value}' 尚未实现")
 

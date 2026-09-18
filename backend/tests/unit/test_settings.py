@@ -25,10 +25,13 @@ def test_default_settings_use_current_generation_providers(monkeypatch: pytest.M
     # pymilvus 导入时会 load_dotenv 把 backend/.env 写进进程环境（BE-029 引入），
     # .env 的 LLM_PROVIDER 会污染 _env_file=None 的默认值断言，一并清除
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    for name in ("MILVUS_CLOUD_URI", "MILVUS_CLOUD_TOKEN", "MILVUS_URI", "MILVUS_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     assert settings.db_provider is DbProvider.SQLITE
     assert settings.vector_store_provider is VectorStoreProvider.MILVUS
     assert settings.milvus_uri == "http://127.0.0.1:19530"
+    assert settings.milvus_token == ""
     assert settings.llm_provider is LlmProvider.OLLAMA
     # BE-027：日志默认 INFO（保证"重要业务事件"默认可见），并落盘 backend/log/
     assert settings.log_level == "INFO"
@@ -39,6 +42,8 @@ def test_default_settings_use_current_generation_providers(monkeypatch: pytest.M
 
 def test_providers_switchable_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """仅通过环境变量即可切换 Provider，模拟未来切换 mysql/glm 的场景。"""
+    monkeypatch.delenv("MILVUS_CLOUD_URI", raising=False)
+    monkeypatch.delenv("MILVUS_CLOUD_TOKEN", raising=False)
     monkeypatch.setenv("DB_PROVIDER", "mysql")
     monkeypatch.setenv("LLM_PROVIDER", "glm")
     monkeypatch.setenv("MILVUS_URI", "http://127.0.0.1:19531")
@@ -46,6 +51,19 @@ def test_providers_switchable_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.db_provider is DbProvider.MYSQL
     assert settings.llm_provider is LlmProvider.GLM
     assert settings.milvus_uri == "http://127.0.0.1:19531"
+
+
+def test_milvus_cloud_config_takes_priority(monkeypatch: pytest.MonkeyPatch) -> None:
+    """云端 URI/API Key 优先于旧的本地 standalone 配置。"""
+    monkeypatch.setenv("MILVUS_URI", "http://127.0.0.1:19530")
+    monkeypatch.setenv("MILVUS_TOKEN", "local-token")
+    monkeypatch.setenv("MILVUS_CLOUD_URI", "https://cloud.example")
+    monkeypatch.setenv("MILVUS_CLOUD_TOKEN", "cloud-api-key")
+
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+
+    assert settings.milvus_uri == "https://cloud.example"
+    assert settings.milvus_token == "cloud-api-key"
 
 
 def test_sensitive_config_from_env_only(monkeypatch: pytest.MonkeyPatch) -> None:

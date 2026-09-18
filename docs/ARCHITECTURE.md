@@ -7,7 +7,7 @@
 -Agent 模块一期重写（2026-09）：主图轻量编排 + 独立 Local Legal RAG 子图 + Tavily Remote MCP Web Search / Plugin Stub 入口，设计依据一期技术稿核心内容已并入本文档 §12（30 条强制约束 + 设计 §号速查）；统一重排采用 `cross-encoder/ms-marco-MiniLM-L-6-v2`（CrossEncoder，模型失败时降级 RRF；显式关闭时按配置正常使用 RRF）
 -数据库此版本支持sqlite3, 后续版本支持mysql8.0根据配置进行切换, 做好数据库接口层抽象
 -数据库实现统一走 SQLAlchemy 2.0 async ORM（声明式模型 + Data Mapper 映射），SQLite 是当前唯一已启用的 Provider，MySQL 8.0 接入只需换 URL 与异步驱动
--向量数据库使用 Milvus（standalone 部署，backend/docker-compose.yml 编排 etcd + minio + milvus），稠密向量与稀疏 BM25 混合检索由 Milvus 服务端 hybrid_search 完成（BE-029），业务代码经 VectorStore 端口访问，不感知具体实现
+-向量数据库使用 Milvus（默认连接 Milvus Cloud，也支持通过配置连接 standalone），稠密向量与稀疏 BM25 混合检索由 Milvus 服务端 hybrid_search 完成（BE-029），业务代码经 VectorStore 端口访问，不感知具体实现
 
 ## 1. 系统概览
 
@@ -148,7 +148,7 @@ frontend/                        # 前端独立项目（React + TS + Vite）
 |------|---------|---------|
 | `Database` / `TransactionContext` | domain/repositories/database.py | SQLAlchemyDatabase（方言无关，MySQL 靠 URL 切换） |
 | `ConversationRepository` / `MessageRepository` / `DocumentRepository` | domain/repositories/ | SQLAlchemyDatabase 内置仓库（ORM Session + Data Mapper） |
-| `VectorStore` | domain/repositories/vector_store.py | MilvusVectorStore（dense+sparse 单集合，服务端 hybrid_search） |
+| `VectorStore` | domain/repositories/vector_store.py | MilvusVectorStore（默认 Milvus Cloud，dense+sparse 单集合，服务端 hybrid_search） |
 | `LLMProvider` | domain/repositories/llm_provider.py | OllamaProvider / GLMProvider |
 | `DocumentParser` | domain/services/document_parser.py | TextParser（txt/md 多编码回退）/ PdfParser（pypdf） |
 | `EmbeddingService` | domain/services/embedding.py | OllamaEmbeddingService（/api/embed 批量） |
@@ -202,7 +202,7 @@ DELETE /api/documents/{id}：向量按 document_id 删除 + 元数据删除（�
 - **为什么混合/服务端融合**：向量检索擅长语义相似，法条编号等精确词面靠 BM25 补足；BM25 分数与余弦量纲不同不可加权，RRF 只用排名无需调权（k=60 论文推荐值）。自研 BM25（BE-028，已废弃）每次增删全量重建索引，万级 chunk 以上不可持续。
 - `build_context` 仍产出带【来源：文件名】的上下文，无命中返回空串，衔接"信息不足"策略；sources 事件与 Prompt 上下文同源。
 - 集合懒建（首次 `add_chunks` 按实际 embedding 维度创建）；集合不存在时检索返回空 = 空知识库语义。
-- Milvus 数据由容器卷持久化，不在 `backend/data/`——干净环境重置除删 data 外还需运行 `scripts/reset_milvus.py`（见 RELIABILITY.md）。
+- Milvus 数据由云端服务或 standalone 容器持久化，不在 `backend/data/`——干净环境重置除删 data 外还需运行 `scripts/reset_milvus.py`（见 RELIABILITY.md）；云端重置必须显式确认，避免误删正式集合。
 
 ## 5. Agent 工作流（LangGraph，一期重写）
 
@@ -311,7 +311,10 @@ retrieval_planner_agent（检索计划，四类策略多选）
 | `RERANK_ENABLED` | true / false | true（CPU 且无 CUDA 实测较慢；false 表示主动使用 RRF 融合序，不应视为模型故障） |
 | `RERANKER_MODEL_PATH` | HF 模型 id 或本地快照绝对路径 | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
 | `RERANKER_DEVICE` | cpu / cuda | cpu |
-| `MILVUS_URI` | — | http://127.0.0.1:19530 |
+| `MILVUS_CLOUD_URI` | Milvus Cloud 集群 Endpoint（优先） | 空；未设置时回退 `MILVUS_URI` |
+| `MILVUS_CLOUD_TOKEN` | Milvus Cloud API Key（优先） | 空 |
+| `MILVUS_URI` | standalone Endpoint（兼容/回退） | http://127.0.0.1:19530 |
+| `MILVUS_TOKEN` | standalone 或兼容服务 token | 空 |
 | `MILVUS_COLLECTION_NAME` | Milvus 集合名 | `law_chunks` |
 | `LANGFUSE_ENABLED` | true / false | false（BE-043：Langfuse 链路追踪开关，关闭零导入零开销） |
 | `LANGFUSE_BASE_URL` | Langfuse 服务地址 | https://cloud.langfuse.com |
@@ -323,7 +326,7 @@ retrieval_planner_agent（检索计划，四类策略多选）
 | `HOST` / `PORT` / `LOG_LEVEL` | — | 0.0.0.0 / 8000 / INFO |
 
 - **思考模式开关**：qwen3.5 / glm-4.5 等推理模型默认先"思考"再回答，首字延迟曾达 30~40s；关闭时 Ollama 带 `think: false`、GLM 带 `thinking: {"type": "disabled"}`。
-- **敏感配置**：`GLM_API_KEY` 等密钥只经环境变量或本地 `.env` 注入，禁止提交仓库、禁止写入日志；glm 缺密钥时装配即报错（尽早失败）。
+- **敏感配置**：`GLM_API_KEY`、`MILVUS_CLOUD_TOKEN` 等密钥只经环境变量或本地 `.env` 注入，禁止提交仓库、禁止写入日志；Milvus token 只用于 `MilvusClient` 认证，结构化日志仅记录是否启用认证。
 - **路径锚定与自愈**：相对路径统一锚定 `backend/`；`backend/data/` 不存在时建连接前自动创建父目录（BE-026），清空后可直接启动。
 - **切换 Provider**：仅改配置，业务代码零修改。
 
@@ -363,7 +366,6 @@ Chat 流式协议（SSE，`data: {json}\n\n`）：
 
 ```bash
 cd backend
-docker compose up -d                               # Milvus standalone（etcd + minio + milvus，BE-029 前置）
 uv sync                                            # 创建/同步 .venv（Python 3.11）
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 uv run pytest                                      # 全量测试（含 DDD 边界守护）
@@ -373,6 +375,7 @@ cd frontend
 npm install && npm run dev                         # http://localhost:5173（/api 代理到 8000）
 npm run build                                      # tsc 类型检查 + 生产构建
 ```
+- 默认启动读取 `MILVUS_CLOUD_URI` + `MILVUS_CLOUD_TOKEN` 连接 Milvus Cloud；若未配置云端变量，才回退到 `MILVUS_URI` + `MILVUS_TOKEN` 的 standalone 地址。需要本地 standalone 时，再执行 `docker compose up -d`。
 - 启动时 lifespan 自动：SQLite connect + init_schema（幂等建表）、Milvus connect（集合不存在时首次入库懒建）；均为幂等操作，重复启动安全（BE-026 首次启动自愈）。
 - 日志：单行 JSON（timestamp/level/service/request_id/message/data），stdout + `backend/log/app.log`（按天轮转保留 30 天），每响应带 `x-request-id`；详见 docs/RELIABILITY.md。
 
@@ -383,7 +386,7 @@ npm run build                                      # tsc 类型检查 + 生产�
 | 单元 | tests/unit/ | 167 | DI 容器、配置（含 Langfuse/Tavily 默认值）、DDD 边界守护（AST，含 langgraph/langfuse/MCP 隔离区）、日志契约、WebSearchPort 与 Tavily 响应归一/脱敏/独立日志、Agent utils、LLM 结构化输出、Langfuse sink、ChatService trace、Reranker、RAG 子图、主图、Stub、状态包装器、回答策略、端口契约、文档 Pipeline 与解析器 |
 | 集成 | tests/integration/（除 API） | 63 | 真实 SQLite、首次启动自愈、真实 Milvus 混合检索（不可达时跳过）、legal_rag 子图全场景、Tavily Fake MCP 主图路径（结果经 observation、失败不重试）、主图既有场景、LLM/Embedding/RAG |
 | 接口 | tests/integration/test_api.py | 12 | 完整应用（临时 SQLite + Fake 向量库/LLM/WebSearchPort）：会话 CRUD、统一错误、SSE 协议（含 web_sources/web_search_notice）、文档上传删除、x-request-id、联网来源持久化 |
-| 端到端 | scripts/（手工运行） | 3 脚本 | 真实 uvicorn + 真实 Milvus/LLM：上传→入库→流式 RAG 问答引用原文→检索策略/状态事件→持久化 |
+| 端到端 | scripts/（手工运行） | 3 脚本 | 真实 uvicorn + 真实 Milvus Cloud/standalone + LLM：上传→入库→流式 RAG 问答引用原文→检索策略/状态事件→持久化 |
 
 - 自动化合计 242 个，`uv run pytest` 本轮为 **237 passed、5 skipped、1 warning**；无需外部服务的部分使用 Fake 遵循领域端口，与生产实现互换验证同一契约，Langfuse 以假客户端锁契约；唯一例外 test_milvus_vector_store.py 的 5 例需真实 Milvus，不可达时自动跳过。
 - Agent 测试的 Fake 体系：脚本化 LLMProvider（按系统提示特征分流输出）、Fake Embedding/VectorStore/RerankScorer——rerank 真实模型不进自动化测试，仅真实 E2E 验证。
@@ -392,7 +395,7 @@ npm run build                                      # tsc 类型检查 + 生产�
 ## 10. 扩展点与预留
 
 - **MySQL 8.0**：ORM 已统一表结构与 DML，接入只剩安装 `aiomysql` 驱动 + `containers.py` 加 `mysql+aiomysql://…` URL 分支并启用 `DbProvider.MYSQL`；需补真实实例集成验证与迁移方案（Alembic autogenerate 可直接消费现有声明式模型）。
-- **Milvus**：容器内存上限（backend/docker-compose.yml）milvus 2GB / etcd 256MB / minio 256MB（合计 2.5GB ≈ 4GB WSL2 的 62%，防无界增长拖垮宿主机）；`MILVUS_URI` 默认 http://127.0.0.1:19530。
+- **Milvus**：默认面向 Milvus Cloud；需要离线或本地开发时可显式设置 `MILVUS_URI` 并启动 `backend/docker-compose.yml` 的 standalone（milvus 2GB / etcd 256MB / minio 256MB）。云端与 standalone 共用 `MilvusClient` 适配器和集合协议。
 - **Web Search**：`agent/web/web_search_entry_node` 通过 `WebSearchPort` 调用 Tavily Remote MCP；若未来增加多轮 web research，只扩展该能力内部节点/子图，主图仍使用统一 `CapabilityResult` 与 observation 接口；`suggested_external_queries` 继续作为后续扩展预留。
 - **Plugin / Skill Runtime（二期）**：把 `agent/plugins/plugin_stub_node` 替换为 runtime 实现，约束同上；一期 Stub 不做任何动态加载。
 - **新文档格式**：实现 `DocumentParser` 策略并注册进工厂；**新 LLM Provider**：实现 `LLMProvider`（chat + stream + model_name）+ 容器加分支，密钥仅环境注入；**新 Agent 节点**：实现节点类并在 AgentGraphBuilder/build_legal_rag_graph 接线 + constants.py 登记中文标签（status 事件文案）。

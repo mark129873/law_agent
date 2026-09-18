@@ -1,5 +1,17 @@
 # 会话交接
 
+## Session 049：Milvus Cloud 默认连接（2026-09-18）
+
+### 本轮已完成
+- `Settings` 优先读取 `MILVUS_CLOUD_URI` / `MILVUS_CLOUD_TOKEN`，`MilvusVectorStore` 将 API Key 传入 `MilvusClient(token=...)`；旧 `MILVUS_URI` / `MILVUS_TOKEN` 保留给 standalone 回退。
+- README、`.env.example`、ARCHITECTURE、PRODUCT、RELIABILITY、init 和 feature_list 已同步；`reset_milvus.py` 对带认证配置要求 `--yes`，防止默认云端误删集合。
+- 保留 `tmp/milvus_cloud_smoke.py` 与 `tmp/milvus_lite_smoke.py` 作为独立手工验证脚本，不读取项目业务代码。
+
+### 验证与结论
+- 当前 `.env` 的真实云端配置通过项目装配链连接：`authenticated=true`、集合不存在时保持懒建；应用启动完成，`GET /api/health` 返回 `{"status":"ok"}`。
+- 定向测试 14 passed；全量 `uv run pytest tests -q -rs` 为 250 passed、5 skipped、1 warning；compileall、feature_list JSON、`git diff --check` 通过。
+- 未执行云端集合重置；BE-049 的 GLM 稳定性 blocker 保持不变。
+
 ## Session 048：测试数据同步与真实 RAG 基线（2026-09-18）
 
 ### 本轮已完成
@@ -157,10 +169,10 @@ uv run python scripts/evaluate_rag.py api-smoke --base-url http://127.0.0.1:8000
 - 这一步中哪些东西不要动：后端 API 契约（§7 SSE）；领域层零技术依赖（langfuse 已入守护名单，只允许 infrastructure/trace）；**trace_sink_var 的注入时机（必须在图任务创建前 set）**；**LangfuseTraceSink 全方法吞异常原则**；双预算常量；BE-017 字面锚点联动
 
 ## 命令
-- Milvus 启动：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone`
+- Milvus 默认：`backend/.env` 配置 `MILVUS_CLOUD_URI` / `MILVUS_CLOUD_TOKEN`；本地 standalone 才执行 `cd backend && docker start milvus-etcd milvus-minio milvus-standalone`
 - 后端启动：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 干净环境重置（两步）：删除 `backend/data/` + `uv run python scripts/reset_milvus.py`
-- 后端验证：`cd backend && uv run pytest tests -q -rs`（全量 242 项；Docker/Milvus 可用时本轮 242 passed、1 warning）
+- 干净环境重置（两步）：删除 `backend/data/` + 本地执行 `uv run python scripts/reset_milvus.py`，云端确认目标后执行 `uv run python scripts/reset_milvus.py --yes`
+- 后端验证：`cd backend && uv run pytest tests -q -rs`（本轮 250 passed、5 skipped、1 warning）
 - 前端构建/启动：`cd frontend && npm run build` / `npm run dev`
 - 端到端：启动服务器后 `PYTHONPATH=backend uv run --with httpx python backend/scripts/verify_real_e2e.py`；联网搜索真实 SSE E2E 使用 `use_web_search=true`，结果保留在 `backend/log/web_search/`
 - Langfuse 云端查证：`api.trace.list / api.trace.get(id)`（完整详情含 observations IO）

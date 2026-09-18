@@ -24,7 +24,7 @@ Law Agent 意图构建法律助手，已完成知识库问答场景（法条检�
 | 前端 | React 19 · TypeScript（严格模式）· Vite 8 · Tailwind CSS v4 · React Router 7 |
 | 后端 | Python 3.11 · FastAPI（全异步）· uv · LangGraph |
 | 数据 | SQLAlchemy 2.0 Async + SQLite（当前启用；MySQL 预留端口） |
-| 检索 | Milvus Standalone（dense + 稀疏 BM25，服务端 `hybrid_search` + RRF） |
+| 检索 | Milvus Cloud（默认）或 Milvus Standalone（dense + 稀疏 BM25，服务端 `hybrid_search` + RRF） |
 | 模型 | Ollama 本地 或 智谱 GLM API；Embedding 默认 Ollama `nomic-embed-text` |
 | 重排 | `cross-encoder/ms-marco-MiniLM-L-6-v2`（CrossEncoder）；关闭或失败时使用 RRF 序 |
 | 观测 | 结构化 JSON 日志 + 可选 Langfuse 三级 trace |
@@ -60,7 +60,7 @@ Frontend (React)  --HTTP/SSE-->  FastAPI
 ## 快速开始
 ### 环境要求
 - Python `>=3.11`, 以及环境变量管理工具 [uv]
-- Docker Desktop / Docker Compose
+- Milvus Cloud Endpoint + API Key（默认）；或 Docker Desktop / Docker Compose（本地 standalone）
 - Node.js 与 npm
 - Ollama，或可访问的 GLM API
 
@@ -70,7 +70,20 @@ git clone https://github.com/mark129873/law_agent_harness.git
 cd law_agent_harness
 cp backend/.env.example backend/.env
 ```
-### 2. 启动 Milvus
+### 2. 配置 Milvus
+
+默认连接 Milvus Cloud。在 `backend/.env` 中填写：
+
+```dotenv
+MILVUS_CLOUD_URI=https://<cluster-endpoint>
+MILVUS_CLOUD_TOKEN=<zilliz-api-key>
+MILVUS_COLLECTION_NAME=law_chunks
+```
+
+`MILVUS_CLOUD_TOKEN` 使用 Zilliz Cloud API Key 原文，不要加 `Bearer`。如果同时存在云端和本地变量，云端变量优先。
+
+如需改用本地 standalone，再填写 `MILVUS_URI=http://127.0.0.1:19530` 和可选的 `MILVUS_TOKEN`，并启动：
+
 ```bash
 docker compose -f backend/docker-compose.yml up -d
 ```

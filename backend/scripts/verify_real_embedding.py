@@ -30,7 +30,11 @@ async def main() -> None:
     # 注入独立集合名（等价于 MilvusVectorStore(uri, collection_name)）
     from app.infrastructure.vector_store.milvus import MilvusVectorStore
 
-    store = MilvusVectorStore(store._uri, collection_name=COLLECTION)
+    store = MilvusVectorStore(
+        store._uri,
+        collection_name=COLLECTION,
+        token=store._token,
+    )
     await store.initialize()
 
     service = KnowledgeIngestionService(pipeline, embedding, store)

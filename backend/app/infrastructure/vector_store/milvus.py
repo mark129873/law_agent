@@ -60,9 +60,13 @@ class MilvusVectorStore(VectorStore):
         dense_top_k: int = 30,
         bm25_top_k: int = 30,
         rrf_k: int = 60,
+        token: str = "",
     ) -> None:
         self._uri = uri
         self._collection_name = collection_name
+        # Milvus Cloud 使用 API Key 作为 token；本地 standalone 通常为空。
+        # 只保存在内存中，禁止进入日志或其他持久化数据。
+        self._token = token
         # 默认相似度下限：调用方（RagService）也可按次传入覆盖
         self._default_min_score = min_score
         # 每路候选预取量：dense/bm25 各自取 top N 后交给 RRF 融合，
@@ -82,7 +86,10 @@ class MilvusVectorStore(VectorStore):
     async def initialize(self) -> None:
         """建立连接；集合已存在（重启场景）则加载，不存在则等首次入库懒建。"""
         def _connect() -> None:
-            client = MilvusClient(uri=self._uri)
+            client_kwargs: dict[str, str] = {"uri": self._uri}
+            if self._token:
+                client_kwargs["token"] = self._token
+            client = MilvusClient(**client_kwargs)
             self._client = client
             if client.has_collection(self._collection_name):
                 client.load_collection(self._collection_name)
@@ -92,7 +99,8 @@ class MilvusVectorStore(VectorStore):
         logger.info(
             "VectorStore connected",
             extra={"service": "vector_store", "provider": "milvus", "collection": self._collection_name,
-                   "collection_exists": self._collection_ready},
+                   "collection_exists": self._collection_ready,
+                   "authenticated": bool(self._token)},
         )
 
     async def close(self) -> None:

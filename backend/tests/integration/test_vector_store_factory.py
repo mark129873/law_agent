@@ -21,8 +21,13 @@ def test_factory_resolves_milvus_by_default() -> None:
 
 
 def test_factory_respects_custom_uri() -> None:
-    """MILVUS_URI 配置应透传到实现（部署地址切换只改配置）。"""
-    settings = Settings(milvus_uri="http://127.0.0.1:19531", _env_file=None)  # type: ignore[call-arg]
+    """Endpoint 与 token 应透传到 Milvus 实现（部署地址切换只改配置）。"""
+    settings = Settings(
+        milvus_uri="https://cloud.example",
+        milvus_token="cloud-api-key",
+        _env_file=None,
+    )  # type: ignore[call-arg]
     store = create_container(settings).resolve(VectorStore)
     assert isinstance(store, MilvusVectorStore)
-    assert store._uri == "http://127.0.0.1:19531"
+    assert store._uri == "https://cloud.example"
+    assert store._token == "cloud-api-key"

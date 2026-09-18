@@ -2,14 +2,19 @@
 
 ## 当前已验证状态
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`（当前分支 feature/auto_coder）
-- 标准启动路径：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 标准验证路径：`cd backend && uv run pytest tests -q -rs`（当前 254 个自动化测试；Milvus 恢复后本轮结果为 254 passed、1 warning）；启动后 `curl http://127.0.0.1:8000/api/health`
+- 标准启动路径：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`（默认读取 `MILVUS_CLOUD_URI` + `MILVUS_CLOUD_TOKEN`；本地 standalone 需显式回退配置并启动 Docker）
+- 标准验证路径：`cd backend && uv run pytest tests -q -rs`（本轮 250 passed、5 skipped、1 warning）；启动后 `curl http://127.0.0.1:8000/api/health`
 - Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ Reranker 模型统一（BE-046）+ 低质量兜底 Agent 删除（BE-047）+ Tavily Remote MCP 搜索（BE-048/FE-017）全部 passing：主图 + Local Legal RAG 子图 + Tavily Web Search + Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
 - 当前 Reranker：全项目统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；`check_rerank_local.py` 首次下载到根目录 `.model/cross-encoder/ms-marco-MiniLM-L-6-v2` 并执行 CPU 样本打分。本地 `.env` 已切换为该模型并开启 `RERANK_ENABLED=true`；无法使用时仍按既有故障降级契约记录 WARN。
 - 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；grounding 未通过且预算耗尽时直接进入 `final_answer_node`，不再调用额外兜底 LLM；其他重试机制不变
 - 当前最高优先级未完成功能：BE-049 RAG 端到端评测代码、数据集、真实隔离集合运行和脱敏基线已具备；仍需处理真实 GLM 调用稳定性后才能把质量门禁标为 passing；其余 BE-001~048 与 FE-001~017 保持 passing 或 deprecated
 - 当前 blocker：Milvus、Embedding 和 API/SSE 均已恢复；真实 workflow 23 条中 13 条出现 GLM `ConnectError`/HTTP 400，当前属于外部模型调用稳定性 blocker，不把失败样本计入检索质量分数。前端未改动，沿用既有 `npm run build` 与 API/组件契约验证。
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md、progress-archive-031-040.md（Session 001~040 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
+
+### Session 049（Milvus Cloud 默认连接）（2026-09-18）
+- Settings 优先读取 `MILVUS_CLOUD_URI` / `MILVUS_CLOUD_TOKEN`，并把 API Key 传入 `MilvusVectorStore`；旧 `MILVUS_URI` / `MILVUS_TOKEN` 保留给 standalone 回退。
+- 更新 README、`.env.example`、ARCHITECTURE、PRODUCT、RELIABILITY 和 init；认证重置脚本要求 `--yes`，避免默认云端配置误删集合。
+- 验证：真实项目装配连接 Zilliz Cloud 成功（authenticated=true）；应用启动完成，`/api/health` 返回 200；定向 14 passed；全量 250 passed、5 skipped、1 warning；compileall、JSON、git diff --check 通过。
 
 ### Session 048（测试数据同步与真实 RAG 基线）（2026-09-18）
 - 用户删除了 `中华人民共和国专利法（要点笔记）.md` 和 `民事诉讼法2021.md`；已删除评测数据集中对应的民事诉讼案例，真实 E2E 脚本不再上传已删 Markdown，pytest 数据集测试改为 23 条并校验来源文件存在。

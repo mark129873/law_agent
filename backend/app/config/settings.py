@@ -12,7 +12,7 @@ from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 项目根锚点：backend/ 目录（本文件位于 backend/app/config/）。
@@ -79,6 +79,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
+        # 云端字段使用显式别名，但测试和代码仍可用 Python 字段名传入。
+        populate_by_name=True,
         # 额外参数视为配置错误而不是静默忽略，尽早暴露拼写问题
         extra="ignore",
     )
@@ -99,9 +101,18 @@ class Settings(BaseSettings):
     sqlite_db_path: str = "data/law_agent.db"
     mysql_url: str = ""  # 仅 db_provider=mysql 时使用
 
-    # ---- 向量数据库 Provider（Milvus，见 backend/docker-compose.yml）----
+    # ---- 向量数据库 Provider（Milvus Cloud 默认，standalone 可回退）----
     vector_store_provider: VectorStoreProvider = VectorStoreProvider.MILVUS
-    milvus_uri: str = "http://127.0.0.1:19530"
+    # 认证配置优先读取 MILVUS_CLOUD_*：这样默认部署直接连接云端，
+    # 旧的 MILVUS_* 变量仍保留给本地 standalone 或兼容服务。
+    milvus_uri: str = Field(
+        default="http://127.0.0.1:19530",
+        validation_alias=AliasChoices("MILVUS_CLOUD_URI", "MILVUS_URI"),
+    )
+    milvus_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("MILVUS_CLOUD_TOKEN", "MILVUS_TOKEN"),
+    )
     # 业务默认集合与评测集合通过配置隔离，避免评测清理正式知识库。
     milvus_collection_name: str = "law_chunks"
 
