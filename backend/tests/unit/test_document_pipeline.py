@@ -67,6 +67,16 @@ def test_chunk_text_overlap_keeps_boundary_context() -> None:
     assert pieces[1][0] == text[6]
 
 
+def test_legal_articles_are_not_split_when_longer_than_target() -> None:
+    """法条即使超过目标长度，也必须作为完整语义单元入 chunk。"""
+    first = "《测试法》第一条规定，" + "甲" * 25
+    second = "《测试法》第二条规定，" + "乙" * 25
+
+    pieces = chunk_text(f"{first}\n{second}", chunk_size=20, chunk_overlap=5)
+
+    assert pieces == [first, second]
+
+
 def test_clean_text_normalizes_blank_lines() -> None:
     """连续空行应被压缩，首尾空白应被去除。"""
     cleaned = clean_text("  第一段\n\n\n\n\n第二段  \n")

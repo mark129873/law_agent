@@ -1,6 +1,7 @@
 # 会话交接
 
 ## 当前已验证
+- **法律条文边界优先 Chunk 切分（BE-048）已 passing**：`DocumentPipeline.chunk_text` 识别行首“第 X 条”标题，短法条可合并，超长法条不再被 `chunk_size` 从中间截断；普通文本仍按段落与滑窗处理。20 个定向测试、真实专利法第四十二条完整性探针、全量 pytest 227 passed/1 warning 通过。
 - 现在明确可用的部分：
   - **Agent 模块一期重写 + 思考块 + Langfuse trace + 全量 Prompt 优化 + 精排状态语义修复 + Reranker 模型统一 + 低质量兜底 Agent 删除全部 passing（BE-032~047 + FE-001~016；BE-030 deprecated）**：主图 14 节点 + RAG 子图 10 节点 + 服务层 + status/think 双事件 + 豆包式思考块 + Langfuse 三级追踪 + 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾。
   - **全量 Prompt 优化（BE-044，本轮新增）**：12 个 Prompt 统一五段结构（角色/任务/格式/规则/纪律）+ JSON 纪律（禁 markdown 代码块）+ 示例值防锚定标注 + answer_generator 明确【来源：文件名】格式硬约束 + grounding 降误判（实质一致即可/无关数字不算法律数据/宁可放行）。**编排器"不 finish"误诊修正**（Langfuse 时间线取证：闲聊打回真凶是重复执行 direct_answer，非 judge）——regenerating：RAG 2→0、闲聊 3→0；RAG 回答从 65 字重复堆砌变一句精准+来源标注。
@@ -8,7 +9,7 @@
   - **真实云端验证通过**（jp.cloud.langfuse.com，用户 .env 预置密钥）：E2E trace 含 29 节点 span / 11 generation（model+Prompt+输出）/ 15 think + 2 regenerating 事件。
   - **精排状态语义修复（BE-045）**：`RERANK_ENABLED=false` 被识别为主动关闭，使用 RRF 但不再显示“精排不可用”；CrossEncoder 真失败仍保留 degraded/WARN；启动日志记录 `rerank_enabled` 与 `reranker_device`。
   - **Reranker 模型统一（BE-046）**：生产配置、检查脚本、`.env.example`、README 和架构文档统一为 `cross-encoder/ms-marco-MiniLM-L-6-v2`；检查脚本下载到根目录 `.model` 后从本地目录加载并执行样本打分。
-  - **测试体系**：自动化 226 个（unit 156 含 agent 99 / integration 70 含 agent 12 与 API 9）；test_milvus_vector_store.py 5 例需真实 Milvus（不可达自动跳过）。
+  - **测试体系**：自动化 227 个（新增 BE-048 法条切分回归）；test_milvus_vector_store.py 5 例需真实 Milvus（不可达自动跳过）。
 - 最近一轮实际跑过的验证（2026-09-14，Session 041）：
   - Milvus 集合重置后全量 `uv run pytest tests -q -rs` → **226 passed, 1 warning**；相关精排测试 37 passed。
   - 真实后端启动日志确认 `rerank_enabled=false`；上传专利法 TXT 后提问“发明专利权的保护期限是多少年？”返回“二十年”、第四十二条来源 10 条，SSE 思考文案为“证据按融合排序完成（精排已关闭）”。
@@ -17,6 +18,13 @@
   - README 本地相对链接 5 个均有效，2 个 Mermaid 代码块与全部 Markdown 围栏闭合；配置、API、仓库地址和功能边界已对照当前代码核验。
   - 最近一次真实 E2E 仍为 Session 034：GLM+Milvus 全断言通过，RAG 回答一句精准+【来源】一次通过；闲聊 curl 实测 0 regenerating。
 - 验证后已清理：本轮创建的测试会话/专利法文档已删除，`law_chunks` 集合已 drop，Milvus 三个容器保持运行状态但集合为空；`backend/data/law_agent.db` 仍为 gitignore 的本地数据库文件。
+
+## 本轮改动（Session 045：法律条文边界优先 Chunk 切分）
+- `backend/app/application/services/document_pipeline.py`：新增法条标题识别与原子法条切分；普通文本仍保留原有段落/滑窗策略。
+- `backend/tests/unit/test_document_pipeline.py`：新增超长法条不截断回归测试。
+- 同步 `docs/ARCHITECTURE.md`、`docs/PRODUCT.md`、`feature_list.json`、`progress.md`。
+- 验证：Milvus/后端健康检查通过；20 个定向测试、真实专利法第四十二条完整性探针、全量 pytest 227 passed、1 warning；`git diff --check` 通过。
+- 风险：未识别到明确法条标题的扫描件或普通文本仍使用原滑窗规则。
 
 ## 本轮改动（Session 044：添加 MIT 开源协议）
 - 新增根目录 `LICENSE`，采用标准 MIT License 文本，版权主体为 `law_agent contributors`。

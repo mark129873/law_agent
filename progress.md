@@ -3,13 +3,20 @@
 ## 当前已验证状态
 - 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`（当前分支 feature/auto_coder）
 - 标准启动路径：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 226 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
+- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 227 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
 - Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ Reranker 模型统一（BE-046）+ 低质量兜底 Agent 删除（BE-047）全部 passing：主图 + Local Legal RAG 子图 + Web/Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
 - 当前 Reranker：全项目统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；`check_rerank_local.py` 首次下载到根目录 `.model/cross-encoder/ms-marco-MiniLM-L-6-v2` 并执行 CPU 样本打分。本地 `.env` 已切换为该模型并开启 `RERANK_ENABLED=true`；无法使用时仍按既有故障降级契约记录 WARN。
 - 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；grounding 未通过且预算耗尽时直接进入 `final_answer_node`，不再调用额外兜底 LLM；其他重试机制不变
-- 当前最高优先级未完成功能：无——BE-001~047 与 FE-001~016 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
+- 当前最高优先级未完成功能：无——BE-001~048 与 FE-001~016 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
 - 当前 blocker：无
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md（Session 001~030 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
+
+### Session 045（法律条文边界优先 Chunk 切分）
+- 日期：2026-09-19
+- 本轮目标：优化法律文档上传切分，避免法条被从中间截断。
+- 改动：`chunk_text` 识别行首“第 X 条”法条标题；短法条按目标长度合并，超长法条作为完整原子 chunk；普通文本保持原段落滑窗；同步 ARCHITECTURE、PRODUCT 与 BE-048。
+- 验证：Milvus 健康、后端 `/api/health`、20 个切分/入库定向测试、真实专利法第四十二条完整性探针、全量 pytest **227 passed、1 warning**；`git diff --check` 通过。
+- 风险：未识别到明确法条标题的扫描件或普通文本仍使用原滑窗规则。
 
 ### Session 044（添加 MIT 开源协议）
 - 日期：2026-09-14
