@@ -385,12 +385,12 @@ npm run build                                      # tsc 类型检查 + 生产�
 
 | 层级 | 位置 | 数量 | 验证内容 |
 |------|------|------|---------|
-| 单元 | tests/unit/ | 186 | DI 容器、配置（含 Langfuse/Tavily 默认值）、DDD 边界守护（AST，含 langgraph/langfuse/MCP 隔离区）、日志契约、WebSearchPort 与 Tavily 响应归一/脱敏/独立日志、Agent utils、LLM 结构化输出、Langfuse sink、ChatService trace、Reranker、RAG 子图、主图、Stub、状态包装器、回答策略、端口契约、文档 Pipeline 与解析器 |
+| 单元 | tests/unit/ | 191 | DI 容器、配置（含 Langfuse/Tavily 默认值）、DDD 边界守护（AST，含 langgraph/langfuse/MCP 隔离区）、日志契约、WebSearchPort 与 Tavily 响应归一/脱敏/独立日志、Agent utils、LLM 结构化输出、Langfuse sink、ChatService trace、Reranker、RAG 子图、主图、Stub、状态包装器、回答策略、端口契约、文档 Pipeline 与解析器、真实 RAG 评测边界 |
 | 集成 | tests/integration/（除 API） | 66 | 真实 SQLite、首次启动自愈、真实 Milvus 混合检索（不可达时跳过）、legal_rag 子图全场景、Tavily Fake MCP 主图路径（结果经 observation、失败不重试）、主图既有场景、LLM/Embedding/RAG |
 | 接口 | tests/integration/test_api.py | 12 | 完整应用（临时 SQLite + Fake 向量库/LLM/WebSearchPort）：会话 CRUD、统一错误、SSE 协议（含 web_sources/web_search_notice）、文档上传删除、x-request-id、联网来源持久化 |
 | 端到端 | scripts/（手工运行） | 3 脚本 | 真实 uvicorn + 真实 Milvus Cloud/standalone + LLM：上传→入库→流式 RAG 问答引用原文→检索策略/状态事件→持久化 |
 
-- 自动化合计 264 个，`uv run pytest` 本轮为 **259 passed、5 skipped、1 warning**；无需外部服务的部分使用 Fake 遵循领域端口，与生产实现互换验证同一契约，Langfuse 以假客户端锁契约；唯一例外 test_milvus_vector_store.py 的 5 例需真实 Milvus，不可达时自动跳过。
+- 自动化合计 269 个，`uv run pytest` 本轮为 **264 passed、5 skipped、1 warning**；无需外部服务的部分使用 Fake 遵循领域端口，与生产实现互换验证同一契约，Langfuse 以假客户端锁契约；唯一例外 test_milvus_vector_store.py 的 5 例需真实 Milvus，不可达时自动跳过。
 - Agent 测试的 Fake 体系：脚本化 LLMProvider（按系统提示特征分流输出）、Fake Embedding/VectorStore/RerankScorer——rerank 真实模型不进自动化测试，仅真实 E2E 验证。
 - 自动化测试使用 Fake WebSearchPort，不依赖真实 Tavily 网络；真实 Remote MCP 通过配置 Key 后的手工 smoke test 验证。2026-09-16 实测返回 5 条来源，SSE/持久化/独立日志及按钮关闭不触网断言通过。E2E 脚本依赖真实服务，不纳入 pytest；结论记录于 feature_list.json 各功能 evidence。测试数据源：tests/data_source/（当前保留的法律 TXT/MD 文档）。
 
