@@ -9,7 +9,7 @@
 - 文档先行：同步 README、PRODUCT、ARCHITECTURE、RELIABILITY、`.env.example`、feature_list 和历史基线说明。
 - 代码移除 `law_agent_eval*` 强制校验与评测专用配置注入；`prepare` 的全量删除保留为显式 `--reset`。
 - 评测单测 13 passed；全量后端测试 255 passed、5 skipped、1 warning；compileall、CLI help、JSON 和 `git diff --check` 通过。
-- 未启动 Docker，Docker 保持关闭；已提交 `779eec9 refactor: reuse app storage for rag evaluation`。
+- 未启动 Docker，Docker 保持关闭；已提交 `8776f96 refactor: reuse app storage for rag evaluation`。
 
 ### 当前风险
 - 共享存储意味着 `prepare --reset` 会删除当前数据库中的全部文档及向量，不能在不可重建的知识库执行。

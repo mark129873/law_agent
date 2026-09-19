@@ -204,7 +204,7 @@
       "name": "RAG 端到端评测系统",
       "description": "基于现有法律测试文档和 QaWorkflow 构建真实 LLM 端到端评测：工作流直调收集检索证据、引用、grounding、节点耗时和最终回答，HTTP/SSE 执行产品链路冒烟；计算 Recall@K、MRR、引用精确率/召回率和 LLM Judge 分数，输出 JSON/Markdown 报告；复用当前 Milvus/SQLite 配置，并支持可配置 Judge 模型。",
       "status": "in_progress",
-      "evidence": "2026-09-19：评测复用当前 Milvus/SQLite 配置，显式 --reset 才全量清理；评测单测 13 passed，全量 255 passed/5 skipped/1 warning。旧真实 workflow 10/23 完成、13 条 GLM 失败，仍待模型稳定性处理；commit 779eec9。"
+      "evidence": "2026-09-19：评测复用当前 Milvus/SQLite 配置，显式 --reset 才全量清理；评测单测 13 passed，全量 255 passed/5 skipped/1 warning。旧真实 workflow 10/23 完成、13 条 GLM 失败，仍待模型稳定性处理；commit 8776f96。"
     },
     {
       "id": "BE-050",
