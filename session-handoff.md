@@ -1,5 +1,19 @@
 # 会话交接
 
+## Session 060：Langfuse 驱动的 RAG 提示词与评测门控优化（2026-09-19）
+
+### 本轮已完成
+- 依据已有真实 Langfuse `evaluation-*` trace 与 RAG 报告，定位 LF-002 等案例的核心问题：恢复查询丢失法条号/期限锚点、`互联网` 误触发 Web 路由、证据 Grader 把旁支主题当必答项、回答遇到局部缺证据时整体拒答，以及 Judge 与产品引用/状态契约不一致。
+- 在不改变主图和 Legal RAG 子图节点/边拓扑的前提下，恢复规划器将精确缺口传递给查询变体；混合召回 `top_k` 调为 30、精排候选上限调为 32；增加显式联网意图守卫；收窄证据 Grader 范围；回答按子问题逐项输出；Judge 纳入状态门槛并遵循 `【来源：文件名】` 协议；Langfuse 默认开启；同步 EI-001 数据集契约。
+
+### 验证与结论
+- `cd backend && uv run pytest tests -q -rs`：259 passed、5 skipped（Milvus 集成服务不可达）、1 warning。
+- `compileall`、`feature_list.json` JSON、`git diff --check` 通过；标准 `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000` 启动成功，`GET /api/health` 返回 200，启动日志确认 `llm_provider=deepseek`、Milvus Cloud 可连接。
+- 本轮真实复评在 `prepare --reset` 首份文档 embedding 阶段失败：本机无 Ollama 进程、服务或 11434 监听；只清理了本次失败产生的单条元数据，未把旧报告分数冒充优化后结果。BE-049 继续 `in_progress`，恢复 Ollama 后需重跑共享知识库评测。
+
+### 代码交付
+- 主图与 RAG 子图流程保持不变；工作区代码与文档改动待本轮提交。
+
 ## Session 059：直调 RAG 评测接入 Langfuse（2026-09-19）
 
 ### 本轮已完成

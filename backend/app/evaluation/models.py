@@ -35,10 +35,15 @@ class JudgeScore(BaseModel):
     issues: list[str] = Field(default_factory=list)
     reason: str = ""
 
-    def apply_gate(self, must_cite: bool) -> "JudgeScore":
-        """按统一门槛生成最终 passed 标记。"""
+    def apply_gate(self, must_cite: bool, *, status_match: bool = True) -> "JudgeScore":
+        """按统一门槛生成最终 passed 标记。
+
+        status_match 默认保持旧调用方兼容；真实评测会显式传入状态是否
+        符合数据集契约，避免“回答看起来正确但工作流走错能力”被误报通过。
+        """
         passed = (
-            self.correctness >= 4
+            status_match
+            and self.correctness >= 4
             and self.completeness >= 3
             and self.groundedness >= 4
             and (not must_cite or self.citation_accuracy >= 4)

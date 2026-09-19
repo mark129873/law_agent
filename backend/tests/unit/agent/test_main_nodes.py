@@ -98,6 +98,18 @@ def test_query_router_parses_and_defaults():
     assert result_web_hint["request_type"] == "web"
     assert result_web_hint["web_search_requested"] is False
 
+    # 模型把“现行法律”误判成联网请求时，产品只允许明确网络意图进入 Web；
+    # 否则应回到本地法律知识库，避免按钮关闭时丢掉可回答的问题。
+    implicit_web = json.dumps(
+        {"normalized_query": "我国现行法律是否规定数据必须境内存储",
+         "intent": "web_request", "request_type": "web"},
+        ensure_ascii=False,
+    )
+    guarded = asyncio.run(QueryRouterAgent(LLMService(StreamingFakeLLM([implicit_web])), CONFIG)(
+        _state(question="我国现行法律是否规定每家互联网公司的所有数据都必须永久存储在中国？")))
+    assert guarded["request_type"] == "local_rag"
+    assert guarded["trace"][0]["route_guarded"] is True
+
 
 # ---- OrchestratorAgent / ActionRouterNode ----
 

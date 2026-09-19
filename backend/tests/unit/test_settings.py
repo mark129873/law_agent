@@ -139,14 +139,14 @@ def test_log_dir_relative_path_anchored_to_backend() -> None:
     assert pathlib.Path(settings.resolved_log_dir) == backend_root / "log"
 
 
-def test_langfuse_disabled_by_default_and_keys_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    """BE-043：Langfuse 默认关闭、密钥为空（关闭=零导入零开销）。"""
+def test_langfuse_enabled_by_default_and_keys_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """BE-043：Langfuse 默认开启；缺密钥时装配点降级，密钥字段仍为空。"""
     monkeypatch.delenv("LANGFUSE_ENABLED", raising=False)
     monkeypatch.delenv("LANGFUSE_BASE_URL", raising=False)  # pymilvus load_dotenv 会灌入 .env 值
     monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
     monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
-    assert settings.langfuse_enabled is False
+    assert settings.langfuse_enabled is True
     assert settings.langfuse_public_key == ""
     assert settings.langfuse_secret_key == ""
     assert settings.langfuse_base_url == "https://cloud.langfuse.com"

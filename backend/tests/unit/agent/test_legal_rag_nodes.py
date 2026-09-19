@@ -31,6 +31,7 @@ from app.agent.subgraphs.legal_rag.nodes import (
     SubqueryGeneratorAgent,
     route_strategies,
 )
+from app.agent.subgraphs.legal_rag.prompts.query_expansion import build_expansion_messages
 from app.domain.entities.chunk import DocumentChunk, RetrievedChunk
 from app.domain.entities.llm import ChatMessage
 from app.domain.entities.message import MessageRole
@@ -261,18 +262,18 @@ def test_evidence_ranking_pre_truncates_candidates_by_rrf_before_rerank():
 
     scorer = CountingScorer()
     node = EvidenceRankingNode(RerankerService(scorer), CONFIG)
-    # 构造 30 个去重后的候选：rrf_score 从 0.30 递减到 0.01
+    # 构造 40 个去重后的候选：rrf_score 从 0.40 递减到 0.01
     candidates = [
-        {"chunk_id": f"c{i}", "content": f"内容{i}", "rrf_score": 0.3 - i * 0.01}
-        for i in range(30)
+        {"chunk_id": f"c{i}", "content": f"内容{i}", "rrf_score": 0.4 - i * 0.01}
+        for i in range(40)
     ]
     result = asyncio.run(node(_state(retrieval_candidates=candidates)))
-    # 只有 RRF 前 20 进入 rerank（配置默认 rerank_max_candidates=20）
+    # 只有 RRF 前 rerank_max_candidates 进入精排，避免全量候选拖慢 CPU。
     assert len(scorer.docs_seen) == CONFIG.rerank_max_candidates
-    # 预截断保留的是 RRF 高分档（c0..c19），低分档不占精排预算
+    # 预截断保留的是 RRF 高分档，低分档不占精排预算
     assert scorer.docs_seen[0] == "内容0"
     trace = result["rag_trace"][0]
-    assert trace["input_count"] == 30 and trace["pre_rerank_count"] == 20
+    assert trace["input_count"] == 40 and trace["pre_rerank_count"] == CONFIG.rerank_max_candidates
     assert len(result["ranked_evidence"]) <= CONFIG.rerank_top_k
 
 
@@ -343,6 +344,18 @@ def test_recovery_planner_parses_and_increments_retry():
     result = asyncio.run(agent(_state(retry_count=0, missing_evidence=["计算规则"])))
     assert result["retry_count"] == 1
     assert result["recovery_plan"]["actions"] == ["subquery"]
+    assert result["missing_evidence"] == ["计算规则"]
+
+
+def test_recovery_query_prompt_keeps_exact_missing_evidence_anchors():
+    messages = build_expansion_messages(
+        "专利申请流程",
+        "专利申请流程",
+        ["《专利法》第三十五条的实质审查请求", "七十二小时裁定期限"],
+    )
+    user_content = messages[-1].content
+    assert "第三十五条" in user_content
+    assert "七十二小时" in user_content
 
 
 def test_recovery_planner_default_avoids_executed_strategies():

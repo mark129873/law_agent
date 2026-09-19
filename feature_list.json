@@ -47,7 +47,7 @@
     {
       "id": "BE-030",
       "name": "统一 Plan-and-Execute 问答工作流（Plan→Retrieve→Generate→Verify 闭环）",
-      "description": "LangGraph 图重构为统一规划闭环：plan 节点（PlannerProvider 可独立配置，默认跟随 LLM_PROVIDER）把问题拆解为子查询（单一明确问题退化为单子查询透传）；retrieve 节点逐子查询混合检索后按 chunk id 合并去重；generate 生成回答；verify 节点两档校验——规则档（引用来源存在性、BE-017 信息不足声明、退化检查）+ LLM judge 档（groundedness，列出无依据结论作为建议）。反馈环：依据不足带建议回 plan 重规划、表达契约失败回 generate 重生成、检索空命中回 plan；plan_runs≤2、generate_runs≤2 预算防死循环，超限输出当前答案并 WARN。SSE 新增 plan/regenerating 事件（向后兼容）。",
+      "description": "LangGraph 图重构为统一规划闭环：plan 节点把问题拆解为子查询（单一明确问题退化为单子查询透传，规划器统一复用主 LLM）；retrieve 节点逐子查询混合检索后按 chunk id 合并去重；generate 生成回答；verify 节点两档校验——规则档（引用来源存在性、BE-017 信息不足声明、退化检查）+ LLM judge 档（groundedness，列出无依据结论作为建议）。反馈环：依据不足带建议回 plan 重规划、表达契约失败回 generate 重生成、检索空命中回 plan；plan_runs≤2、generate_runs≤2 预算防死循环，超限输出当前答案并 WARN。SSE 新增 plan/regenerating 事件（向后兼容）。",
       "status": "deprecated",
       "evidence": "2026-09-12：统一 Plan-and-Execute 闭环（PlanNode/VerifyNode 三态判定、多子查询合并、条件边打回受双预算约束、PLANNER_* 配置、SSE plan/regenerating；修复 InvalidUpdateError 与空命中死循环）。pytest 139 passed；真实 E2E 触发一次 contract 打回后正确引用第四十二条。；2026-09-13 被 BE-032~041 一期 Agent 重写整体替代（主图+RAG 子图架构），BE-038 切换装配后本功能退役，历史证据指向 git 81248d3 前后提交。",
       "testedAt": "2026-09-12"
@@ -204,7 +204,7 @@
       "name": "RAG 端到端评测系统",
       "description": "基于现有法律测试文档和 QaWorkflow 评估 RAG 生成质量：工作流直调收集最终回答、证据、引用、grounding 与耗时，LLM Judge 评估正确性、完整性、依据支持和引用准确性；计算 Recall@K、MRR 等辅助指标并输出 JSON/Markdown 报告。仅保留 prepare/workflow，复用当前知识库配置，支持独立 Judge 模型。",
       "status": "in_progress",
-      "evidence": "2026-09-19：直调 workflow 接入 Langfuse，每案例 trace/Judge span/trace_id；真实共享评测 23/23 完成、23/23 trace 可回查，Hit@5/Recall@5=0.913、MRR=0.8406、Judge 通过率=0.5217，质量未达门槛，保持 in_progress。报告 20260919T053533Z-7f6b9aab；commit a004376。"
+      "evidence": "2026-09-19：依据 Langfuse 失败 trace 优化恢复锚点、召回候选、路由、回答与 Judge 门控；全量 259 passed。真实复评因本机无 Ollama embedding 服务未完成，保持 in_progress。"
     },
     {
       "id": "BE-050",
@@ -216,7 +216,7 @@
     {
       "id": "BE-051",
       "name": "DeepSeek LLM Provider",
-      "description": "新增 DeepSeek OpenAI 兼容 Chat Completions Provider，支持主模型、Planner 与评测 Judge 通过环境变量选择；使用 DEEPSEEK_API_KEY 认证，思考模式固定关闭。",
+      "description": "新增 DeepSeek OpenAI 兼容 Chat Completions Provider，主问答统一复用主 LLM，评测 Judge 可通过环境变量独立选择；使用 DEEPSEEK_API_KEY 认证，思考模式固定关闭。",
       "status": "passing",
       "evidence": "2026-09-18：DeepSeek chat/stream 协议测试通过，thinking=disabled；当前 DEEPSEEK_API_KEY 实测 deepseek-chat 返回非空答案，容器主模型选择测试通过。"
     },

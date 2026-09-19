@@ -1,14 +1,20 @@
 # progress.md -- 会话进度日志
 
 ## 当前已验证状态
-- 当前主工作树：`C:\Users\nnnnnn\Desktop\law_agent`（`feature/auto_coder`，HEAD `a004376`）；`codex/archive-cleanup` 隔离 worktree 保留在历史提交 `73255d6`，未合并分支为空。
+- 当前主工作树：`C:\Users\nnnnnn\Desktop\law_agent`（`feature/auto_coder`，本轮 RAG 优化改动待提交）；`codex/archive-cleanup` 隔离 worktree 保留在历史提交 `73255d6`，未合并分支为空。
 - 标准启动路径：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`（`MILVUS_PROVIDER` 默认 `cloud` 读取 `MILVUS_CLOUD_*`；本地 standalone 必须显式设为 `local` 并启动 Docker）
-- 标准验证路径：`cd backend && uv run pytest tests -q -rs`；本轮 257 passed、5 skipped（Milvus 不可达）、1 warning；服务配置齐全后启动并检查 `/api/health`。
+- 标准验证路径：`cd backend && uv run pytest tests -q -rs`；本轮 259 passed、5 skipped（Milvus 集成服务不可达）、1 warning；服务配置齐全后启动并检查 `/api/health`。
 - Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ Reranker 模型统一（BE-046）+ 低质量兜底 Agent 删除（BE-047）+ Tavily Remote MCP 搜索（BE-048/FE-017）全部 passing：主图 + Local Legal RAG 子图 + Tavily Web Search + Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
 - 当前 Reranker：全项目统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；`check_rerank_local.py` 首次下载到根目录 `.model/cross-encoder/ms-marco-MiniLM-L-6-v2` 并执行 CPU 样本打分。本地 `.env` 已切换为该模型并开启 `RERANK_ENABLED=true`；无法使用时仍按既有故障降级契约记录 WARN。
 - 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；grounding 未通过且预算耗尽时直接进入 `final_answer_node`，不再调用额外兜底 LLM；其他重试机制不变
-- 当前最高优先级未完成功能：BE-049 已完成一次共享知识库真实模型评测，但质量未达门槛；报告保留在 `backend/log/evaluation/20260919T051128Z-514ba54b/`，不能将本次结果写成 passing。
-- 当前 blocker：最新真实 workflow 23/23 完成且无基础设施失败，但 `status_match_rate=0.5217`、`judge_pass_rate=0.5217`；部分本地证据不足/联网搜索关闭案例与当前产品契约或数据集预期不一致，另有检索证据不足案例待决定是否修正数据集或查询链路。Langfuse 已能按案例回查完整 trace；前端未改动。
+- 当前最高优先级未完成功能：BE-049 已完成一次共享知识库真实模型评测，但质量未达门槛；报告保留在 `backend/log/evaluation/20260919T053533Z-7f6b9aab/`，不能将本次结果写成 passing。
+- 当前 blocker：本轮基于 Langfuse 失败 trace 完成查询恢复、路由、回答和 Judge 优化，但重新 `prepare --reset` 时本机没有 Ollama embedding 服务（11434 无监听），因此没有新的真实质量分数；BE-049 继续 `in_progress`，前端未改动。
+
+### Session 060（Langfuse 驱动的 RAG 提示词与评测门控优化）（2026-09-19）
+- 根因：Langfuse LF-002 等 trace 显示恢复查询丢失专利法条号等精确锚点；`互联网` 被误判为联网意图；Judge 未把期望/实际状态纳入通过门槛，且对产品允许的来源文件引用过严。
+- 最小改动：恢复规划器把法条号、期限、主体和条件传入下一轮查询变体；混合召回由 20 扩至 30、精排候选上限为 32；路由增加显式联网意图守卫；证据 Grader 改为问题范围判断；回答按子问题逐项作答；Judge 对状态与 `【来源：文件名】` 协议统一评分；同步 EI-001 评测契约。主图和 RAG 子图拓扑未变，Langfuse 默认开启。
+- 验证：全量 `uv run pytest tests -q -rs` 为 259 passed、5 skipped、1 warning；compileall、JSON、`git diff --check` 通过；标准 `uv run uvicorn` 启动成功，`GET /api/health` 返回 200。
+- 真实复评：`prepare --reset` 在首份文档 embedding 阶段因本机无 Ollama 服务失败，已删除本次产生的失败元数据记录，未改写已有真实评测指标；下一轮需恢复 Ollama 后再验证质量变化。
 - 法律条文边界优先 Chunk 切分（BE-052）已 passing：识别行首法条标题，短法条可合并，超长法条保持原子性；普通文本仍使用原有段落与滑窗规则。
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md、progress-archive-031-040.md（Session 001~040 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
 

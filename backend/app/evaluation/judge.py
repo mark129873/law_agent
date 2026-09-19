@@ -48,7 +48,10 @@ class EvaluationJudge:
             reason="Judge 输出不可解析，按保守分数记录",
         )
         score = await self._llm.structured_invoke(messages, JudgeScore, default=default)
-        return score.apply_gate(case.must_cite)
+        return score.apply_gate(
+            case.must_cite,
+            status_match=actual_status == case.expected_status,
+        )
 
 
 _SYSTEM_PROMPT = """你是一个严格、保守的 RAG 评测 Judge。
@@ -70,8 +73,12 @@ _SYSTEM_PROMPT = """你是一个严格、保守的 RAG 评测 Judge。
 评分规则：
 - correctness：是否回答了问题，是否符合提供的答案要点；
 - completeness：是否覆盖主要答案要点；
-- groundedness：事实是否能在提供的证据中找到依据；没有证据时不能凭常识补齐；
-- citation_accuracy：引用是否来自提供的证据且与回答对应；不要求引用的直接回答可给5。
+- groundedness：需要本地证据的回答，其事实是否能在提供的证据中找到依据；
+  当 expected_sources 为空且 must_cite=false 时，不因没有本地证据扣分，
+  只检查回答是否符合答案要点且没有编造具体法律事实；
+- citation_accuracy：引用来源是否来自提供的证据且与回答对应。产品协议只要求
+  `【来源：文件名】`，来源文件一致即可，不要求额外写条文编号；不要求引用的直接回答可给5；
+- expected_status 与 actual_status 必须一致，否则本案例不通过，即使回答文本部分正确。
 """
 
 
@@ -110,4 +117,3 @@ def _build_user_prompt(
     return "请评估以下数据块，不要补充数据块之外的事实：\n" + json.dumps(
         payload, ensure_ascii=False, indent=2
     )
-

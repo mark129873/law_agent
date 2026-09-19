@@ -152,9 +152,9 @@ class Settings(BaseSettings):
     reranker_device: str = "cpu"
 
     # ---- Langfuse 链路追踪（BE-043）----
-    # 总开关：默认关闭——关闭时 langfuse 模块零导入、零开销，纯本地运行；
-    # 开启但密钥缺失时装配点 WARN 降级为关闭（可观测故障不阻断业务）。
-    langfuse_enabled: bool = False
+    # 总开关默认开启，便于直接回查真实问答与评测；显式关闭时 langfuse
+    # 模块零导入、零开销。开启但密钥缺失时装配点 WARN 降级为关闭。
+    langfuse_enabled: bool = True
     # Langfuse 服务地址：云版或自托管实例（如 http://localhost:3000）；
     # 变量名与 langfuse SDK 自身的 LANGFUSE_BASE_URL 口径一致
     langfuse_base_url: str = "https://cloud.langfuse.com"

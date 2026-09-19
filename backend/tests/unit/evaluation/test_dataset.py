@@ -18,6 +18,7 @@ def test_repository_evaluation_dataset_is_complete_and_versioned() -> None:
         "local_factual",
         "multi_condition",
         "evidence_insufficient",
+        "capability_control",
         "adversarial",
         "direct_control",
     }

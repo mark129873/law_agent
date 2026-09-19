@@ -52,6 +52,9 @@ class RecoveryPlannerAgent:
                 "reason": plan.reason,
                 "missing_evidence": plan.missing_evidence,
             },
+            # 将规划器整理后的缺口传给下一轮查询变体；没有整理结果时
+            # 保留 Grader 原始缺口，避免恢复 Prompt 丢失法条号等锚点。
+            "missing_evidence": list(plan.missing_evidence or missing),
             "retry_count": retry,
             "rag_trace": [
                 make_trace(

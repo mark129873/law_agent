@@ -318,7 +318,7 @@ retrieval_planner_agent（检索计划，四类策略多选）
 | `MILVUS_URI` | standalone Endpoint（`local` 时使用） | http://127.0.0.1:19530 |
 | `MILVUS_TOKEN` | standalone 或兼容服务 token（`local` 时使用） | 空 |
 | `MILVUS_COLLECTION_NAME` | Milvus 集合名 | `law_chunks` |
-| `LANGFUSE_ENABLED` | true / false | false（BE-043：Langfuse 链路追踪开关，关闭零导入零开销） |
+| `LANGFUSE_ENABLED` | true / false | true（BE-043：Langfuse 链路追踪默认开启；缺密钥时 WARN 降级） |
 | `LANGFUSE_BASE_URL` | Langfuse 服务地址 | https://cloud.langfuse.com |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Langfuse 项目密钥 | 空（开启但缺失 → WARN 降级关闭，不阻断业务） |
 | `TAVILY_MCP_URL` | Tavily Remote MCP Streamable HTTP 地址 | `https://mcp.tavily.com/mcp/` |
@@ -401,7 +401,7 @@ npm run build                                      # tsc 类型检查 + 生产�
 - **Web Search**：`agent/web/web_search_entry_node` 通过 `WebSearchPort` 调用 Tavily Remote MCP；若未来增加多轮 web research，只扩展该能力内部节点/子图，主图仍使用统一 `CapabilityResult` 与 observation 接口；`suggested_external_queries` 继续作为后续扩展预留。
 - **Plugin / Skill Runtime（二期）**：把 `agent/plugins/plugin_stub_node` 替换为 runtime 实现，约束同上；一期 Stub 不做任何动态加载。
 - **新文档格式**：实现 `DocumentParser` 策略并注册进工厂；**新 LLM Provider**：实现 `LLMProvider`（chat + stream + model_name）+ 容器加分支，密钥仅环境注入；**新 Agent 节点**：实现节点类并在 AgentGraphBuilder/build_legal_rag_graph 接线 + constants.py 登记中文标签（status 事件文案）。
-- **Rerank**：统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；GPU 机器设 `RERANKER_DEVICE=cuda`，CPU 机器使用 `cpu`。`rerank_max_candidates=20` 控制精排输入规模。`RERANK_ENABLED=false` 是可观测的主动关闭状态，证据仍按 Milvus RRF 序输出；只有 CrossEncoder 加载/推理异常才记为 `reranker_degraded`。
+- **Rerank**：统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；GPU 机器设 `RERANKER_DEVICE=cuda`，CPU 机器使用 `cpu`。混合检索默认返回 30 条/查询，`rerank_max_candidates=32` 控制精排输入规模，以免恢复查询召回的法条在全局粗排时过早丢失。`RERANK_ENABLED=false` 是可观测的主动关闭状态，证据仍按 Milvus RRF 序输出；只有 CrossEncoder 加载/推理异常才记为 `reranker_degraded`。
 - **前端**：遵循 §7 API 契约与 SSE 协议；开发期统一请求相对路径 `/api/...` 由 Vite 代理，前端代码不感知后端地址。
 
 ### 10.1 RAG 端到端评测（BE-049）
@@ -425,6 +425,12 @@ npm run build                                      # tsc 类型检查 + 生产�
 当 `LANGFUSE_ENABLED=true` 时，直调评测为每条案例创建 `evaluation-<case_id>` trace，
 复用节点 span 与 LLM generation 采集，并将 Judge 调用放入 `evaluation_judge` span；
 `EvaluationCaseResult.trace_id` 写入报告，供失败案例回查完整 Prompt、路由、检索事件和模型输出。
+
+评测优化约束：RAG 子图的节点与边拓扑保持不变，但恢复规划器会把证据缺口中的
+法条号、期限、主体等检索锚点传给下一轮查询变体；混合检索保留更多融合候选后再统一精排。
+Judge 按产品现有的 `【来源：文件名】` 引用协议评分，不要求模型额外输出条文编号；
+同时把 `actual_status` 与 `expected_status` 纳入通过门槛。`expected_sources=[]` 且
+`must_cite=false` 的直接回答或能力说明不因没有本地证据而被扣 groundedness。
 
 评测复用 `Settings` 当前配置的 `MILVUS_COLLECTION_NAME` 和 `SQLITE_DB_PATH`，不额外创建集合或数据库，
 其中工作流直接访问当前向量库，`prepare` 经服务端文档 API 维护元数据与向量。评测默认不清理数据，只有显式执行
@@ -483,7 +489,7 @@ query_router=意图判定；orchestrator=编排决策；strategy_router=选中�
 | §44~46 | 图构建骨架；路由函数放条件边（预算检查归路由不归节点） | `agent/graph.py`、`legal_rag/graph.py` |
 | §47 | 错误处理矩阵：Milvus 节点内重试 1 次→全失败置 RETRIEVAL_ERROR、禁无限 loop；Reranker 降级 RRF 序记 degraded；LLM 结构化输出解析重试 1 次→安全默认（Planner=original、Grader=insufficient 防误判充分） | 各节点/service 实现 + 测试锁定 |
 | §48 | 节点 Trace 统一字段（node/status/duration_ms + LLM model/latency + RAG query/candidate/dedup/rerank/retry 计数） | `utils/trace_utils.py` + Langfuse |
-| §49 | 性能约束：检索查询 ≤8、hybrid top-k=20、原始候选 ≈160、rerank top-10；不把全量候选直接送 Answer LLM | `legal_rag/config.py` |
+| §49 | 性能约束：检索查询 ≤8、hybrid top-k=30、原始候选 ≤240、rerank top-10；不把全量候选直接送 Answer LLM | `legal_rag/config.py` |
 | §50 | 测试策略：主图 E2E 覆盖 RAG 成功/直接回答/证据不足/Tavily MCP 联网搜索/按钮关闭/grounding 重试复用/Plugin NOT_IMPLEMENTED | `tests/integration/agent/` |
 | §51 | Mock 要求：Fake 服务遵循领域端口，与生产实现互换验证同一契约 | `tests/fakes.py` |
 | §54/§55 | 完成标准（联网搜索与既有主图路径均可运行）；二期扩展=扩展 Web research 或替换 Plugin Stub，主图零重构 | 本文档 §5/§10 |

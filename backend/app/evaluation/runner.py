@@ -151,7 +151,9 @@ async def evaluate_workflow_cases(
                     name="evaluation_result",
                     payload={
                         "case_id": case.id,
+                        "expected_status": case.expected_status,
                         "actual_status": actual_status,
+                        "status_match": str(result.status_match),
                         "grounding_passed": str(grounding),
                         "evidence_count": str(len(evidence)),
                         "citation_count": str(len(citations)),
@@ -172,7 +174,9 @@ async def evaluate_workflow_cases(
                     output=answer,
                     metadata={
                         "evaluation_case_id": case.id,
+                        "expected_status": case.expected_status,
                         "actual_status": actual_status,
+                        "status_match": str(result.status_match),
                         "grounding_passed": str(grounding),
                         "judge_passed": str(result.judge.passed if result.judge else False),
                     },

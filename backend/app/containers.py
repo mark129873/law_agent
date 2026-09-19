@@ -162,8 +162,8 @@ def _build_reranker(settings: Settings) -> RerankerService:
 def _build_trace_sink_factory(settings: Settings) -> Callable[[], TraceSink | None] | None:
     """按配置构造 trace 汇工厂（BE-043）。
 
-    关闭（默认）返回 None：ChatService 不构造任何观测实现，langfuse
-    模块零导入零开销；开启但缺密钥时工厂内部 WARN 降级为恒 None
+    显式关闭返回 None：ChatService 不构造任何观测实现，langfuse
+    模块零导入零开销；默认开启但缺密钥时工厂内部 WARN 降级为恒 None
     （可观测故障不阻断业务，见 infrastructure/trace/langfuse_sink.py）。
     """
     if not settings.langfuse_enabled:
@@ -262,7 +262,7 @@ def create_container(settings: Settings | None = None) -> DIContainer:
             conversation_service=c.resolve(ConversationService),
             # 与评测器复用同一个领域工作流装配，确保两条入口不会漂移。
             qa_graph=c.resolve(QaWorkflow),
-            # Langfuse trace 汇工厂（BE-043）：按 LANGFUSE_ENABLED 注入，关闭为 None
+            # Langfuse trace 汇工厂（BE-043）：默认注入，显式关闭时为 None
             trace_sink_factory=_build_trace_sink_factory(settings),
         ),
         singleton=True,

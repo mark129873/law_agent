@@ -41,4 +41,4 @@ def test_judge_pass_gate_is_recomputed_from_scores() -> None:
 
     assert score.apply_gate(must_cite=True).passed is False
     assert score.apply_gate(must_cite=False).passed is True
-
+    assert score.apply_gate(must_cite=False, status_match=False).passed is False
