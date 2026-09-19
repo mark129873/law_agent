@@ -18,6 +18,11 @@
 - 验证：全量 pytest 257 passed、5 skipped、1 warning；CLI help、compileall、JSON、冲突标记和 diff 检查通过。
 - BE-049 仍为 `in_progress`；真实共享 Milvus/LLM/Judge 质量评测尚未重跑，旧版基线不作为当前配置结论。
 
+### Session 056（环境配置字段同步）（2026-09-19）
+- 按当前 `Settings` 同步本地 `backend/.env` 与 `backend/.env.example`：补齐服务、日志、数据库、Milvus、Planner/Judge、Reranker、Langfuse 和 Tavily 字段；保留本地密钥，不提交 `.env`。
+- 将 DeepSeek 默认模型、Tavily 搜索深度和 Reranker 示例路径说明同步到当前实现；README 与 ARCHITECTURE 的 DeepSeek 默认模型改为 `deepseek-v4-flash`。
+- 验证：42 个配置字段完整覆盖 `.env`/`.env.example`；Settings 实际解析通过；配置与评测相关测试 27 passed，`git diff --check` 通过。
+
 ### Session 053（评测收敛为 RAG 生成质量）（2026-09-19）
 - 按用户确认删除 api-smoke 子命令、实现、专用测试和报告渲染；文档导入迁移到 `app/evaluation/corpus.py`，保留 prepare/workflow。
 - README 改为「RAG 评测」，说明 Judge 四维评分、门槛、辅助指标和报告；同步架构、产品、可靠性与功能清单，历史基线仅展示 RAG 质量结果。

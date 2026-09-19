@@ -304,7 +304,7 @@ retrieval_planner_agent（检索计划，四类策略多选）
 | `VECTOR_STORE_PROVIDER` | milvus（当前唯一已启用 Provider） | milvus |
 | `LLM_PROVIDER` | ollama / glm / deepseek | ollama |
 | `DEEPSEEK_BASE_URL` | DeepSeek API 地址 | https://api.deepseek.com |
-| `DEEPSEEK_MODEL` | DeepSeek 对话模型 | `deepseek-chat` |
+| `DEEPSEEK_MODEL` | DeepSeek 对话模型 | `deepseek-v4-flash` |
 | `DEEPSEEK_API_KEY` | DeepSeek API Key（仅环境变量或 `.env`） | 空（`LLM_PROVIDER=deepseek` 时必填） |
 | `PLANNER_PROVIDER` | follow / ollama / glm / deepseek | follow（跟随 LLM_PROVIDER） |
 | `PLANNER_MODEL` | 模型名 | 空（用所选 Provider 的默认模型） |

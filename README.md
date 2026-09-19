@@ -112,7 +112,7 @@ ollama serve
 ollama pull qwen3.5:4b
 ollama pull nomic-embed-text:latest
 ```
-若使用 GLM，设置 `LLM_PROVIDER=glm` 和 `GLM_API_KEY`；若使用 DeepSeek，设置 `LLM_PROVIDER=deepseek` 和 `DEEPSEEK_API_KEY`，默认模型为 `deepseek-chat`，思考模式固定关闭。
+若使用 GLM，设置 `LLM_PROVIDER=glm` 和 `GLM_API_KEY`；若使用 DeepSeek，设置 `LLM_PROVIDER=deepseek` 和 `DEEPSEEK_API_KEY`，默认模型为 `deepseek-v4-flash`，思考模式固定关闭。
 
 
 ### 5. 启动前端

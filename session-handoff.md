@@ -12,6 +12,18 @@
 - CLI help、compileall、feature_list JSON、冲突标记和 `git diff --check` 均通过。
 - BE-049 继续 `in_progress`：真实共享 Milvus/LLM/Embedding/Reranker/Judge 评测尚未重跑，旧版隔离配置基线不代表当前配置。
 
+## Session 056：环境配置字段同步（2026-09-19）
+
+### 本轮已完成
+- 对照 `backend/app/config/settings.py` 补齐 `backend/.env` 的显式配置字段，并同步 `.env.example` 的安全占位和当前默认值。
+- 当前本地配置使用 DeepSeek `deepseek-v4-flash`、Milvus Cloud、`law_chunks`、CPU MiniLM Reranker、Langfuse 和 Tavily；现有密钥仅保留在本地 `.env`。
+- README 与 ARCHITECTURE 的 DeepSeek 默认模型说明已同步；未引入 `WEB_SEARCH_ENABLED` 等已删除配置。
+
+### 验证与结论
+- 42 个 Settings 字段均可在 `.env` 与 `.env.example` 找到；Settings 实际解析成功。
+- `tests/unit/test_settings.py` 与评测单测共 27 passed；`git diff --check` 通过。
+- `.env` 仍由 `.gitignore` 排除，不提交密钥或本地连接地址。
+
 ## Session 053：RAG 生成质量评测（2026-09-19）
 
 ### 本轮已完成
