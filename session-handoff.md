@@ -1,5 +1,20 @@
 # 会话交接
 
+## Session 052：评测复用业务存储（2026-09-19）
+
+### 本轮目标
+- 按用户要求，RAG 评测不再使用独立 Milvus 集合或 SQLite 数据库，直接跟随当前服务配置。
+
+### 本轮已完成
+- 文档先行：同步 README、PRODUCT、ARCHITECTURE、RELIABILITY、`.env.example`、feature_list 和历史基线说明。
+- 代码移除 `law_agent_eval*` 强制校验与评测专用配置注入；`prepare` 的全量删除保留为显式 `--reset`。
+- 评测单测 13 passed；全量后端测试 255 passed、5 skipped、1 warning；compileall、CLI help、JSON 和 `git diff --check` 通过。
+- 未启动 Docker，Docker 保持关闭；已提交 `779eec9 refactor: reuse app storage for rag evaluation`。
+
+### 当前风险
+- 共享存储意味着 `prepare --reset` 会删除当前数据库中的全部文档及向量，不能在不可重建的知识库执行。
+- `docs/evaluation-baseline.md` 的旧报告仍记录隔离配置，只作为历史结果，需重新运行共享配置后才能形成新基线。
+
 ## Session 051：明确测试环境清理步骤（2026-09-19）
 
 ### 本轮已完成

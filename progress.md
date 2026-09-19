@@ -7,7 +7,7 @@
 - Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ Reranker 模型统一（BE-046）+ 低质量兜底 Agent 删除（BE-047）+ Tavily Remote MCP 搜索（BE-048/FE-017）全部 passing：主图 + Local Legal RAG 子图 + Tavily Web Search + Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
 - 当前 Reranker：全项目统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；`check_rerank_local.py` 首次下载到根目录 `.model/cross-encoder/ms-marco-MiniLM-L-6-v2` 并执行 CPU 样本打分。本地 `.env` 已切换为该模型并开启 `RERANK_ENABLED=true`；无法使用时仍按既有故障降级契约记录 WARN。
 - 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；grounding 未通过且预算耗尽时直接进入 `final_answer_node`，不再调用额外兜底 LLM；其他重试机制不变
-- 当前最高优先级未完成功能：BE-049 RAG 端到端评测代码、数据集、真实隔离集合运行和脱敏基线已具备；仍需处理真实 GLM 调用稳定性后才能把质量门禁标为 passing；其余 BE-001~048 与 FE-001~017 保持 passing 或 deprecated
+- 当前最高优先级未完成功能：BE-049 RAG 端到端评测代码、数据集、真实共享知识库运行和脱敏基线已具备；仍需处理真实 GLM 调用稳定性后才能把质量门禁标为 passing；其余 BE-001~048 与 FE-001~017 保持 passing 或 deprecated
 - 当前 blocker：Milvus、Embedding 和 API/SSE 均已恢复；真实 workflow 23 条中 13 条出现 GLM `ConnectError`/HTTP 400，当前属于外部模型调用稳定性 blocker，不把失败样本计入检索质量分数。前端未改动，沿用既有 `npm run build` 与 API/组件契约验证。
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md、progress-archive-031-040.md（Session 001~040 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
 
@@ -15,6 +15,12 @@
 - 新增 `MILVUS_PROVIDER=cloud|local`，默认 cloud；cloud 使用 `MILVUS_CLOUD_URI/TOKEN`，local 使用 `MILVUS_URI/TOKEN`，不再按 URI 是否存在自动回退。
 - 新增 DeepSeek OpenAI 兼容 Provider，可用于主 LLM、Planner 和 Judge；固定发送 `thinking.type=disabled`，API Key 只从环境注入。
 - 验证：定向 29 passed；全量 `uv run pytest tests -q -rs` 为 255 passed、5 skipped、1 warning；当前 `.env` 云端 Milvus 初始化成功，DeepSeek `deepseek-chat` 实际返回非空答案；compileall、git diff --check 通过。
+
+### Session 052（评测复用业务存储）（2026-09-19）
+- RAG 评测改为复用当前 `MILVUS_COLLECTION_NAME` 和 `SQLITE_DB_PATH`，删除 `law_agent_eval*` 集合强制校验及评测专用启动配置。
+- `prepare` 默认只追加测试文档；全量清理改为显式 `prepare --reset`，并在 README、PRODUCT、ARCHITECTURE、RELIABILITY 和 `.env.example` 标注其破坏性。
+- 历史真实结果保留在 `docs/evaluation-baseline.md`，明确它来自旧版隔离配置，不冒充当前共享知识库基线。
+- 验证：评测单测 13 passed；全量 `uv run pytest tests -q -rs` 为 255 passed、5 skipped、1 warning；compileall、CLI help、JSON 和 `git diff --check` 通过；未启动 Docker。
 
 ### Session 051（明确测试环境清理步骤）（2026-09-19）
 - 更新 `docs/RELIABILITY.md`：明确下次 Codex 测试前先删除当前 `SQLITE_DB_PATH` 对应的 SQLite 测试数据库及 WAL/SHM 文件，再执行 `uv run python scripts/reset_milvus.py --yes` 删除当前配置的 Milvus 测试集合。

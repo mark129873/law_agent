@@ -1,11 +1,15 @@
-# RAG 评测真实基线
+# RAG 评测历史基线（旧版隔离配置）
+
+> 本报告生成于评测改为复用当前知识库之前。旧版运行使用了独立集合和 SQLite
+> 路径；当前实现已改为跟随 `Settings` 的业务配置，因此本报告仅作历史记录，
+> 不作为当前共享知识库配置的质量基线。
 
 ## 运行范围
 
 - 日期：2026-09-18
 - 数据源：`backend/tests/data_source/` 当前保留的 5 份法律文档
 - 数据集：`backend/tests/evaluation/rag_cases.jsonl`，23 条案例
-- Milvus 集合：`law_agent_eval`（与正式集合 `law_chunks` 隔离）
+- 旧版 Milvus 集合：`law_agent_eval`（当时与正式集合 `law_chunks` 隔离）
 - 主模型/Judge：GLM `glm-4.5-air`
 - Embedding：`nomic-embed-text:latest`
 - Reranker：`cross-encoder/ms-marco-MiniLM-L-6-v2`，CPU

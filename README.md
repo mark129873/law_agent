@@ -126,12 +126,11 @@ npm run dev
 ## RAG 评测演示文档
 
 项目提供真实 LLM 端到端评测，并生成检索质量、引用一致性、grounding 和失败案例的演示文档。
-评测使用独立 Milvus 集合和 SQLite 数据库。先用下面的配置启动后端：
+评测直接复用当前后端配置的 Milvus 集合和 SQLite 数据库，确保评测反映正在使用的知识库。
+使用默认配置启动后端即可：
 
 ```powershell
 cd backend
-$env:MILVUS_COLLECTION_NAME="law_agent_eval"
-$env:SQLITE_DB_PATH="data/law_agent_eval.db"
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -139,15 +138,23 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ```bash
 cd backend
-uv run python scripts/evaluate_rag.py prepare --base-url http://127.0.0.1:8000 --reset-eval
 uv run python scripts/evaluate_rag.py workflow --cases tests/evaluation/rag_cases.jsonl
 uv run python scripts/evaluate_rag.py api-smoke --base-url http://127.0.0.1:8000
 ```
 
+如果当前知识库还没有测试文档，先执行：
+
+```bash
+uv run python scripts/evaluate_rag.py prepare --base-url http://127.0.0.1:8000
+```
+
+`prepare` 会向当前知识库追加测试文档；只有明确需要重建当前知识库时才使用
+`prepare --reset`，该参数会删除当前 SQLite 数据库中的全部文档及其向量内容，不能当作普通评测前置步骤。
+
 评测结果写入 `backend/log/evaluation/`，包含 `report.json` 和 `report.md`；原始结果不提交 Git。
 工作流评测读取真实 `QaWorkflow` 内部证据，HTTP 冒烟验证 SSE 顺序、来源持久化和错误边界。
 LLM Judge 可通过 `EVAL_JUDGE_PROVIDER` 与 `EVAL_JUDGE_MODEL` 独立配置。
-最近一次脱敏真实基线见 [`docs/evaluation-baseline.md`](docs/evaluation-baseline.md)。
+旧版隔离配置的脱敏真实结果见 [`docs/evaluation-baseline.md`](docs/evaluation-baseline.md)；共享当前知识库后应重新生成基线。
 
 ## 项目结构
 

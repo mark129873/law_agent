@@ -119,7 +119,7 @@ class Settings(BaseSettings):
     milvus_cloud_token: str = ""
     milvus_uri: str = "http://127.0.0.1:19530"
     milvus_token: str = ""
-    # 业务默认集合与评测集合通过配置隔离，避免评测清理正式知识库。
+    # 业务问答与 RAG 评测复用同一集合，保证评测反映当前知识库。
     milvus_collection_name: str = "law_chunks"
 
     # ---- 大模型 Provider ----
