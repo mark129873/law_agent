@@ -60,9 +60,9 @@ Frontend (React)  --HTTP/SSE-->  FastAPI
 ## 快速开始
 ### 环境要求
 - Python `>=3.11`, 以及环境变量管理工具 [uv]
-- Milvus Cloud Endpoint + API Key（默认）；或 Docker Desktop / Docker Compose（本地 standalone）
+- Milvus Cloud Endpoint + API Key（默认）；或 Docker Desktop（本地 Milvus standalone）
 - Node.js 与 npm
-- `llama` CLI（提供 `llama serve`），以及 Ollama 或可访问的 GLM/DeepSeek API
+- llama serve
 
 ### 1. 克隆项目并创建配置
 ```bash
@@ -81,17 +81,9 @@ MILVUS_CLOUD_TOKEN=<zilliz-api-key>
 MILVUS_COLLECTION_NAME=law_chunks
 ```
 
-`MILVUS_CLOUD_TOKEN` 使用 Zilliz Cloud API Key 原文，不要加 `Bearer`。`MILVUS_PROVIDER` 默认是 `cloud`，不会根据 URI 是否存在自动推断。
-
-如需改用本地 standalone，设置 `MILVUS_PROVIDER=local`，再填写 `MILVUS_URI=http://127.0.0.1:19530` 和可选的 `MILVUS_TOKEN`，并启动：
-
-```bash
-docker compose -f backend/docker-compose.yml up -d
-```
-
 ### 3. 配置并启动 llama serve 模型服务
 
-在 `backend/.env` 配置两个 GGUF 路径和服务地址：
+在 `backend/.env` 配置Embedding以及 Reranker GGUF 路径和服务地址, 并启动：
 
 ```dotenv
 EMBEDDING_BASE_URL=http://127.0.0.1:11434
@@ -101,9 +93,6 @@ RERANKER_MODEL_PATH=C:\Users\<user>\Desktop\model\qwen3-reranker-0.6b-q8_0.gguf
 LLAMA_DEVICE=Vulkan1
 LLAMA_CONTEXT_SIZE=4096
 ```
-
-从 `backend` 目录运行启动器；它会为两个模型分别启动 `llama serve --embedding` 和 `llama serve --rerank`。`LLAMA_DEVICE` 非空时追加 `--device <值>`，留空则不传该参数；`LLAMA_CONTEXT_SIZE` 默认使用 4096，设为 0 则不传 `--ctx-size`：
-
 ```bash
 cd backend
 uv sync
@@ -116,13 +105,9 @@ uv run python scripts/start_llama_servers.py
 cd backend
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
-当前默认使用 DeepSeek，需配置 `DEEPSEEK_API_KEY`；也可切换其他 Provider。若使用 Ollama：
-```bash
-ollama serve
-ollama pull qwen3.5:4b
-```
-若使用 GLM，设置 `LLM_PROVIDER=glm` 和 `GLM_API_KEY`；若切换为 DeepSeek，设置 `LLM_PROVIDER=deepseek` 和 `DEEPSEEK_API_KEY`，默认模型为 `deepseek-v4-flash`，思考模式固定关闭。
-
+当前默认使用 DeepSeek，需配置DEEPSEEK_API_KEY；并设置LLM_PROVIDER=deepseek
+若使用 Ollama, 则可以拉取qwen3.5:4b, 并设置LLM_PROVIDER=ollama
+若使用 GLM，则需配置 GLM_API_KEY，并设置 LLM_PROVIDER=glm
 
 ### 5. 启动前端
 ```bash
@@ -131,59 +116,6 @@ npm install
 npm run dev
 ```
 - 访问：<http://localhost:5173>
-
-## RAG 评测
-
-评测直接调用真实 `QaWorkflow`，根据测试问题、答案要点、检索证据和最终回答评估 RAG 生成质量。
-真实质量评测固定使用以下链路：DeepSeek 主 LLM、当前配置的 Milvus、llama serve Qwen3 Reranker
-和 Qwen3 Embedding（llama serve 在此路径负责向量化与重排，不负责问答或 Judge）。主 LangGraph 与 RAG
-子图按生产装配执行，不切换到其他 LLM Provider：
-
-- 主 LLM：`LLM_PROVIDER=deepseek`；
-- Embedding：`EMBEDDING_BASE_URL` + `EMBEDDING_MODEL_PATH`，入库和查询必须使用同一 llama serve 服务；
-- Reranker：`RERANK_ENABLED=true`，服务地址由 `RERANKER_BASE_URL` 指定，模型由 `RERANKER_MODEL_PATH` 指定；
-- 向量库：`MILVUS_PROVIDER` 与 `MILVUS_COLLECTION_NAME` 的当前配置。
-
-`workflow` 入口会在装配前拒绝 Ollama/GLM 主 LLM、Ollama/GLM Judge 和关闭 Reranker 的配置，
-避免把其他 Provider 的协议测试结果混入真实 RAG 质量结论。通用 Provider 测试仍独立保留。
-这些依赖可用且测试文档已入库后，无需启动 HTTP 服务即可执行：
-
-```bash
-cd backend
-uv run python scripts/evaluate_rag.py workflow --cases tests/evaluation/rag_cases.jsonl
-```
-
-数据集位于 `backend/tests/evaluation/rag_cases.jsonl`，包含问题、期望来源、答案要点和引用要求。
-LLM Judge 对每条回答按 0–5 分评分：
-
-| 维度 | 评估内容 |
-| --- | --- |
-| 正确性 | 回答是否符合问题和答案要点 |
-| 完整性 | 是否覆盖主要答案要点 |
-| 依据支持 | 回答中的事实是否有检索证据支撑 |
-| 引用准确性 | 引用是否来自检索证据并与回答对应 |
-
-Judge 通过条件为正确性 ≥4、完整性 ≥3、依据支持 ≥4；要求引用的案例还需引用准确性 ≥4。
-报告同时记录 grounding 校验结果、基于来源文件名的引用精确率/召回率，
-以及 Hit@K、Recall@K、MRR、耗时和失败案例，辅助定位生成质量问题。
-Judge 默认通过 `EVAL_JUDGE_PROVIDER=follow` 复用 DeepSeek 主 LLM；如需独立 Judge，质量评测只允许
-`EVAL_JUDGE_PROVIDER=deepseek`，并可用 `EVAL_JUDGE_MODEL` 覆盖模型名。配置枚举中的其他 Provider
-仍服务于通用装配/协议测试，但不属于真实 RAG 质量评测。
-
-如果当前知识库还没有数据集对应的测试文档，先按“快速开始”启动后端，再在另一个终端导入：
-
-```bash
-cd backend
-uv run python scripts/evaluate_rag.py prepare --base-url http://127.0.0.1:8000
-```
-
-`prepare` 会向当前知识库追加测试文档；只有明确需要重建当前知识库时才使用
-`prepare --reset`，该参数会删除当前 SQLite 数据库中的全部文档及其向量内容，不能当作普通评测前置步骤。
-
-结果写入 `backend/log/evaluation/<run_id>/`：`report.json` 保存逐题回答、证据和 Judge 评分，
-`report.md` 提供指标汇总与案例结果；原始报告不提交 Git。
-命令成功退出表示报告已生成，回答质量是否达标应查看报告中的分数、通过率和失败案例。
-历史脱敏基线见 [`docs/evaluation-baseline.md`](docs/evaluation-baseline.md)，不代表当前配置下的质量分数。
 
 ## 项目结构
 
@@ -212,6 +144,47 @@ law_agent/
 │   └── RELIABILITY.md         # 日志、观测和干净环境规范
 └── README.md
 ```
+
+## RAG 质量评测
+
+评测直接调用 `QaWorkflow`，根据测试问题、答案要点、检索证据和最终回答评估 RAG 生成质量。
+真实质量评测固定使用以下链路：DeepSeek 主 LLM、当前配置的 Milvus、llama serve Qwen3 Reranker
+和 Qwen3 Embedding。
+
+```bash
+cd backend
+uv run python scripts/evaluate_rag.py workflow --cases tests/evaluation/rag_cases.jsonl
+```
+
+数据集位于 `backend/tests/evaluation/rag_cases.jsonl`，包含问题、期望来源、答案要点和引用要求。
+LLM Judge 对每条回答按 0–5 分评分：
+
+| 维度 | 评估内容 |
+| --- | --- |
+| 正确性 | 回答是否符合问题和答案要点 |
+| 完整性 | 是否覆盖主要答案要点 |
+| 依据支持 | 回答中的事实是否有检索证据支撑 |
+| 引用准确性 | 引用是否来自检索证据并与回答对应 |
+
+Judge 通过条件为正确性 ≥4、完整性 ≥3、依据支持 ≥4；要求引用的案例还需引用准确性 ≥4。
+报告同时记录 grounding 校验结果、基于来源文件名的引用精确率/召回率，
+以及 Hit@K、Recall@K、MRR、耗时和失败案例，辅助定位生成质量问题。
+
+Judge 默认通过 `EVAL_JUDGE_PROVIDER=follow` 复用 DeepSeek 主 LLM；
+如需独立 Judge，则更改EVAL_JUDGE_PROVIDER, EVAL_JUDGE_MODEL
+
+
+```bash
+cd backend
+uv run python scripts/evaluate_rag.py prepare --base-url http://127.0.0.1:8000
+```
+
+`prepare` 会向当前知识库追加测试文档；只有明确需要重建当前知识库时才使用
+`prepare --reset`，该参数会删除当前 SQLite 数据库中的全部文档及其向量内容，不能当作普通评测前置步骤。
+
+结果写入 `backend/log/evaluation/<run_id>/`：`report.json` 保存逐题回答、证据和 Judge 评分，
+`report.md` 提供指标汇总与案例结果；
+
 
 ## 许可证
 
