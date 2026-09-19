@@ -1,6 +1,6 @@
 """RAG 评测 CLI。
 
-入口保持薄：数据集、工作流、HTTP 冒烟分别由 app.evaluation 模块负责，
+入口保持薄：数据集、文档导入、工作流评测分别由 app.evaluation 模块负责，
 脚本只处理参数、运行配置和退出码。
 """
 
@@ -20,7 +20,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="法律 RAG 端到端评测")
+    parser = argparse.ArgumentParser(description="法律 RAG 生成质量评测")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     prepare = subparsers.add_parser("prepare", help="向当前知识库导入测试文档")
@@ -32,18 +32,15 @@ def build_parser() -> argparse.ArgumentParser:
     workflow.add_argument("--cases", default="tests/evaluation/rag_cases.jsonl")
     workflow.add_argument("--output-root", default="log/evaluation")
 
-    smoke = subparsers.add_parser("api-smoke", help="通过 HTTP/SSE 验证产品链路")
-    smoke.add_argument("--base-url", default="http://127.0.0.1:8000")
-    smoke.add_argument("--cases", default="tests/evaluation/rag_cases.jsonl")
-    smoke.add_argument("--output-root", default="log/evaluation")
     return parser
 
 
 async def _run(args: argparse.Namespace) -> int:
     from app.evaluation.dataset import load_cases
-    from app.evaluation.http_smoke import prepare_corpus, run_api_smoke
 
     if args.command == "prepare":
+        from app.evaluation.corpus import prepare_corpus
+
         result = await prepare_corpus(args.base_url, reset=args.reset)
         output_dir = _new_output_dir(args.output_root, "prepare")
         (output_dir / "prepare.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -65,14 +62,6 @@ async def _run(args: argparse.Namespace) -> int:
         print(json.dumps({"passed": True, "report_dir": str(report_dir), "summary": report.summary}, ensure_ascii=False))
         return 0
 
-    if args.command == "api-smoke":
-        result = await run_api_smoke(args.base_url, cases)
-        output_dir = _new_output_dir(args.output_root, "api-smoke")
-        (output_dir / "api-smoke.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-        (output_dir / "api-smoke.md").write_text(_render_smoke_markdown(result), encoding="utf-8")
-        print(json.dumps({"report_dir": str(output_dir), **result}, ensure_ascii=False))
-        return 0 if result["passed"] else 1
-
     raise AssertionError(f"未知命令：{args.command}")
 
 
@@ -81,16 +70,6 @@ def _new_output_dir(root: str, prefix: str) -> Path:
     path = Path(root) / run_id
     path.mkdir(parents=True, exist_ok=True)
     return path
-
-
-def _render_smoke_markdown(result: dict) -> str:
-    lines = ["# API/SSE 冒烟结果", "", f"- base_url: `{result['base_url']}`", f"- passed: `{result['passed']}`", ""]
-    for case in result["cases"]:
-        lines.extend([f"## {case['case_id']}", "", f"- passed: `{case['passed']}`", f"- events: `{', '.join(case['event_types'])}`", ""])
-        for name, value in case["checks"].items():
-            lines.append(f"- {name}: `{value}`")
-        lines.append("")
-    return "\n".join(lines)
 
 
 def main() -> int:

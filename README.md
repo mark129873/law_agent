@@ -123,38 +123,46 @@ npm run dev
 ```
 - 访问：<http://localhost:5173>
 
-## RAG 评测演示文档
+## RAG 评测
 
-项目提供真实 LLM 端到端评测，并生成检索质量、引用一致性、grounding 和失败案例的演示文档。
-评测直接复用当前后端配置的 Milvus 集合和 SQLite 数据库，确保评测反映正在使用的知识库。
-使用默认配置启动后端即可：
-
-```powershell
-cd backend
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-再执行：
+评测直接调用真实 `QaWorkflow`，根据测试问题、答案要点、检索证据和最终回答评估 RAG 生成质量。
+复用当前后端配置的 Milvus 知识库、Embedding、Reranker 和 LLM；这些依赖可用且测试文档已入库后，
+无需启动 HTTP 服务即可执行：
 
 ```bash
 cd backend
 uv run python scripts/evaluate_rag.py workflow --cases tests/evaluation/rag_cases.jsonl
-uv run python scripts/evaluate_rag.py api-smoke --base-url http://127.0.0.1:8000
 ```
 
-如果当前知识库还没有测试文档，先执行：
+数据集位于 `backend/tests/evaluation/rag_cases.jsonl`，包含问题、期望来源、答案要点和引用要求。
+LLM Judge 对每条回答按 0–5 分评分：
+
+| 维度 | 评估内容 |
+| --- | --- |
+| 正确性 | 回答是否符合问题和答案要点 |
+| 完整性 | 是否覆盖主要答案要点 |
+| 依据支持 | 回答中的事实是否有检索证据支撑 |
+| 引用准确性 | 引用是否来自检索证据并与回答对应 |
+
+Judge 通过条件为正确性 ≥4、完整性 ≥3、依据支持 ≥4；要求引用的案例还需引用准确性 ≥4。
+报告同时记录 grounding 校验结果、基于来源文件名的引用精确率/召回率，
+以及 Hit@K、Recall@K、MRR、耗时和失败案例，辅助定位生成质量问题。
+Judge 可通过 `EVAL_JUDGE_PROVIDER` 与 `EVAL_JUDGE_MODEL` 独立配置，默认使用主 LLM。
+
+如果当前知识库还没有数据集对应的测试文档，先按“快速开始”启动后端，再在另一个终端导入：
 
 ```bash
+cd backend
 uv run python scripts/evaluate_rag.py prepare --base-url http://127.0.0.1:8000
 ```
 
 `prepare` 会向当前知识库追加测试文档；只有明确需要重建当前知识库时才使用
 `prepare --reset`，该参数会删除当前 SQLite 数据库中的全部文档及其向量内容，不能当作普通评测前置步骤。
 
-评测结果写入 `backend/log/evaluation/`，包含 `report.json` 和 `report.md`；原始结果不提交 Git。
-工作流评测读取真实 `QaWorkflow` 内部证据，HTTP 冒烟验证 SSE 顺序、来源持久化和错误边界。
-LLM Judge 可通过 `EVAL_JUDGE_PROVIDER` 与 `EVAL_JUDGE_MODEL` 独立配置。
-旧版隔离配置的脱敏真实结果见 [`docs/evaluation-baseline.md`](docs/evaluation-baseline.md)；共享当前知识库后应重新生成基线。
+结果写入 `backend/log/evaluation/<run_id>/`：`report.json` 保存逐题回答、证据和 Judge 评分，
+`report.md` 提供指标汇总与案例结果；原始报告不提交 Git。
+命令成功退出表示报告已生成，回答质量是否达标应查看报告中的分数、通过率和失败案例。
+历史脱敏基线见 [`docs/evaluation-baseline.md`](docs/evaluation-baseline.md)，不代表当前配置下的质量分数。
 
 ## 项目结构
 
