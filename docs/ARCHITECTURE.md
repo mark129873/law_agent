@@ -194,7 +194,7 @@ POST /api/documents (multipart)：白名单（40001）/ 20MB 上限（41301）�
   ▼ 状态机：processing → ready（chunk 为空或异常 → failed，不产生僵尸记录）
 DELETE /api/documents/{id}：向量按 document_id 删除 + 元数据删除（必须同时清理）
 ```
-- 段落感知切分（`chunk_size` 500 / `chunk_overlap` 50）：优先按换行段落打包，保证一条法规完整入同一 chunk——定长切分会把长条文截断到两个 chunk，检索命中也答不全。
+- 法条边界优先切分（`chunk_size` 500 / `chunk_overlap` 50）：识别法律文本中的“第 X 条”边界后，把单条法条作为不可拆分语义单元；短法条可合并进同一 chunk，单条超过目标长度时允许该 chunk 超长但不从法条中间截断。未识别为法条的普通文本仍按段落打包，超长段落才退化为带 overlap 的滑窗。
 - 稠密向量由 EmbeddingService 传入，稀疏 BM25 由 Milvus 服务端按 content 字段自动生成（BM25 Function），两路同源、无双写一致性问题。
 
 ### RAG 混合检索（BE-029，Milvus 服务端 hybrid_search）

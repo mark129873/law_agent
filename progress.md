@@ -9,6 +9,7 @@
 - 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；grounding 未通过且预算耗尽时直接进入 `final_answer_node`，不再调用额外兜底 LLM；其他重试机制不变
 - 当前最高优先级未完成功能：BE-049 已保留 prepare/workflow 生成质量评测、数据集和旧版隔离配置历史基线；仍需在共享知识库配置下重跑真实模型评测，不能将旧基线写成当前配置已验证。
 - 当前 blocker：此 worktree 尚无 `.env` 和 Milvus Cloud 连接配置；旧版真实 workflow 23 条中 13 条出现 GLM `ConnectError`/HTTP 400，模型稳定性问题待验证。前端未改动。
+- 法律条文边界优先 Chunk 切分（BE-052）已 passing：识别行首法条标题，短法条可合并，超长法条保持原子性；普通文本仍使用原有段落与滑窗规则。
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md、progress-archive-031-040.md（Session 001~040 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
 
 ### Session 053（评测收敛为 RAG 生成质量）（2026-09-19）
@@ -61,6 +62,13 @@
 - 改动：文档先行同步 PRODUCT/ARCHITECTURE/RELIABILITY；新增 `WebSearchPort`、Tavily Streamable HTTP 适配器、MCP v1 依赖与配置、原始/规范化结果原子 JSON 日志；新增 `use_web_search` 与状态 API、`web_sources`/`web_search_notice` SSE；前端新增持久在线模式按钮、配置 tag、联网来源折叠区、合法 URL 与 300 字预览；移除 Web Search Stub，保留 Plugin Stub；补齐单测、主图和 API 集成测试。
 - 验证：Docker/Milvus 可用时 `cd backend && uv run pytest tests -q -rs` → 242 passed、1 warning（5 个 Milvus 用例均实际执行）；真实 Tavily SSE E2E 返回 5 条网页来源，完成 `web_sources→delta→done`、来源持久化和独立日志断言；按钮关闭时未触网；`scripts/verify_real_e2e.py` 真实 Milvus/GLM RAG E2E 通过；`cd frontend && npm run build`、`git diff --check`、JSON 校验通过。CUA inventory helper 不可用，未完成可见浏览器实操。
 - 风险/交接：部署环境仍需配置 `TAVILY_API_KEY`；搜索日志写入 `backend/log/web_search/` 后永久保留且已 gitignore，本轮产生的 1 个真实搜索日志已保留且未进入 Git；无真实联网链路 blocker。
+
+### Session 054（法律条文边界优先 Chunk 切分）
+- 日期：2026-09-19
+- 本轮目标：优化法律文档上传切分，避免法条被从中间截断。
+- 改动：`chunk_text` 识别行首“第 X 条”法条标题；短法条按目标长度合并，超长法条作为完整原子 chunk；普通文本保持原段落滑窗；同步 ARCHITECTURE、PRODUCT 与 BE-052。
+- 验证：Milvus 健康、后端 `/api/health`、20 个切分/入库定向测试、真实专利法第四十二条完整性探针、全量 pytest **227 passed、1 warning**；`git diff --check` 通过。
+- 风险：未识别到明确法条标题的扫描件或普通文本仍使用原滑窗规则。
 
 ### Session 044（添加 MIT 开源协议）
 - 日期：2026-09-14

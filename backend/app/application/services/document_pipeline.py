@@ -19,6 +19,10 @@ logger = logging.getLogger("app.document.pipeline")
 # 控制字符（保留 \t\n 等常规空白）与连续空行的清洗规则
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _MULTIPLE_BLANK_LINES = re.compile(r"\n{3,}")
+_LEGAL_ARTICLE_HEADER = re.compile(
+    r"(?m)^[ \t]*(?:#{1,6}[ \t]*)?(?:《[^》\r\n]{1,100}》[ \t]*)?"
+    r"第[0-9０-９一二三四五六七八九十百千万零〇两]+条(?:规定)?"
+)
 
 
 def clean_text(text: str) -> str:
@@ -33,35 +37,61 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
-def chunk_text(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
-    """段落感知切分：优先保持法条段落完整，单段超限时退化为滑动窗口。
+def _split_legal_articles(text: str) -> list[str] | None:
+    """按行首法条标题切出原子段；未识别到法条时返回 None。"""
+    headers = list(_LEGAL_ARTICLE_HEADER.finditer(text))
+    if not headers:
+        return None
 
-    为什么不用纯定长窗口：法律文本一条法规就是一个语义单元，
-    定长切分会把一条法条从中间截断（实测第四十二条的
-    "期限为二十年"与后半句被切到两个 chunk，导致检索到也答不全）；
-    按段落打包能让每条法条完整进入同一个 chunk。
+    # 法条标题通常位于一行开头；用下一个标题作为终点，保留条文中的换行和标点。
+    segments: list[str] = []
+    prefix = text[: headers[0].start()].strip()
+    if prefix:
+        segments.append(prefix)
+    for index, header in enumerate(headers):
+        end = headers[index + 1].start() if index + 1 < len(headers) else len(text)
+        segment = text[header.start() : end].strip()
+        if segment:
+            segments.append(segment)
+    return segments
+
+
+def chunk_text(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
+    """法条边界优先切分，普通文本沿用段落感知与滑动窗口。
+
+    法律文本一条法条就是一个语义单元；识别到法条标题后，短法条可以
+    合并，超长法条也直接作为一个 chunk，避免把结论、条件和例外拆开。
+    普通文本没有可靠的法律边界时，仍按原有段落打包，单段超限再滑窗。
     """
     if not text:
         return []
-    paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+    legal_segments = _split_legal_articles(text)
+    segments = legal_segments or [p.strip() for p in text.split("\n") if p.strip()]
     chunks: list[str] = []
     buffer = ""
-    for paragraph in paragraphs:
-        # 单段超过 chunk_size：无法保持完整，退化为定长滑动窗口（保留 overlap）
-        if len(paragraph) > chunk_size:
+    for segment in segments:
+        # 识别到法条时，完整法条优先于 chunk_size；普通长段落才允许滑窗。
+        if len(segment) > chunk_size and legal_segments is None:
             if buffer:
                 chunks.append(buffer)
                 buffer = ""
             step = max(1, chunk_size - chunk_overlap)
-            chunks.extend(paragraph[start : start + chunk_size] for start in range(0, len(paragraph), step))
+            chunks.extend(segment[start : start + chunk_size] for start in range(0, len(segment), step))
             continue
-        candidate = paragraph if not buffer else f"{buffer}\n{paragraph}"
+        if len(segment) > chunk_size:
+            if buffer:
+                chunks.append(buffer)
+                buffer = ""
+            chunks.append(segment)
+            continue
+
+        candidate = segment if not buffer else f"{buffer}\n{segment}"
         if len(candidate) <= chunk_size:
             buffer = candidate
         else:
             if buffer:
                 chunks.append(buffer)
-            buffer = paragraph
+            buffer = segment
     if buffer:
         chunks.append(buffer)
     return chunks

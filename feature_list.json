@@ -219,6 +219,14 @@
       "description": "新增 DeepSeek OpenAI 兼容 Chat Completions Provider，支持主模型、Planner 与评测 Judge 通过环境变量选择；使用 DEEPSEEK_API_KEY 认证，思考模式固定关闭。",
       "status": "passing",
       "evidence": "2026-09-18：DeepSeek chat/stream 协议测试通过，thinking=disabled；当前 DEEPSEEK_API_KEY 实测 deepseek-chat 返回非空答案，容器主模型选择测试通过。"
+    },
+    {
+      "id": "BE-052",
+      "name": "法律条文边界优先 Chunk 切分",
+      "description": "文档上传 Pipeline 识别“第 X 条”法条边界，把单条法条作为不可拆分语义单元；短法条按目标长度合并，超长单条法条允许 chunk 超出目标但不从中间截断；普通非法律文本保持原段落与滑窗规则。",
+      "status": "passing",
+      "evidence": "2026-09-19：新增法条边界优先切分与超长法条原子保留；20 个定向测试、真实专利法第四十二条完整性探针、全量 pytest 227 passed/1 warning 通过。",
+      "testedAt": "2026-09-19"
     }
   ]
 }
