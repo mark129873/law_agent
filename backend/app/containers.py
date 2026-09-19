@@ -11,7 +11,7 @@ from typing import Callable
 
 from app.agent import create_qa_workflow
 from app.agent.config import AgentConfig
-from app.agent.services.reranker_service import CrossEncoderScorer, RerankerService
+from app.agent.services.reranker_service import LlamaRerankScorer, RerankerService
 from app.agent.subgraphs.legal_rag.config import LegalRAGConfig
 from app.application.services.chat_service import ChatService
 from app.application.services.conversation_service import ConversationService
@@ -31,7 +31,7 @@ from app.domain.repositories.database import Database
 from app.infrastructure.database.sqlalchemy.database import SQLAlchemyDatabase, sqlite_url
 from app.infrastructure.document_parser.pdf_parser import PdfParser
 from app.infrastructure.document_parser.text_parser import TextParser
-from app.infrastructure.embedding.ollama_embedding import OllamaEmbeddingService
+from app.infrastructure.embedding.llama_embedding import LlamaEmbeddingService
 from app.infrastructure.llm.deepseek import DeepSeekProvider
 from app.infrastructure.llm.glm import GLMProvider
 from app.infrastructure.llm.ollama import OllamaProvider
@@ -142,19 +142,19 @@ def _build_document_pipeline(settings: Settings) -> DocumentPipeline:
 
 
 def _build_embedding_service(settings: Settings) -> EmbeddingService:
-    """按配置构造向量生成服务（当前实现：Ollama）。"""
-    return OllamaEmbeddingService(settings.ollama_base_url, settings.ollama_embedding_model)
+    """按配置构造 llama serve 向量生成服务。"""
+    return LlamaEmbeddingService(settings.embedding_base_url, settings.embedding_model_path)
 
 
 def _build_reranker(settings: Settings) -> RerankerService:
     """构造统一重排服务（BE-033）。
 
-    为什么构造时不加载模型：CrossEncoderScorer 懒加载——首次 rerank
-    才读本地模型，装配阶段零开销；加载失败在检索侧降级 RRF 序。
-    RERANK_ENABLED=false 时整体降级（CPU 无 CUDA 部署的可行性开关）。
+    为什么构造时不请求服务：llama serve 进程由独立启动器管理，装配阶段
+    不做网络探测；请求失败在检索侧降级 RRF 序。RERANK_ENABLED=false
+    时整体降级，保留可观测的主动关闭状态。
     """
     return RerankerService(
-        CrossEncoderScorer(settings.reranker_model_path, settings.reranker_device),
+        LlamaRerankScorer(settings.reranker_base_url, settings.reranker_model_path),
         enabled=settings.rerank_enabled,
     )
 
@@ -230,7 +230,7 @@ def create_container(settings: Settings | None = None) -> DIContainer:
         lambda c: RagService(c.resolve(EmbeddingService), c.resolve(VectorStore)),
         singleton=True,
     )
-    # 统一重排服务（BE-033：本地 MiniLM CrossEncoder，懒加载）
+    # 统一重排服务（BE-033：llama serve Qwen3 Reranker HTTP 适配器）
     container.register(RerankerService, lambda c: _build_reranker(settings), singleton=True)
     # 问答工作流作为领域端口注册，ChatService 与评测器复用同一个装配结果。
     container.register(

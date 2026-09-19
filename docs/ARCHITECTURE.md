@@ -4,7 +4,7 @@
 -本文档只描述**架构与实现**（分层、数据流、配置、契约、测试体系）；用户可见的行为需求见 docs/PRODUCT.md
 -实现变更不得改变 PRODUCT.md 描述的用户可见行为；行为要变，先改 PRODUCT.md，再改实现
 -后端 Python 3.11（uv 管理环境，.venv 虚拟环境）+ FastAPI（接口全异步）+ LangGraph，LLM 支持 Ollama 本地部署、GLM API 与 DeepSeek API（详细技术栈见 §1 末尾）
--Agent 模块一期重写（2026-09）：主图轻量编排 + 独立 Local Legal RAG 子图 + Tavily Remote MCP Web Search / Plugin Stub 入口，设计依据一期技术稿核心内容已并入本文档 §12（30 条强制约束 + 设计 §号速查）；统一重排采用 `cross-encoder/ms-marco-MiniLM-L-6-v2`（CrossEncoder，模型失败时降级 RRF；显式关闭时按配置正常使用 RRF）
+-Agent 模块一期重写（2026-09）：主图轻量编排 + 独立 Local Legal RAG 子图 + Tavily Remote MCP Web Search / Plugin Stub 入口，设计依据一期技术稿核心内容已并入本文档 §12（30 条强制约束 + 设计 §号速查）；Embedding 与重排统一通过两个独立的 `llama serve` HTTP 服务调用 Qwen3 GGUF 模型（模型请求失败时降级 RRF；显式关闭时按配置正常使用 RRF）
 -数据库此版本支持sqlite3, 后续版本支持mysql8.0根据配置进行切换, 做好数据库接口层抽象
 -数据库实现统一走 SQLAlchemy 2.0 async ORM（声明式模型 + Data Mapper 映射），SQLite 是当前唯一已启用的 Provider，MySQL 8.0 接入只需换 URL 与异步驱动
 -向量数据库使用 Milvus（默认连接 Milvus Cloud，也支持通过配置连接 standalone），稠密向量与稀疏 BM25 混合检索由 Milvus 服务端 hybrid_search 完成（BE-029），业务代码经 VectorStore 端口访问，不感知具体实现
@@ -36,11 +36,11 @@
                ▼
       ┌──────────────────────────────────┐
       │ LLM：Ollama / GLM API / DeepSeek  │
-      │ Rerank：本地 MiniLM CrossEncoder   │
+      │ Embedding/Rerank：llama serve GGUF │
       └──────────────────────────────────┘
 ```
 
-技术栈：Python 3.11 + FastAPI（全异步）+ uv 环境管理 + LangGraph + SQLAlchemy 2.0 async ORM（声明式模型 + AsyncSession，当前挂 aiosqlite 驱动）+ Milvus（服务端 hybrid_search：稠密 + 稀疏 BM25，RRF 融合）+ sentence-transformers（`cross-encoder/ms-marco-MiniLM-L-6-v2` CrossEncoder 统一重排）+ httpx。
+技术栈：Python 3.11 + FastAPI（全异步）+ uv 环境管理 + LangGraph + SQLAlchemy 2.0 async ORM（声明式模型 + AsyncSession，当前挂 aiosqlite 驱动）+ Milvus（服务端 hybrid_search：稠密 + 稀疏 BM25，RRF 融合）+ llama.cpp `llama serve` HTTP API（Qwen3 Embedding / Reranker GGUF）+ httpx。
 前端技术栈：React 19 + TypeScript（严格模式）+ Vite 8 + Tailwind CSS v4 + React Router 7 + 原生 Fetch（无 axios）。
 
 ## 2. 目录结构
@@ -73,7 +73,7 @@ backend/
 │   │   ├── vector_store/       # MilvusVectorStore（dense+sparse 单集合，服务端 hybrid_search）
 │   │   ├── llm/                # OllamaProvider / GLMProvider / DeepSeekProvider
 │   │   ├── document_parser/    # PdfParser（pypdf）/ TextParser（txt/md，多编码回退）
-│   │   ├── embedding/          # OllamaEmbeddingService（/api/embed 批量）
+│   │   ├── embedding/          # LlamaEmbeddingService（llama serve /v1/embeddings 批量）
 │   │   └── trace/              # LangfuseTraceSink（BE-043：trace→节点 span→LLM generation 三级上报；开关降级）
 │   │
 │   ├── agent/                  # LangGraph Agent（※ 全项目唯一允许导入 langgraph 与重型推理库的业务模块）
@@ -151,7 +151,7 @@ frontend/                        # 前端独立项目（React + TS + Vite）
 | `VectorStore` | domain/repositories/vector_store.py | MilvusVectorStore（默认 Milvus Cloud，dense+sparse 单集合，服务端 hybrid_search） |
 | `LLMProvider` | domain/repositories/llm_provider.py | OllamaProvider / GLMProvider / DeepSeekProvider |
 | `DocumentParser` | domain/services/document_parser.py | TextParser（txt/md 多编码回退）/ PdfParser（pypdf） |
-| `EmbeddingService` | domain/services/embedding.py | OllamaEmbeddingService（/api/embed 批量） |
+| `EmbeddingService` | domain/services/embedding.py | LlamaEmbeddingService（llama serve `/v1/embeddings` 批量） |
 | `WebSearchPort` | domain/services/web_search.py | TavilyMcpSearchClient（Remote MCP Streamable HTTP 适配器） |
 | `QaWorkflow` | domain/services/qa_workflow.py | LangGraph 工作流（agent/，`create_qa_workflow` 工厂：主图 + legal_rag 子图 + Web MCP / Plugin Stub） |
 
@@ -309,9 +309,13 @@ retrieval_planner_agent（检索计划，四类策略多选）
 | `EVAL_JUDGE_PROVIDER` | follow / ollama / glm / deepseek | follow（默认复用主 LLM；真实质量评测仅允许 follow/deepseek） |
 | `EVAL_JUDGE_MODEL` | 模型名 | 空（用主 LLM；非空时可独立指定 Judge） |
 | `LLM_ENABLE_THINKING` | true / false | false |
+| `EMBEDDING_BASE_URL` | llama serve Embedding Endpoint | `http://127.0.0.1:11434` |
+| `EMBEDDING_MODEL_PATH` | Embedding GGUF 文件路径（随请求发送给 llama serve） | 空（由 `.env` 配置） |
 | `RERANK_ENABLED` | true / false | true（CPU 且无 CUDA 实测较慢；false 表示主动使用 RRF 融合序，不应视为模型故障） |
-| `RERANKER_MODEL_PATH` | HF 模型 id 或本地快照绝对路径 | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
-| `RERANKER_DEVICE` | cpu / cuda | cpu |
+| `RERANKER_BASE_URL` | llama serve Reranker Endpoint | `http://127.0.0.1:11435` |
+| `RERANKER_MODEL_PATH` | Reranker GGUF 文件路径（随请求发送给 llama serve） | 空（由 `.env` 配置） |
+| `LLAMA_DEVICE` | llama serve 的 `--device` 值；为空时启动命令不添加该参数 | 空 |
+| `LLAMA_CONTEXT_SIZE` | 两个 llama serve 进程的 `--ctx-size`；设为 0 时不添加 | `4096` |
 | `MILVUS_PROVIDER` | Milvus 部署形态选择：`cloud` / `local` | `cloud` |
 | `MILVUS_CLOUD_URI` | Milvus Cloud 集群 Endpoint（`cloud` 时使用） | 空 |
 | `MILVUS_CLOUD_TOKEN` | Milvus Cloud API Key（`cloud` 时使用） | 空 |
@@ -369,6 +373,7 @@ Chat 流式协议（SSE，`data: {json}\n\n`）：
 ```bash
 cd backend
 uv sync                                            # 创建/同步 .venv（Python 3.11）
+uv run python scripts/start_llama_servers.py       # 另开终端；读取两个 GGUF 路径和 LLAMA_DEVICE
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 uv run pytest                                      # 全量测试（含 DDD 边界守护）
 curl http://127.0.0.1:8000/api/health              # {"status":"ok"}
@@ -391,7 +396,7 @@ npm run build                                      # tsc 类型检查 + 生产�
 | 端到端 | scripts/（手工运行） | 3 脚本 | 真实 uvicorn + 真实 Milvus Cloud/standalone + LLM：上传→入库→流式 RAG 问答引用原文→检索策略/状态事件→持久化 |
 
 - 自动化合计 269 个，`uv run pytest` 本轮为 **264 passed、5 skipped、1 warning**；无需外部服务的部分使用 Fake 遵循领域端口，与生产实现互换验证同一契约，Langfuse 以假客户端锁契约；唯一例外 test_milvus_vector_store.py 的 5 例需真实 Milvus，不可达时自动跳过。
-- Agent 测试的 Fake 体系：脚本化 LLMProvider（按系统提示特征分流输出）、Fake Embedding/VectorStore/RerankScorer——rerank 真实模型不进自动化测试，仅真实 E2E 验证。
+- Agent 测试的 Fake 体系：脚本化 LLMProvider（按系统提示特征分流输出）、Fake Embedding/VectorStore/RerankScorer——llama serve 真实模型不进自动化测试，仅真实 E2E 验证。
 - 自动化测试使用 Fake WebSearchPort，不依赖真实 Tavily 网络；真实 Remote MCP 通过配置 Key 后的手工 smoke test 验证。2026-09-16 实测返回 5 条来源，SSE/持久化/独立日志及按钮关闭不触网断言通过。E2E 脚本依赖真实服务，不纳入 pytest；结论记录于 feature_list.json 各功能 evidence。测试数据源：tests/data_source/（当前保留的法律 TXT/MD 文档）。
 
 ## 10. 扩展点与预留
@@ -401,14 +406,14 @@ npm run build                                      # tsc 类型检查 + 生产�
 - **Web Search**：`agent/web/web_search_entry_node` 通过 `WebSearchPort` 调用 Tavily Remote MCP；若未来增加多轮 web research，只扩展该能力内部节点/子图，主图仍使用统一 `CapabilityResult` 与 observation 接口；`suggested_external_queries` 继续作为后续扩展预留。
 - **Plugin / Skill Runtime（二期）**：把 `agent/plugins/plugin_stub_node` 替换为 runtime 实现，约束同上；一期 Stub 不做任何动态加载。
 - **新文档格式**：实现 `DocumentParser` 策略并注册进工厂；**新 LLM Provider**：实现 `LLMProvider`（chat + stream + model_name）+ 容器加分支，密钥仅环境注入；**新 Agent 节点**：实现节点类并在 AgentGraphBuilder/build_legal_rag_graph 接线 + constants.py 登记中文标签（status 事件文案）。
-- **Rerank**：统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；GPU 机器设 `RERANKER_DEVICE=cuda`，CPU 机器使用 `cpu`。混合检索默认返回 30 条/查询，`rerank_max_candidates=32` 控制精排输入规模，以免恢复查询召回的法条在全局粗排时过早丢失。`RERANK_ENABLED=false` 是可观测的主动关闭状态，证据仍按 Milvus RRF 序输出；只有 CrossEncoder 加载/推理异常才记为 `reranker_degraded`。
+- **Embedding/Rerank**：文档与查询向量通过 `EMBEDDING_BASE_URL` 的 llama serve `/v1/embeddings` 生成；证据通过 `RERANKER_BASE_URL` 的 llama serve `/v1/rerank` 使用 `RERANKER_MODEL_PATH` 对应的 Qwen3 Reranker GGUF 重排。`scripts/start_llama_servers.py` 为两个服务分别追加 `--embedding` / `--rerank`；仅当 `LLAMA_DEVICE` 非空时追加 `--device <值>`，默认用 `LLAMA_CONTEXT_SIZE=4096` 限制双进程 KV cache，设为 0 才不添加 `--ctx-size`。混合检索默认返回 30 条/查询，`rerank_max_candidates=32` 控制精排输入规模，以免恢复查询召回的法条在全局粗排时过早丢失。`RERANK_ENABLED=false` 是可观测的主动关闭状态，证据仍按 Milvus RRF 序输出；只有 llama serve 请求失败才记为 `reranker_degraded`。
 - **前端**：遵循 §7 API 契约与 SSE 协议；开发期统一请求相对路径 `/api/...` 由 Vite 代理，前端代码不感知后端地址。
 
 ### 10.1 RAG 端到端评测（BE-049）
 
 评测系统是开发者侧能力，不改变终端用户问答 API。真实质量评测固定使用现有测试法律文档、
-`QaWorkflow`、DeepSeek 主 LLM、Ollama Embedding、Milvus 和 MiniLM Reranker，形成可复现的质量基线。
-Ollama 在这条评测链路中只负责 Embedding；Ollama/GLM 对话 Provider 的协议测试不计入 RAG 质量结论。
+`QaWorkflow`、DeepSeek 主 LLM、llama serve Qwen3 Embedding、Milvus 和 Qwen3 Reranker，形成可复现的质量基线。
+Ollama/GLM 对话 Provider 的协议测试不计入 RAG 质量结论。
 
 质量评测统一通过 `workflow` 直接调用 `QaWorkflow.ainvoke()`，读取 `answer`、`rag_status`、
 `evidence`、`citations`、`grounding_passed` 和节点 trace。LLM Judge 对正确性、完整性、

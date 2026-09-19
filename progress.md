@@ -3,12 +3,19 @@
 ## 当前已验证状态
 - 当前主工作树：`C:\Users\nnnnnn\Desktop\law_agent`（`feature/auto_coder`，真实评测边界提交 `71e71b4`，全项目审计提交 `09f4b64`）；`codex/archive-cleanup` 隔离 worktree 保留在历史提交 `73255d6`，未合并分支为空。
 - 标准启动路径：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`（`MILVUS_PROVIDER` 默认 `cloud` 读取 `MILVUS_CLOUD_*`；本地 standalone 必须显式设为 `local` 并启动 Docker）
-- 标准验证路径：`cd backend && uv run pytest tests -q -rs`；本轮 264 passed、5 skipped（Milvus 集成服务不可达）、1 warning；服务配置齐全后启动并检查 `/api/health`。
-- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ Reranker 模型统一（BE-046）+ 低质量兜底 Agent 删除（BE-047）+ Tavily Remote MCP 搜索（BE-048/FE-017）全部 passing：主图 + Local Legal RAG 子图 + Tavily Web Search + Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
-- 当前 Reranker：全项目统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；`check_rerank_local.py` 首次下载到根目录 `.model/cross-encoder/ms-marco-MiniLM-L-6-v2` 并执行 CPU 样本打分。本地 `.env` 已切换为该模型并开启 `RERANK_ENABLED=true`；无法使用时仍按既有故障降级契约记录 WARN。
+- 标准验证路径：`cd backend && uv run pytest tests -q -rs`；本轮 268 passed、5 skipped（Milvus 集成服务不可达）、1 warning；标准后端启动和 `/api/health` 均通过。
+- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ llama serve Qwen3 Embedding/Reranker（BE-053）+ 低质量兜底 Agent 删除（BE-047）+ Tavily Remote MCP 搜索（BE-048/FE-017）全部完成当前代码验证：主图 + Local Legal RAG 子图 + Tavily Web Search + Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
+- 当前 Embedding/Reranker：两个独立 `llama serve` 进程分别加载 `Qwen3-Embedding-0.6B-Q8_0.gguf` 与 `qwen3-reranker-0.6b-q8_0.gguf`；路径、地址、`LLAMA_DEVICE` 和 `LLAMA_CONTEXT_SIZE` 均由 `.env` 配置，当前设备为 `Vulkan1`、上下文为 4096。启动器真实双服务验收通过，Embedding 返回 1024 维，Reranker 返回正确排序；服务请求失败仍按 RRF 降级。
 - 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；grounding 未通过且预算耗尽时直接进入 `final_answer_node`，不再调用额外兜底 LLM；其他重试机制不变
 - 当前最高优先级未完成功能：BE-049 已完成一次共享知识库真实模型评测，但质量未达门槛；报告保留在 `backend/log/evaluation/20260919T053533Z-7f6b9aab/`，不能将本次结果写成 passing。
-- 当前 blocker：本轮已将真实质量评测固定为 DeepSeek + Milvus + Reranker，Ollama 仅保留为 Embedding，并拒绝其他 LLM Provider；本机仍没有 Ollama embedding 服务（11434 无监听），因此没有新的真实质量分数；BE-049 继续 `in_progress`，前端未改动。
+- 当前 blocker：本轮完成的是新模型服务和协议/启动验收，尚未用新 Embedding/Reranker 重跑 23 条真实 RAG 质量评测，因此没有新的质量分数或质量收益结论；BE-049 继续 `in_progress`，前端未改动。
+
+### Session 063（切换 llama serve Qwen3 Embedding/Reranker）（2026-09-20）
+- 将 Embedding 从 Ollama 改为 `LlamaEmbeddingService`，调用 `/v1/embeddings`；将本地 MiniLM CrossEncoder 改为 `LlamaRerankScorer`，调用 `/v1/rerank`；两个适配器均保留响应校验和结构化日志，Reranker 请求失败继续降级 RRF。
+- 新增 `scripts/start_llama_servers.py`：从 `.env` 读取两个 GGUF 路径、地址、`LLAMA_DEVICE` 和 `LLAMA_CONTEXT_SIZE`，分别启动 `--embedding` / `--rerank`；设备为空不传 `--device`。默认上下文 4096 是双进程显存稳定性的部署参数，设为 0 可恢复模型默认值。
+- 删除 sentence-transformers/torch 等旧精排依赖并同步 `uv.lock`；同步 Settings、容器、评测快照、README、ARCHITECTURE、PRODUCT、RELIABILITY、`.env.example` 和功能清单。
+- 验证：24 个定向测试、268 个全量测试通过（5 个 Milvus 集成跳过、1 warning）；compileall、`uv lock --check` 通过；`Vulkan1` 真实双服务启动、Embedding 2 条/1024 维、Reranker 2 条且相关文档排名第一；后端 `/api/health` 返回 `ok`。
+- 风险：BE-049 尚未使用新模型重跑真实质量评测，不能把本轮协议/启动通过写成检索质量提升；提交号在收尾提交后补入。
 
 ### Session 062（固定真实 RAG 质量评测 Provider 边界）（2026-09-19）
 - 文档与 CLI 明确真实质量评测固定使用 DeepSeek 主 LLM、当前 Milvus、MiniLM Reranker 和 Ollama Embedding；Ollama/GLM 对话 Provider 的通用协议测试不计入质量结论。

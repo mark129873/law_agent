@@ -125,8 +125,6 @@ class Settings(BaseSettings):
     llm_provider: LlmProvider = LlmProvider.DEEPSEEK
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3.5:4b"
-    # 向量化模型独立配置：embedding 模型与对话模型通常是不同的模型
-    ollama_embedding_model: str = "nomic-embed-text:latest"
     glm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
     glm_model: str = "glm-4-flash"
     # 敏感配置：只通过环境变量注入，禁止写入任何文件或日志
@@ -146,14 +144,21 @@ class Settings(BaseSettings):
     eval_judge_model: str = ""
 
     # ---- Agent 服务（一期重写 BE-033）----
+    # Embedding 与 Reranker 由两个独立的 llama serve 进程提供；模型路径
+    # 作为请求中的 model 字段传递，保证服务端模型与应用配置可追溯。
+    embedding_base_url: str = "http://127.0.0.1:11434"
+    embedding_model_path: str = ""
     # Rerank 总开关：默认开启（设计 §32 统一重排）。如果部署环境暂时
     # 不需要精排，可置 false 使用 RRF；服务仍会把“主动关闭”单独记录。
     rerank_enabled: bool = True
-    # Rerank 模型与 scripts/check_rerank_model/check_rerank_local.py 保持一致：
-    # 默认使用 Hugging Face 模型 id；也可改为脚本下载后的本地快照路径。
-    # 加载失败时检索降级为 RRF 融合序，不阻断问答。
-    reranker_model_path: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    reranker_device: str = "cpu"
+    reranker_base_url: str = "http://127.0.0.1:11435"
+    # llama serve Reranker GGUF 文件路径；请求失败时检索降级为 RRF 融合序。
+    reranker_model_path: str = ""
+    # 启动 llama serve 时使用的 --device 值；空串表示不传该参数。
+    llama_device: str = ""
+    # 两个模型并行占用显存；默认收紧上下文以避免同时加载时 KV cache 溢出。
+    # 设为 0 可恢复 llama serve 从模型读取默认上下文长度。
+    llama_context_size: int = Field(default=4096, ge=0)
 
     # ---- Langfuse 链路追踪（BE-043）----
     # 总开关默认开启，便于直接回查真实问答与评测；显式关闭时 langfuse

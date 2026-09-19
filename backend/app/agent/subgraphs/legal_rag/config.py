@@ -29,7 +29,7 @@ class LegalRAGConfig:
     # 统一重排保留条数（设计 §34；进入回答上下文与「参考文档」展示）
     rerank_top_k: int = 10
     # 重排前按 RRF 分预截断的候选上限（粗排→精排：跨查询候选可达 8×30，
-    # 只把最有希望的候选交给 CrossEncoder；适度扩大候选池，避免恢复查询
+    # 只把最有希望的候选交给 llama serve Reranker；适度扩大候选池，避免恢复查询
     # 找到的具体法条在全局粗排阶段被过早丢弃。）
     rerank_max_candidates: int = 32
     # RRF 融合平滑常数（论文推荐值 60，排名越靠前贡献越大）；装配点注入 Milvus RRFRanker

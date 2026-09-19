@@ -25,8 +25,8 @@ Law Agent 意图构建法律助手，已完成知识库问答场景（法条检�
 | 后端 | Python 3.11 · FastAPI（全异步）· uv · LangGraph |
 | 数据 | SQLAlchemy 2.0 Async + SQLite（当前启用；MySQL 预留端口） |
 | 检索 | Milvus Cloud（默认）或 Milvus Standalone（dense + 稀疏 BM25，服务端 `hybrid_search` + RRF） |
-| 模型 | Ollama 本地、智谱 GLM API 或 DeepSeek API；Embedding 默认 Ollama `nomic-embed-text` |
-| 重排 | `cross-encoder/ms-marco-MiniLM-L-6-v2`（CrossEncoder）；关闭或失败时使用 RRF 序 |
+| 模型 | Ollama 本地、智谱 GLM API 或 DeepSeek API；Embedding 使用 llama serve Qwen3 GGUF |
+| 重排 | llama serve Qwen3 Reranker GGUF；关闭或服务失败时使用 RRF 序 |
 | 观测 | 结构化 JSON 日志 + 可选 Langfuse 三级 trace |
 
 
@@ -46,7 +46,7 @@ Frontend (React)  --HTTP/SSE-->  FastAPI
                                       ▲
                     Infrastructure    │    Agent (LangGraph)
                     SQLite / Milvus   │    主图 + legal_rag 子图
-                 Ollama / GLM / DeepSeek│    Tavily MCP / Plugin Stub
+                    Ollama / GLM / DeepSeek│    llama serve / Tavily MCP
 ```
 
 ### 主图流程
@@ -62,7 +62,7 @@ Frontend (React)  --HTTP/SSE-->  FastAPI
 - Python `>=3.11`, 以及环境变量管理工具 [uv]
 - Milvus Cloud Endpoint + API Key（默认）；或 Docker Desktop / Docker Compose（本地 standalone）
 - Node.js 与 npm
-- Ollama，或可访问的 GLM/DeepSeek API
+- `llama` CLI（提供 `llama serve`），以及 Ollama 或可访问的 GLM/DeepSeek API
 
 ### 1. 克隆项目并创建配置
 ```bash
@@ -89,16 +89,26 @@ MILVUS_COLLECTION_NAME=law_chunks
 docker compose -f backend/docker-compose.yml up -d
 ```
 
-### 3. 下载并验证 Reranker 模型
+### 3. 配置并启动 llama serve 模型服务
 
-项目统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`。首次使用需要联网从 Hugging Face 下载；检查脚本会把模型保存到仓库根目录的 `.model/cross-encoder/ms-marco-MiniLM-L-6-v2`，后续启动可以直接复用本地文件：
+在 `backend/.env` 配置两个 GGUF 路径和服务地址：
+
+```dotenv
+EMBEDDING_BASE_URL=http://127.0.0.1:11434
+EMBEDDING_MODEL_PATH=C:\Users\<user>\Desktop\model\Qwen3-Embedding-0.6B-Q8_0.gguf
+RERANKER_BASE_URL=http://127.0.0.1:11435
+RERANKER_MODEL_PATH=C:\Users\<user>\Desktop\model\qwen3-reranker-0.6b-q8_0.gguf
+LLAMA_DEVICE=Vulkan1
+LLAMA_CONTEXT_SIZE=4096
+```
+
+从 `backend` 目录运行启动器；它会为两个模型分别启动 `llama serve --embedding` 和 `llama serve --rerank`。`LLAMA_DEVICE` 非空时追加 `--device <值>`，留空则不传该参数；`LLAMA_CONTEXT_SIZE` 默认使用 4096，设为 0 则不传 `--ctx-size`：
 
 ```bash
 cd backend
 uv sync
-uv run python scripts/check_rerank_model/check_rerank_local.py
+uv run python scripts/start_llama_servers.py
 ```
-脚本会完成模型下载和检验。
 
 ### 4. 配置并启动后端
 
@@ -110,7 +120,6 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```bash
 ollama serve
 ollama pull qwen3.5:4b
-ollama pull nomic-embed-text:latest
 ```
 若使用 GLM，设置 `LLM_PROVIDER=glm` 和 `GLM_API_KEY`；若切换为 DeepSeek，设置 `LLM_PROVIDER=deepseek` 和 `DEEPSEEK_API_KEY`，默认模型为 `deepseek-v4-flash`，思考模式固定关闭。
 
@@ -126,13 +135,13 @@ npm run dev
 ## RAG 评测
 
 评测直接调用真实 `QaWorkflow`，根据测试问题、答案要点、检索证据和最终回答评估 RAG 生成质量。
-真实质量评测固定使用以下链路：DeepSeek 主 LLM、当前配置的 Milvus、MiniLM Reranker，
-以及 Ollama Embedding（Ollama 在此路径只负责向量化，不负责问答或 Judge）。主 LangGraph 与 RAG
+真实质量评测固定使用以下链路：DeepSeek 主 LLM、当前配置的 Milvus、llama serve Qwen3 Reranker
+和 Qwen3 Embedding（llama serve 在此路径负责向量化与重排，不负责问答或 Judge）。主 LangGraph 与 RAG
 子图按生产装配执行，不切换到其他 LLM Provider：
 
 - 主 LLM：`LLM_PROVIDER=deepseek`；
-- Embedding：`OLLAMA_EMBEDDING_MODEL`，入库和查询必须使用同一 Ollama 服务；
-- Reranker：`RERANK_ENABLED=true`，模型由 `RERANKER_MODEL_PATH` 指定；
+- Embedding：`EMBEDDING_BASE_URL` + `EMBEDDING_MODEL_PATH`，入库和查询必须使用同一 llama serve 服务；
+- Reranker：`RERANK_ENABLED=true`，服务地址由 `RERANKER_BASE_URL` 指定，模型由 `RERANKER_MODEL_PATH` 指定；
 - 向量库：`MILVUS_PROVIDER` 与 `MILVUS_COLLECTION_NAME` 的当前配置。
 
 `workflow` 入口会在装配前拒绝 Ollama/GLM 主 LLM、Ollama/GLM Judge 和关闭 Reranker 的配置，

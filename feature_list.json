@@ -1,6 +1,6 @@
 {
   "project": "legal-knowledge-agent",
-  "description": "法律知识库与助手 Agent：基于 LangGraph 一期重写的问答 Agent（主图编排 + Local Legal RAG 独立子图 + Tavily Remote MCP Web Search + Plugin Stub 入口），支持四类检索查询变体（原始/改写/子问题/术语扩展）fan-out 并发生成、Milvus 服务端混合检索（稠密+稀疏 BM25，RRF 融合）多 Query 并发召回、统一重排（cross-encoder/ms-marco-MiniLM-L-6-v2，可降级 RRF）、证据评估与本地恢复循环、grounding 双规则校验与确定性收尾；节点执行状态以 SSE status 事件流式展示（Codex 风格浅色过程行），检索策略全量展示；支持多会话、历史消息、流式回答、参考文档、联网搜索与对话删除。后端 Python 3.11.15 + FastAPI + SQLAlchemy 2.0 async（当前 SQLite）+ Milvus Cloud/standalone + sentence-transformers + MCP SDK；前端 React + TypeScript + Vite + Tailwind CSS，交互与视觉风格参考 Codex Web。架构决策见 docs/ARCHITECTURE.md。",
+  "description": "法律知识库与助手 Agent：基于 LangGraph 一期重写的问答 Agent（主图编排 + Local Legal RAG 独立子图 + Tavily Remote MCP Web Search + Plugin Stub 入口），支持四类检索查询变体（原始/改写/子问题/术语扩展）fan-out 并发生成、Milvus 服务端混合检索（稠密+稀疏 BM25，RRF 融合）多 Query 并发召回、llama serve Qwen3 Embedding/Reranker 统一向量化与重排（可降级 RRF）、证据评估与本地恢复循环、grounding 双规则校验与确定性收尾；节点执行状态以 SSE status 事件流式展示（Codex 风格浅色过程行），检索策略全量展示；支持多会话、历史消息、流式回答、参考文档、联网搜索与对话删除。后端 Python 3.11.15 + FastAPI + SQLAlchemy 2.0 async（当前 SQLite）+ Milvus Cloud/standalone + llama.cpp HTTP API + MCP SDK；前端 React + TypeScript + Vite + Tailwind CSS，交互与视觉风格参考 Codex Web。架构决策见 docs/ARCHITECTURE.md。",
   "rules": {
     "single_active_feature": true,
     "passing_requires_evidence": true,
@@ -62,9 +62,9 @@
     {
       "id": "BE-033",
       "name": "Agent 服务层（LLM/Milvus/Reranker/Citation）",
-      "description": "LLMService 适配 LLMProvider（structured_invoke=chat+JSON 容错+重试 1 次+安全默认）；MilvusService 适配 VectorStore 端口（不直连 SDK）；RerankerService 使用 cross-encoder/ms-marco-MiniLM-L-6-v2 CrossEncoder、可配置设备、懒加载单例、失败降级 RRF 序 + reranker_degraded；CitationService 引用构建。Settings 新增 RERANKER_* 字段 + .env.example 同步。",
+      "description": "LLMService 适配 LLMProvider（structured_invoke=chat+JSON 容错+重试 1 次+安全默认）；MilvusService 适配 VectorStore 端口（不直连 SDK）；RerankerService 使用 llama serve `/v1/rerank` 的 Qwen3 GGUF，失败降级 RRF 序 + reranker_degraded；CitationService 引用构建。Settings 新增 Embedding/Reranker HTTP 与模型路径配置。",
       "status": "passing",
-      "evidence": "2026-09-14：LLMService（structured_invoke=chat+JSON 容错提取+重试 1 次附修正指令+安全默认）；MilvusService 适配 VectorStore 端口；RerankerService 依赖注入打分器 + CrossEncoderScorer 懒加载单例（asyncio.Lock 双重检查 + to_thread，失败降级 RRF 序 + degraded 标记）；统一默认模型改为 cross-encoder/ms-marco-MiniLM-L-6-v2；Settings 与 .env.example 同步。"
+      "evidence": "2026-09-20：llama serve Qwen3 HTTP 适配器、RRF 降级与 24 个定向/268 个全量测试通过；双真实服务协议验收通过，提交号收尾后补入。"
     },
     {
       "id": "BE-034",
@@ -111,7 +111,7 @@
     {
       "id": "BE-039",
       "name": "Agent 重写测试体系重建",
-      "description": "backend/tests/{unit,integration}/agent/：各节点单测（脚本化 Fake LLM/Reranker/向量库，覆盖 JSON 容错回退）、RAG 子图集成 7 场景（简单/复杂/子查询/改写/扩展/恢复/证据不足）、主图 E2E 覆盖联网搜索经 observation、按钮关闭、grounding 重试复用与 Plugin Stub；SSE 序列（含 status 交织，过滤 status 后原序不变）、direct 路径；fakes 扩展；test_ddd_boundaries 增加 sentence_transformers/torch/MCP 隔离；删除旧 test_agent_graph/test_agent_parsing。",
+      "description": "backend/tests/{unit,integration}/agent/：各节点单测（脚本化 Fake LLM/Reranker/向量库，覆盖 JSON 容错回退）、RAG 子图集成 7 场景（简单/复杂/子查询/改写/扩展/恢复/证据不足）、主图 E2E 覆盖联网搜索经 observation、按钮关闭、grounding 重试复用与 Plugin Stub；SSE 序列（含 status 交织，过滤 status 后原序不变）、direct 路径；Fake llama serve HTTP 协议测试；删除旧 test_agent_graph/test_agent_parsing。",
       "status": "passing",
       "evidence": "2026-09-13：重建 Agent 单元/集成测试与 Fake 体系，共 88 个 Agent 测试；覆盖 RAG 7 场景、主图 E2E、SSE 序列和 DDD 重型依赖隔离。干净环境全量 pytest 195 passed。"
     },
@@ -167,16 +167,16 @@
     {
       "id": "BE-045",
       "name": "区分精排主动关闭与模型故障降级",
-      "description": "RERANK_ENABLED=false 时继续使用 RRF 融合序，但以 disabled 状态和“精排已关闭”思考文案展示；CrossEncoder 加载/推理异常仍以 degraded 状态、WARN 日志和故障文案展示；启动日志记录生效开关与设备。",
+      "description": "RERANK_ENABLED=false 时继续使用 RRF 融合序，但以 disabled 状态和“精排已关闭”思考文案展示；llama serve Reranker 请求异常仍以 degraded 状态、WARN 日志和故障文案展示；启动脚本按 LLAMA_DEVICE 非空与否决定是否追加 --device。",
       "status": "passing",
-      "evidence": "2026-09-14：RerankResult 增 disabled 状态，EvidenceRankingNode 区分关闭/失败文案与 trace；启动日志记录开关和设备；37 个相关单测通过，真实模型快照可加载并返回分数。"
+      "evidence": "2026-09-20：disabled/degraded 两态、WARN 日志、空设备不传 --device 均通过协议测试和真实启动验收；提交号收尾后补入。"
     },
     {
       "id": "BE-046",
       "name": "统一 Reranker 模型与本地下载启动",
-      "description": "全项目统一使用 check_rerank_local.py 中的 cross-encoder/ms-marco-MiniLM-L-6-v2；脚本首次运行下载到仓库根目录 .model 并执行 CPU 打分自检；Settings、.env.example、生产装配和 README 的下载/启动说明保持一致。",
-      "status": "passing",
-      "evidence": "2026-09-14：默认配置、脚本、本地 .env、README 与架构文档统一为 MiniLM 模型；脚本复用本地目录完成加载和样本打分；全量 pytest 226 passed（1 warning）。"
+      "description": "全项目统一使用本地 MiniLM CrossEncoder 并从仓库 .model 加载。",
+      "status": "deprecated",
+      "evidence": "2026-09-20：本地 CrossEncoder 路径由 BE-053 的 llama serve Qwen3 GGUF 服务替代。"
     },
     {
       "id": "BE-047",
@@ -202,9 +202,9 @@
     {
       "id": "BE-049",
       "name": "RAG 端到端评测系统",
-      "description": "基于现有法律测试文档和 QaWorkflow 评估 RAG 生成质量：固定复用主 LangGraph 的 DeepSeek + Milvus + 开启 Reranker，Ollama 仅负责 Embedding；工作流直调收集回答、证据、引用、grounding 与耗时，Judge 仅允许 follow/deepseek，输出 JSON/Markdown 与 Recall@K、MRR 等指标。仅保留 prepare/workflow，其他 LLM Provider 不纳入真实质量评测。",
+      "description": "基于现有法律测试文档和 QaWorkflow 评估 RAG 生成质量：固定复用主 LangGraph 的 DeepSeek + Milvus + llama serve Qwen3 Embedding/Reranker；工作流直调收集回答、证据、引用、grounding 与耗时，Judge 仅允许 follow/deepseek，输出 JSON/Markdown 与 Recall@K、MRR 等指标。仅保留 prepare/workflow，其他 LLM Provider 不纳入真实质量评测。",
       "status": "in_progress",
-      "evidence": "2026-09-19：固定真实评测为 DeepSeek+Milvus+Reranker，保留 Ollama Embedding并拒绝其他LLM；全量264 passed、5 skipped、1 warning。真实复评仍因本机无 Ollama embedding 服务未完成，保持 in_progress；commit 71e71b4。"
+      "evidence": "2026-09-20：评测契约改为 DeepSeek+Milvus+llama serve Qwen3 Embedding/Reranker；真实质量复评待两个服务启动后完成，保持 in_progress。"
     },
     {
       "id": "BE-050",
@@ -227,6 +227,14 @@
       "status": "passing",
       "evidence": "2026-09-19：新增法条边界优先切分与超长法条原子保留；20 个定向测试、真实专利法第四十二条完整性探针、全量 pytest 227 passed/1 warning 通过。",
       "testedAt": "2026-09-19"
+    },
+    {
+      "id": "BE-053",
+      "name": "llama serve Qwen3 Embedding 与 Reranker",
+      "description": "通过两个独立 llama serve HTTP 服务接入 Qwen3-Embedding-0.6B-Q8_0.gguf 与 qwen3-reranker-0.6b-q8_0.gguf；模型路径、服务地址、LLAMA_DEVICE 与 LLAMA_CONTEXT_SIZE 均由环境配置，空设备值不追加 --device；Embedding 使用 /v1/embeddings，Reranker 使用 /v1/rerank，服务失败继续按既有契约降级 RRF。",
+      "status": "passing",
+      "evidence": "2026-09-20：Vulkan1 双服务真实加载与接口验收通过；Embedding 1024 维、Reranker 排序正确；24 定向/268 全量测试通过，提交号收尾后补入。",
+      "testedAt": "2026-09-20"
     }
   ]
 }

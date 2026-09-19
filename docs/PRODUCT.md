@@ -39,7 +39,7 @@
 
 ## 4. 参考文档（回答依据展示）
 - 当回答基于知识库检索（RAG）且检索有命中时，回答完成后下方显示「参考文档」按钮；点开后按序号展示参考的文档名称与对应命中内容（按相关性重排，最多 10 条），刷新或重新打开会话后仍可查看。
-- 参考文档默认使用本地 CrossEncoder 精排模型按用户原问题排序；模型正常工作时直接展示排序结果，主动关闭或模型故障时分别按思考块中的对应文案说明并继续使用 RRF 顺序。
+- 参考文档默认使用本地 llama serve Qwen3 Reranker GGUF 按用户原问题排序；模型正常工作时直接展示排序结果，主动关闭或模型服务故障时分别按思考块中的对应文案说明并继续使用 RRF 顺序。
 - 检索到部分相关证据时，回答会基于已有证据谨慎作答并正常展示参考文档；完全无命中时回答明确声明"知识库中暂无相关依据，建议咨询专业律师"，不显示「参考文档」按钮。
 - 当回答未使用知识库检索（直接回答）或检索无命中时，不显示「参考文档」按钮。
 
@@ -77,7 +77,7 @@ RAG 评测系统用于评估生成答案的质量、回归验证和失败分析�
 - 向量库默认连接 Milvus Cloud；开发者通过 `MILVUS_PROVIDER=local` 显式切回本地 standalone。两种部署对用户侧上传、检索和参考文档展示行为保持一致。当前主 LLM 默认使用 DeepSeek；也可通过 `LLM_PROVIDER` 切换 Provider，DeepSeek 思考模式固定关闭。
 
 - 评测使用仓库内的法律测试文档，并复用当前 Milvus 集合和 SQLite 数据库；默认不清理数据，只有显式执行 `prepare --reset` 才会删除当前数据库中的全部文档，因此重置只适合可重建的测试知识库。
-- 真实质量评测固定使用 DeepSeek 主 LLM + Milvus + 开启的 MiniLM Reranker；Embedding 保留使用 Ollama，且 Ollama 只承担向量化。Ollama/GLM 对话 Provider 的协议测试与质量评测隔离。模型和网络具有波动性，报告用于展示趋势与失败案例，不把单次分数伪装成绝对正确率。
+- 真实质量评测固定使用 DeepSeek 主 LLM + Milvus + llama serve Qwen3 Reranker；Embedding 使用 llama serve Qwen3 Embedding。Ollama/GLM 对话 Provider 的协议测试与质量评测隔离。模型和网络具有波动性，报告用于展示趋势与失败案例，不把单次分数伪装成绝对正确率。
 - 评测结果输出 JSON 和 Markdown；不新增评测前端页面，不把密钥、Authorization 或完整敏感配置写入报告。
 - 质量评测直接调用工作流，依据问题、答案要点、检索证据和最终回答评估正确性、完整性、依据支持及引用准确性；检索与 grounding 指标辅助定位问题。评测入口只保留数据准备和质量评测，不包含 API/SSE 冒烟测试。
 - 评测 Judge 默认复用 DeepSeek 主 LLM；需要隔离评测模型时，真实质量评测只允许通过 `EVAL_JUDGE_PROVIDER=deepseek` 与 `EVAL_JUDGE_MODEL` 配置，其他 Provider 不参与质量评测。

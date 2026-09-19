@@ -1,5 +1,21 @@
 # 会话交接
 
+## Session 063：切换 llama serve Qwen3 Embedding/Reranker（2026-09-20）
+
+### 本轮已完成
+- Embedding 改为 `LlamaEmbeddingService`，通过 `EMBEDDING_BASE_URL` + `EMBEDDING_MODEL_PATH` 调用 llama serve `/v1/embeddings`；Reranker 改为 `LlamaRerankScorer`，通过 `RERANKER_BASE_URL` + `RERANKER_MODEL_PATH` 调用 `/v1/rerank`。
+- 新增 `scripts/start_llama_servers.py`，从环境配置启动两个独立服务；`LLAMA_DEVICE` 非空才追加 `--device`，`LLAMA_CONTEXT_SIZE` 默认 4096，设为 0 不追加 `--ctx-size`。本地配置使用 Vulkan1 和两个 Qwen3 GGUF 路径，`.env` 未纳入 Git。
+- 删除旧 MiniLM/sentence-transformers/torch 依赖及本地下载脚本；同步 Settings、容器、评测快照、文档、测试和 `uv.lock`。Embedding 失败仍由上层按现有入库错误契约处理，Reranker 失败仍降级 RRF。
+
+### 验证与结论
+- `uv run pytest tests -q -rs`：268 passed、5 skipped（Milvus 集成服务不可达）、1 warning；定向 llama 协议/配置/启动参数测试 24 passed。
+- `uv run python -m compileall -q app scripts`、`uv lock --check` 通过；后端标准启动成功，`GET /api/health` 返回 `ok`。
+- 真实 `start_llama_servers.py` 使用 `Vulkan1` 双服务并行加载成功；Embedding 返回 2 条、1024 维，Reranker 返回 2 条且相关文档排名第一。设备报告显示 RX 7700 XT 12272 MiB、11313 MiB free；默认模型上下文会导致双进程 KV cache 额外预留，因此启动器默认使用 4096。
+- BE-049 仍为 `in_progress`：尚未用新模型重跑 23 条真实 RAG 质量评测，不报告质量收益或新指标。
+
+### 代码交付
+- 提交号：收尾提交后补入。
+
 ## Session 062：固定真实 RAG 质量评测 Provider 边界（2026-09-19）
 
 ### 本轮已完成

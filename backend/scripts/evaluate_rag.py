@@ -2,7 +2,7 @@
 
 入口保持薄：数据集、文档导入、工作流评测分别由 app.evaluation 模块负责，
 脚本只处理参数、运行配置和退出码。真实 workflow 评测固定使用
-DeepSeek + Milvus + Reranker，Ollama 仅作为 Embedding。
+DeepSeek + Milvus + llama serve Qwen3 Embedding/Reranker。
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     workflow = subparsers.add_parser(
         "workflow",
-        help="使用 DeepSeek + Milvus + Reranker 直接调用 QaWorkflow 执行评测（Ollama 仅用于 Embedding）",
+        help="使用 DeepSeek + Milvus + llama serve Qwen3 Embedding/Reranker 直接调用 QaWorkflow 执行评测",
     )
     workflow.add_argument("--cases", default="tests/evaluation/rag_cases.jsonl")
     workflow.add_argument("--output-root", default="log/evaluation")

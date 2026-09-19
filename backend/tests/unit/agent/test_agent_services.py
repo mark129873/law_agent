@@ -6,6 +6,7 @@ rerank 模型、不触碰 Milvus（测试封闭性约束，设计 §51）。
 
 import asyncio
 
+import httpx
 import pytest
 
 from app.agent.services.citation_service import CitationService
@@ -15,7 +16,7 @@ from app.agent.services.llm_service import (
     parse_structured_output,
 )
 from app.agent.services.milvus_service import MilvusService
-from app.agent.services.reranker_service import RerankerService
+from app.agent.services.reranker_service import LlamaRerankScorer, RerankerService
 from app.domain.entities.chunk import DocumentChunk, RetrievedChunk
 from app.domain.entities.llm import ChatMessage
 from app.domain.entities.message import MessageRole
@@ -217,6 +218,40 @@ def test_rerank_uses_query_for_scoring():
     assert scorer.calls[0][0] == "原始问题"
 
 
+@pytest.mark.asyncio
+async def test_llama_rerank_scorer_restores_input_order() -> None:
+    """llama serve 按相关性排序返回结果，适配器必须按 index 还原输入顺序。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/rerank"
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"index": 1, "relevance_score": 0.9},
+                    {"index": 0, "relevance_score": 0.1},
+                ]
+            },
+        )
+
+    scorer = LlamaRerankScorer(
+        "http://mock", "C:/model/qwen3-reranker.gguf", transport=httpx.MockTransport(handler)
+    )
+    assert await scorer.score("问题", ["甲", "乙"]) == [0.1, 0.9]
+
+
+@pytest.mark.asyncio
+async def test_llama_rerank_scorer_rejects_invalid_results() -> None:
+    """响应缺少某个文档分数时必须失败，避免静默错排。"""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"results": [{"index": 0, "relevance_score": 0.1}]})
+
+    scorer = LlamaRerankScorer("http://mock", "reranker.gguf", transport=httpx.MockTransport(handler))
+    with pytest.raises(ValueError, match="数量不匹配"):
+        await scorer.score("问题", ["甲", "乙"])
+
+
 # ---- CitationService ----
 
 def test_citations_numbered_and_deduped():
@@ -238,11 +273,36 @@ def test_citations_numbered_and_deduped():
 def test_reranker_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     # pymilvus import 的 load_dotenv 副作用会把 .env 的值灌进进程环境
     # （Session 027 已记录），默认值断言前先清除（与 test_settings 同模式）
-    for key in ("RERANK_ENABLED", "RERANKER_MODEL_PATH", "RERANKER_DEVICE"):
+    for key in (
+        "RERANK_ENABLED",
+        "RERANKER_BASE_URL",
+        "RERANKER_MODEL_PATH",
+        "EMBEDDING_BASE_URL",
+        "EMBEDDING_MODEL_PATH",
+        "LLAMA_DEVICE",
+    ):
         monkeypatch.delenv(key, raising=False)
     from app.config.settings import Settings
 
     settings = Settings(_env_file=None)  # 不读 .env，验证纯默认值
     assert settings.rerank_enabled is True  # 默认开启（设计 §32 忠实）
-    assert settings.reranker_model_path == "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    assert settings.reranker_device == "cpu"
+    assert settings.embedding_base_url == "http://127.0.0.1:11434"
+    assert settings.embedding_model_path == ""
+    assert settings.reranker_base_url == "http://127.0.0.1:11435"
+    assert settings.reranker_model_path == ""
+    assert settings.llama_device == ""
+    assert settings.llama_context_size == 4096
+
+
+def test_llama_settings_read_model_paths_and_device(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EMBEDDING_MODEL_PATH", "C:/model/embedding.gguf")
+    monkeypatch.setenv("RERANKER_MODEL_PATH", "C:/model/reranker.gguf")
+    monkeypatch.setenv("LLAMA_DEVICE", "Vulkan1")
+    monkeypatch.setenv("LLAMA_CONTEXT_SIZE", "8192")
+    from app.config.settings import Settings
+
+    settings = Settings(_env_file=None)
+    assert settings.embedding_model_path == "C:/model/embedding.gguf"
+    assert settings.reranker_model_path == "C:/model/reranker.gguf"
+    assert settings.llama_device == "Vulkan1"
+    assert settings.llama_context_size == 8192

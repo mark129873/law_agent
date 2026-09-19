@@ -44,7 +44,7 @@
 | `document` | 文档元数据状态机、上传与删除 |
 | `document_pipeline` | 解析 → 清洗 → 段落切分 Pipeline |
 | `knowledge` | 向量化与入库编排 |
-| `embedding` | 向量生成服务 |
+| `embedding` | llama serve Embedding HTTP 服务调用与向量生成；启动器默认将双进程上下文限制为 `LLAMA_CONTEXT_SIZE=4096`，避免 KV cache 在显存中按模型默认长上下文过量预留 |
 | `rag` | 检索与上下文构建 |
 | `web_search` | Tavily Remote MCP 搜索调用、搜索结果落盘与失败状态 |
 | `conversation` | 会话生命周期与消息持久化 |
@@ -100,7 +100,7 @@ LOG_LEVEL=ERROR  # 仅输出 ERROR
 
 ## RAG 端到端评测（BE-049）
 
-- **执行范围**：真实质量评测固定使用 DeepSeek 主 LLM、Ollama Embedding、Milvus 和开启的 MiniLM Reranker，通过工作流直调与 LLM Judge 评估生成质量；Ollama 对话模型、GLM 等其他 LLM Provider 不属于这条质量评测路径。`prepare` 只负责数据导入，不执行 HTTP/SSE 冒烟；接口契约由既有 API 集成测试覆盖。
+- **执行范围**：真实质量评测固定使用 DeepSeek 主 LLM、llama serve Qwen3 Embedding、Milvus 和开启的 Qwen3 Reranker，通过工作流直调与 LLM Judge 评估生成质量；Ollama 对话模型、GLM 等其他 LLM Provider 不属于这条质量评测路径。`prepare` 只负责数据导入，不执行 HTTP/SSE 冒烟；接口契约由既有 API 集成测试覆盖。
 - **数据一致性**：评测复用当前服务配置的 `MILVUS_COLLECTION_NAME` 和 `SQLITE_DB_PATH`，以便测量实际知识库；默认评测不清理数据，`prepare --reset` 是显式的全量删除操作，只能在可重建的测试知识库执行。
 - **报告内容**：报告记录数据集版本、Git commit、Provider、模型名、指标、耗时和失败原因；敏感配置只记录“已配置/未配置”或模型名，禁止写入 API Key、Authorization 和完整环境变量。
 - **真实模型波动**：LLM Judge 结果不是确定性 CI 门禁。评测脚本遇到单条超时或 Judge 失败时继续执行并记录该案例，只有基础设施不可用、数据格式非法或报告无法写入时才返回非零退出码。
