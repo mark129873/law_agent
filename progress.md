@@ -16,6 +16,10 @@
 - 新增 DeepSeek OpenAI 兼容 Provider，可用于主 LLM、Planner 和 Judge；固定发送 `thinking.type=disabled`，API Key 只从环境注入。
 - 验证：定向 29 passed；全量 `uv run pytest tests -q -rs` 为 255 passed、5 skipped、1 warning；当前 `.env` 云端 Milvus 初始化成功，DeepSeek `deepseek-chat` 实际返回非空答案；compileall、git diff --check 通过。
 
+### Session 051（明确测试环境清理步骤）（2026-09-19）
+- 更新 `docs/RELIABILITY.md`：明确下次 Codex 测试前先删除当前 `SQLITE_DB_PATH` 对应的 SQLite 测试数据库及 WAL/SHM 文件，再执行 `uv run python scripts/reset_milvus.py --yes` 删除当前配置的 Milvus 测试集合。
+- 本轮仅更新测试运维文档，不改业务代码；已执行 diff 校验与 JSON 校验。
+
 ### Session 049（Milvus Cloud 默认连接）（2026-09-18）
 - Settings 优先读取 `MILVUS_CLOUD_URI` / `MILVUS_CLOUD_TOKEN`，并把 API Key 传入 `MilvusVectorStore`；旧 `MILVUS_URI` / `MILVUS_TOKEN` 保留给 standalone 回退。
 - 更新 README、`.env.example`、ARCHITECTURE、PRODUCT、RELIABILITY 和 init；认证重置脚本要求 `--yes`，避免默认云端配置误删集合。

@@ -1,5 +1,14 @@
 # 会话交接
 
+## Session 051：明确测试环境清理步骤（2026-09-19）
+
+### 本轮已完成
+- 更新 `docs/RELIABILITY.md` 的测试干净环境管理：固定先清理 SQLite 测试数据库及 `-wal`/`-shm` 文件，再执行 `uv run python scripts/reset_milvus.py --yes` 删除当前配置的 Milvus 测试集合。
+- 明确当前全部为测试环境，不再要求下次 Codex 对云端/本地或 `--yes` 做人工判断；脚本仍按 `MILVUS_PROVIDER` 读取对应连接配置。
+
+### 验证与结论
+- 本轮仅修改文档和会话记录，没有执行实际数据删除；已通过 `git diff --check` 和 JSON 解析检查。
+
 ## Session 050：Milvus 显式部署选择与 DeepSeek（2026-09-18）
 
 ### 本轮已完成

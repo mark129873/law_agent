@@ -112,11 +112,26 @@ LOG_LEVEL=ERROR  # 仅输出 ERROR
 ### 作用
 干净环境管理保证测试从一个已知的空白状态启动，避免历史遗留数据干扰测试结果，引发未知异常。
 
-### 重置机制 (测试前需运行)
-1. 删除 sqlite数据库中的原先的测试数据
-2. 删除 Milvus 中的知识库集合：默认云端配置下必须显式执行 `cd backend && uv run python scripts/reset_milvus.py --yes`；本地 standalone 可执行不带参数的脚本。脚本幂等删除 `law_chunks` 集合，下次启动/入库自动重建。
-   **警告：云端集合可能是正式数据，只有确认目标 Endpoint 和集合后才允许执行 `--yes`。**
-3. 删除完成之后, 明确输出: 测试干净环境管理完成, 清理xxx文件, 删除xxx数据库内容
+### 重置机制（测试前必须运行）
+
+当前仓库只使用测试环境。下次 Codex 执行测试前，先停止正在运行的后端进程，再按下面固定顺序清理；不需要人工确认或临时判断云端/本地路径。
+
+1. 删除 SQLite 数据库中的历史测试数据。命令会读取当前 `SQLITE_DB_PATH`，同时清理 SQLite 可能产生的 `-wal` / `-shm` 文件：
+
+   ```powershell
+   cd backend
+   uv run python -c "from pathlib import Path; from app.config.settings import get_settings; p=Path(get_settings().resolved_sqlite_db_path); [q.unlink(missing_ok=True) for q in (p, Path(str(p)+'-wal'), Path(str(p)+'-shm'))]; print(f'清理 SQLite 测试数据库: {p}')"
+   ```
+
+2. 删除 Milvus 中当前配置的知识库集合。脚本会根据 `MILVUS_PROVIDER` 选择 `MILVUS_CLOUD_*` 或 `MILVUS_*`，`--yes` 是测试环境的固定参数：
+
+   ```powershell
+   uv run python scripts/reset_milvus.py --yes
+   ```
+
+   脚本幂等删除 `MILVUS_COLLECTION_NAME` 指定的集合；集合不存在时也算成功，下次启动或入库会自动重建。
+
+3. 两步完成后明确输出：`测试干净环境管理完成：已清理 SQLite 测试数据库，并删除 Milvus 测试知识库集合 <collection>`。
 
 ### 需要重置干净环境的场景
 - 开工测试之前
