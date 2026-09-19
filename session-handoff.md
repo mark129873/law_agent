@@ -1,5 +1,21 @@
 # 会话交接
 
+## Session 053：RAG 生成质量评测（2026-09-19）
+
+### 本轮已完成
+- 用户确认同时删除 api-smoke 子命令、实现与专用测试，保留 prepare/workflow；语料导入迁到 `app/evaluation/corpus.py`，默认追加与显式 `--reset` 行为保留。
+- README 标题改为「RAG 评测」，以正确性、完整性、依据支持、引用准确性和报告使用为主；同步架构、产品、可靠性、历史基线及 BE-049 描述。
+- 新增 CLI 回归覆盖旧命令被拒绝、prepare 入口迁移与默认不重置、workflow 加载数据集并调用质量评测器。
+
+### 验证与结论
+- 全量 pytest：256 passed、5 skipped（Milvus 不可达）、1 warning；包含既有 API 集成测试，未重新执行真实 LLM 评测。
+- CLI 主入口/prepare/workflow help、compileall、JSON、diff 检查通过；13 个热层 Session，passing 热条目 23、归档 40，共 68 个功能，无需沉降。
+
+### 环境与风险
+- 本 worktree 无 `.env`、SQLite/WAL/SHM、运行中的后端或 Milvus Cloud 配置；验证复用 `C:/Users/nnnnnn/Desktop/law_agent/backend/.venv/Scripts/python.exe`，导入的是当前 worktree 代码。没有清理其他工作树数据，也没有启动 Docker。
+- 真实服务启动和模型评分未重跑，BE-049 继续 `in_progress`；已有 GLM 失败与旧版隔离基线不能当作当前共享知识库验证结果。
+- 开始时已有 13 个未提交文件且与本轮修改重叠，保留全部原修改，不代为提交；旧 Session 的命令仅作历史记录，当前入口以 README 为准。
+
 ## Session 052：评测复用业务存储（2026-09-19）
 
 ### 本轮目标
@@ -87,18 +103,17 @@
 - 使用 `MILVUS_COLLECTION_NAME=law_agent_eval` 尝试真实 workflow，初始化阶段因 `127.0.0.1:19530` 无法连接失败；没有生成或填写虚构的 RAG 基线分数。
 - BE-049 仍为 `in_progress`。启动 Docker/Milvus、Embedding/LLM、Reranker 后，按 README 执行 `prepare → workflow → api-smoke`，确认报告内容后再改为 `passing`。
 
-### 下一轮直接执行
+### 当前评测命令（Session 053 更新）
+
+已导入测试文档时直接运行 workflow；需要 prepare 时，先按 README 的快速开始启动后端。
+
 ```powershell
 cd backend
-$env:MILVUS_COLLECTION_NAME="law_agent_eval"
-$env:SQLITE_DB_PATH="data/law_agent_eval.db"
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
-uv run python scripts/evaluate_rag.py prepare --base-url http://127.0.0.1:8000 --reset-eval
 uv run python scripts/evaluate_rag.py workflow --cases tests/evaluation/rag_cases.jsonl
-uv run python scripts/evaluate_rag.py api-smoke --base-url http://127.0.0.1:8000
 ```
 
 ## 当前已验证
+- **法律条文边界优先 Chunk 切分（BE-052）已 passing**：`DocumentPipeline.chunk_text` 识别行首“第 X 条”标题，短法条可合并，超长法条不再被 `chunk_size` 从中间截断；普通文本仍按段落与滑窗处理。20 个定向测试、真实专利法第四十二条完整性探针、全量 pytest 227 passed/1 warning 通过。
 - 现在明确可用的部分：
   - **Agent 模块一期重写 + 思考块 + Langfuse trace + 全量 Prompt 优化 + 精排状态语义修复 + Reranker 模型统一 + 低质量兜底 Agent 删除 + Tavily Remote MCP 搜索全部 passing（BE-032~048 + FE-001~017；BE-030 deprecated）**：主图含 14 个业务节点 + RAG 子图 10 节点 + Tavily Web Search + Plugin Stub + 服务层 + status/think 双事件 + 豆包式思考块 + Langfuse 三级追踪 + 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾。BE-049 评测运行器已实现但真实基线待补。
   - **Tavily Remote MCP 搜索（BE-048/FE-017）**：按钮状态通过 `use_web_search` 传递；`WebSearchPort` → Tavily Streamable HTTP `tavily_search` → `observation_node` → Answer/grounding/final；只在按钮开启时实际联网，搜索结果以 300 字网页预览经 `web_sources` 展示，完整原始/规范化数据写入 `backend/log/web_search/search-<UTC>-<UUID>.log`，落盘失败 fail-closed；真实 Remote MCP 已返回 5 条来源并完成 SSE/持久化验收。
@@ -129,6 +144,13 @@ uv run python scripts/evaluate_rag.py api-smoke --base-url http://127.0.0.1:8000
 - 前端新增持久在线模式按钮、配置 tag、网页来源折叠区、合法 URL、300 字预览和历史来源恢复；保留 Plugin Stub，删除旧 Web Search Stub。
 - 验证：Docker/Milvus 可用时全量后端 **242 passed、1 warning**；前端 `npm run build` 通过；真实 Tavily SSE E2E 返回 5 条来源、日志和持久化断言通过；按钮关闭不触网；真实 RAG E2E 通过；浏览器可见回归因 CUA inventory helper 不可用未完成。
 - 交接风险：部署环境需配置 `TAVILY_API_KEY`；本轮真实远程响应已验证，后续若 Tavily 返回结构变更应优先检查适配器的结构化/文本归一化日志。
+
+## 本轮改动（Session 054：法律条文边界优先 Chunk 切分）
+- `backend/app/application/services/document_pipeline.py`：新增法条标题识别与原子法条切分；普通文本仍保留原有段落/滑窗策略。
+- `backend/tests/unit/test_document_pipeline.py`：新增超长法条不截断回归测试。
+- 同步 `docs/ARCHITECTURE.md`、`docs/PRODUCT.md`、`feature_list.json`、`progress.md`。
+- 验证：Milvus/后端健康检查通过；20 个定向测试、真实专利法第四十二条完整性探针、全量 pytest 227 passed、1 warning；`git diff --check` 通过。
+- 风险：未识别到明确法条标题的扫描件或普通文本仍使用原滑窗规则。
 
 ## 本轮改动（Session 044：添加 MIT 开源协议）
 - 新增根目录 `LICENSE`，采用标准 MIT License 文本，版权主体为 `law_agent contributors`。

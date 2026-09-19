@@ -194,7 +194,7 @@ POST /api/documents (multipart)：白名单（40001）/ 20MB 上限（41301）�
   ▼ 状态机：processing → ready（chunk 为空或异常 → failed，不产生僵尸记录）
 DELETE /api/documents/{id}：向量按 document_id 删除 + 元数据删除（必须同时清理）
 ```
-- 段落感知切分（`chunk_size` 500 / `chunk_overlap` 50）：优先按换行段落打包，保证一条法规完整入同一 chunk——定长切分会把长条文截断到两个 chunk，检索命中也答不全。
+- 法条边界优先切分（`chunk_size` 500 / `chunk_overlap` 50）：识别法律文本中的“第 X 条”边界后，把单条法条作为不可拆分语义单元；短法条可合并进同一 chunk，单条超过目标长度时允许该 chunk 超长但不从法条中间截断。未识别为法条的普通文本仍按段落打包，超长段落才退化为带 overlap 的滑窗。
 - 稠密向量由 EmbeddingService 传入，稀疏 BM25 由 Milvus 服务端按 content 字段自动生成（BM25 Function），两路同源、无双写一致性问题。
 
 ### RAG 混合检索（BE-029，Milvus 服务端 hybrid_search）
@@ -411,12 +411,11 @@ npm run build                                      # tsc 类型检查 + 生产�
 评测系统是开发者侧能力，不改变终端用户问答 API。它使用现有测试法律文档、
 `QaWorkflow`、真实 Embedding、Milvus、Reranker 和 LLM，形成一套可复现的质量基线。
 
-评测分为两个入口：
-
-1. **工作流直调**：直接调用 `QaWorkflow.ainvoke()`，读取 `answer`、`rag_status`、
-   `evidence`、`citations`、`grounding_passed` 和节点 trace，用于计算检索与回答指标；
-2. **HTTP/SSE 冒烟**：通过真实 `/api/chat/stream` 验证会话、SSE 事件顺序、来源持久化和
-   错误脱敏。完整评测问题不重复走 HTTP，避免额外模型成本。
+质量评测统一通过 `workflow` 直接调用 `QaWorkflow.ainvoke()`，读取 `answer`、`rag_status`、
+`evidence`、`citations`、`grounding_passed` 和节点 trace。LLM Judge 对正确性、完整性、
+依据支持和引用准确性评分，检索指标用于辅助定位回答质量问题；运行评测无需启动 HTTP 服务。
+`prepare` 仅负责通过文档 API 导入数据，由 `app/evaluation/corpus.py` 实现；
+评测 CLI 不再提供 API/SSE 冒烟子命令，接口契约仍由既有 API 集成测试验证。
 
 评测数据集为 `backend/tests/evaluation/rag_cases.jsonl`，每条记录包含问题、期望状态、
 期望来源、答案要点和是否必须引用。检索指标使用来源文件名匹配，不依赖随机生成的 chunk ID。
@@ -426,7 +425,7 @@ npm run build                                      # tsc 类型检查 + 生产�
 可通过 `EVAL_JUDGE_PROVIDER` / `EVAL_JUDGE_MODEL` 独立配置；未配置时回退主 LLM。
 
 评测复用 `Settings` 当前配置的 `MILVUS_COLLECTION_NAME` 和 `SQLITE_DB_PATH`，不额外创建集合或数据库，
-从而保证工作流直调与 HTTP/SSE 冒烟面对同一份知识库。评测默认不清理数据，只有显式执行
+其中工作流直接访问当前向量库，`prepare` 经服务端文档 API 维护元数据与向量。评测默认不清理数据，只有显式执行
 `prepare --reset` 才会通过文档 API 删除当前数据库中的全部文档并重新导入测试文档。
 原始报告写入 `backend/log/evaluation/`，不进入 Git；仅提交数据集、运行器、测试和经过真实验证的
 汇总报告。

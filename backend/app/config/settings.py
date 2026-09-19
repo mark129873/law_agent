@@ -133,7 +133,7 @@ class Settings(BaseSettings):
     # 敏感配置：只通过环境变量注入，禁止写入任何文件或日志
     glm_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-chat"
+    deepseek_model: str = "deepseek-v4-flash"
     # 敏感配置：只通过环境变量注入，禁止写入任何文件或日志
     deepseek_api_key: str = ""
     # 思考模式开关：qwen3.5/glm-4.5 等推理模型默认会先"思考"再回答，
