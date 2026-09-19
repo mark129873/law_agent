@@ -425,7 +425,9 @@ npm run build                                      # tsc 类型检查 + 生产�
 引用精确率/召回率、grounding 结果、LLM Judge 分数、失败案例和延迟统计。真实 LLM Judge
 可通过 `EVAL_JUDGE_PROVIDER` / `EVAL_JUDGE_MODEL` 独立配置；未配置时回退主 LLM。
 
-评测使用独立的 `MILVUS_COLLECTION_NAME`，默认业务集合 `law_chunks` 不参与评测清理。
+评测复用 `Settings` 当前配置的 `MILVUS_COLLECTION_NAME` 和 `SQLITE_DB_PATH`，不额外创建集合或数据库，
+从而保证工作流直调与 HTTP/SSE 冒烟面对同一份知识库。评测默认不清理数据，只有显式执行
+`prepare --reset` 才会通过文档 API 删除当前数据库中的全部文档并重新导入测试文档。
 原始报告写入 `backend/log/evaluation/`，不进入 Git；仅提交数据集、运行器、测试和经过真实验证的
 汇总报告。
 

@@ -15,22 +15,21 @@ from app.evaluation.models import EvaluationCase
 async def prepare_corpus(
     base_url: str,
     *,
-    reset_eval: bool,
+    reset: bool,
     data_dir: str | Path | None = None,
 ) -> dict[str, Any]:
-    """通过公开文档 API 清理并重新导入当前仓库测试数据源中的文档。
+    """通过公开文档 API 可选清理后，导入当前仓库测试数据源中的文档。
 
     不直接 drop Milvus collection：运行中的服务可能缓存集合状态，
     通过文档删除接口可以同时清理 SQLite 元数据和向量内容。
     """
-    _require_eval_collection()
     root = Path(data_dir) if data_dir else Path(__file__).resolve().parents[2] / "tests" / "data_source"
     files = sorted(path for path in root.iterdir() if path.is_file() and path.suffix.lower() in {".md", ".txt", ".pdf"})
     if not files:
         raise ValueError(f"测试数据源为空：{root}")
 
     async with httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=300.0) as client:
-        if reset_eval:
+        if reset:
             response = await client.get("/api/documents")
             _raise_http(response, "读取文档列表")
             for document in response.json():
@@ -46,12 +45,11 @@ async def prepare_corpus(
             _raise_http(response, f"上传文档 {path.name}")
             uploaded.append(response.json())
 
-    return {"base_url": base_url, "reset_eval": reset_eval, "uploaded": uploaded}
+    return {"base_url": base_url, "reset": reset, "uploaded": uploaded}
 
 
 async def run_api_smoke(base_url: str, cases: list[EvaluationCase]) -> dict[str, Any]:
     """执行一个有依据问题和一个无依据问题，校验 SSE 与持久化契约。"""
-    _require_eval_collection()
     success = next((case for case in cases if case.expected_status == "SUCCESS" and case.expected_sources), None)
     insufficient = next((case for case in cases if case.expected_status == "LOCAL_EVIDENCE_INSUFFICIENT"), None)
     if success is None or insufficient is None:
@@ -141,16 +139,6 @@ def _safe_response(text: str, events: list[dict[str, Any]]) -> bool:
     forbidden = ["Traceback", "GLM_API_KEY", "TAVILY_API_KEY", "Authorization"]
     forbidden.extend(value for value in os.environ.values() if value and len(value) >= 8)
     return not any(marker in haystack for marker in forbidden)
-
-
-def _require_eval_collection() -> None:
-    """阻止 prepare/api-smoke 误连正式知识库。"""
-    collection = os.environ.get("MILVUS_COLLECTION_NAME", "")
-    if not collection.startswith("law_agent_eval"):
-        raise RuntimeError(
-            "评测入口要求 MILVUS_COLLECTION_NAME 以 law_agent_eval 开头，"
-            "请先配置独立 Milvus 集合。"
-        )
 
 
 def _content_type(path: Path) -> str:
