@@ -1,4 +1,4 @@
-"""BE-049 Judge 与 Milvus 隔离配置测试。"""
+"""BE-049 Judge 与 Milvus 配置测试。"""
 
 from app.config.settings import Settings
 from app.containers import build_evaluation_judge_provider, create_container
@@ -49,11 +49,11 @@ def test_container_can_select_deepseek_provider_without_network_call() -> None:
 def test_custom_collection_is_passed_to_milvus_adapter() -> None:
     settings = Settings(
         milvus_cloud_uri="https://cloud.example",
-        milvus_collection_name="law_agent_eval_test",
+        milvus_collection_name="test_collection",
         _env_file=None,
     )  # type: ignore[call-arg]
     container = create_container(settings)
 
     store = container.resolve(VectorStore)
 
-    assert store._collection_name == "law_agent_eval_test"
+    assert store._collection_name == "test_collection"

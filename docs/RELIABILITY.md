@@ -100,8 +100,8 @@ LOG_LEVEL=ERROR  # 仅输出 ERROR
 
 ## RAG 端到端评测（BE-049）
 
-- **执行范围**：评测使用真实 LLM、Embedding、Milvus 和 Reranker；工作流直调负责质量指标，HTTP/SSE 只负责产品路径冒烟。
-- **数据隔离**：评测必须使用独立的 `MILVUS_COLLECTION_NAME`，默认不得清理 `law_chunks`；评测 SQLite 数据也应使用单独路径。
+- **执行范围**：评测使用真实 LLM、Embedding、Milvus 和 Reranker，通过工作流直调与 LLM Judge 评估生成质量；`prepare` 只负责数据导入，不执行 HTTP/SSE 冒烟。接口契约由既有 API 集成测试覆盖。
+- **数据一致性**：评测复用当前服务配置的 `MILVUS_COLLECTION_NAME` 和 `SQLITE_DB_PATH`，以便测量实际知识库；默认评测不清理数据，`prepare --reset` 是显式的全量删除操作，只能在可重建的测试知识库执行。
 - **报告内容**：报告记录数据集版本、Git commit、Provider、模型名、指标、耗时和失败原因；敏感配置只记录“已配置/未配置”或模型名，禁止写入 API Key、Authorization 和完整环境变量。
 - **真实模型波动**：LLM Judge 结果不是确定性 CI 门禁。评测脚本遇到单条超时或 Judge 失败时继续执行并记录该案例，只有基础设施不可用、数据格式非法或报告无法写入时才返回非零退出码。
 - **Judge 约束**：Judge 只能依据问题、评测要点、系统回答、检索证据和引用评分，不允许把外部知识当作证据；Judge 模型与回答模型的实际名称必须写入报告。

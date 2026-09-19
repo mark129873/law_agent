@@ -1,15 +1,22 @@
 # progress.md -- 会话进度日志
 
 ## 当前已验证状态
-- 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`（当前分支 feature/auto_coder）
+- 当前工作树：`C:\Users\nnnnnn\.codex\worktrees\43a6\law_agent`（detached HEAD）；已有 Session 052 未提交修改予以保留。
 - 标准启动路径：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`（`MILVUS_PROVIDER` 默认 `cloud` 读取 `MILVUS_CLOUD_*`；本地 standalone 必须显式设为 `local` 并启动 Docker）
-- 标准验证路径：`cd backend && uv run pytest tests -q -rs`（本轮 255 passed、5 skipped、1 warning）；启动后 `curl http://127.0.0.1:8000/api/health`
+- 标准验证路径：`cd backend && uv run pytest tests -q -rs`；本轮使用已有虚拟环境的 Python 执行同一测试集，256 passed、5 skipped（Milvus 不可达）、1 warning；服务配置齐全后启动并检查 `/api/health`。
 - Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ Reranker 模型统一（BE-046）+ 低质量兜底 Agent 删除（BE-047）+ Tavily Remote MCP 搜索（BE-048/FE-017）全部 passing：主图 + Local Legal RAG 子图 + Tavily Web Search + Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
 - 当前 Reranker：全项目统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；`check_rerank_local.py` 首次下载到根目录 `.model/cross-encoder/ms-marco-MiniLM-L-6-v2` 并执行 CPU 样本打分。本地 `.env` 已切换为该模型并开启 `RERANK_ENABLED=true`；无法使用时仍按既有故障降级契约记录 WARN。
 - 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；grounding 未通过且预算耗尽时直接进入 `final_answer_node`，不再调用额外兜底 LLM；其他重试机制不变
-- 当前最高优先级未完成功能：BE-049 RAG 端到端评测代码、数据集、真实隔离集合运行和脱敏基线已具备；仍需处理真实 GLM 调用稳定性后才能把质量门禁标为 passing；其余 BE-001~048 与 FE-001~017 保持 passing 或 deprecated
-- 当前 blocker：Milvus、Embedding 和 API/SSE 均已恢复；真实 workflow 23 条中 13 条出现 GLM `ConnectError`/HTTP 400，当前属于外部模型调用稳定性 blocker，不把失败样本计入检索质量分数。前端未改动，沿用既有 `npm run build` 与 API/组件契约验证。
+- 当前最高优先级未完成功能：BE-049 已保留 prepare/workflow 生成质量评测、数据集和旧版隔离配置历史基线；仍需在共享知识库配置下重跑真实模型评测，不能将旧基线写成当前配置已验证。
+- 当前 blocker：此 worktree 尚无 `.env` 和 Milvus Cloud 连接配置；旧版真实 workflow 23 条中 13 条出现 GLM `ConnectError`/HTTP 400，模型稳定性问题待验证。前端未改动。
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md、progress-archive-031-040.md（Session 001~040 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
+
+### Session 053（评测收敛为 RAG 生成质量）（2026-09-19）
+- 按用户确认删除 api-smoke 子命令、实现、专用测试和报告渲染；文档导入迁移到 `app/evaluation/corpus.py`，保留 prepare/workflow。
+- README 改为「RAG 评测」，说明 Judge 四维评分、门槛、辅助指标和报告；同步架构、产品、可靠性与功能清单，历史基线仅展示 RAG 质量结果。
+- 测试前确认当前 worktree 无 SQLite/WAL/SHM、无后端进程且未配置 Milvus；复用已有 Python 环境执行离线回归，不启动 Docker、不操作其他工作树知识库。
+- 验证：全量 pytest 256 passed、5 skipped、1 warning（含现有 API 集成测试）；CLI 三种 help、compileall、JSON 与 diff 检查通过。13 个热层 Session、23 个 passing 热条目、40 个归档条目，共 68 个功能，无需沉降。
+- 本轮开始前已有 13 个文件未提交，其中与当前修改存在重叠；保留原改动，不将其代为提交。真实服务启动和模型质量分数未在本轮重测。
 
 ### Session 050（Milvus 显式部署选择与 DeepSeek）（2026-09-18）
 - 新增 `MILVUS_PROVIDER=cloud|local`，默认 cloud；cloud 使用 `MILVUS_CLOUD_URI/TOKEN`，local 使用 `MILVUS_URI/TOKEN`，不再按 URI 是否存在自动回退。
@@ -19,6 +26,11 @@
 ### Session 051（明确测试环境清理步骤）（2026-09-19）
 - 更新 `docs/RELIABILITY.md`：明确下次 Codex 测试前先删除当前 `SQLITE_DB_PATH` 对应的 SQLite 测试数据库及 WAL/SHM 文件，再执行 `uv run python scripts/reset_milvus.py --yes` 删除当前配置的 Milvus 测试集合。
 - 本轮仅更新测试运维文档，不改业务代码；已执行 diff 校验与 JSON 校验。
+
+### Session 052（评测复用业务存储）（2026-09-19）
+- RAG 评测改为复用当前 `MILVUS_COLLECTION_NAME` 和 `SQLITE_DB_PATH`，删除 `law_agent_eval*` 集合强制校验及评测专用启动配置。
+- `prepare` 默认只追加测试文档；全量清理改为显式 `prepare --reset`，并在 README、PRODUCT、ARCHITECTURE、RELIABILITY 和 `.env.example` 标注其破坏性。
+- 历史真实结果保留在 `docs/evaluation-baseline.md`，明确它来自旧版隔离配置，不冒充当前共享知识库基线。
 
 ### Session 049（Milvus Cloud 默认连接）（2026-09-18）
 - Settings 优先读取 `MILVUS_CLOUD_URI` / `MILVUS_CLOUD_TOKEN`，并把 API Key 传入 `MilvusVectorStore`；旧 `MILVUS_URI` / `MILVUS_TOKEN` 保留给 standalone 回退。

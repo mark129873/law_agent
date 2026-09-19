@@ -1,5 +1,35 @@
 # 会话交接
 
+## Session 053：RAG 生成质量评测（2026-09-19）
+
+### 本轮已完成
+- 用户确认同时删除 api-smoke 子命令、实现与专用测试，保留 prepare/workflow；语料导入迁到 `app/evaluation/corpus.py`，默认追加与显式 `--reset` 行为保留。
+- README 标题改为「RAG 评测」，以正确性、完整性、依据支持、引用准确性和报告使用为主；同步架构、产品、可靠性、历史基线及 BE-049 描述。
+- 新增 CLI 回归覆盖旧命令被拒绝、prepare 入口迁移与默认不重置、workflow 加载数据集并调用质量评测器。
+
+### 验证与结论
+- 全量 pytest：256 passed、5 skipped（Milvus 不可达）、1 warning；包含既有 API 集成测试，未重新执行真实 LLM 评测。
+- CLI 主入口/prepare/workflow help、compileall、JSON、diff 检查通过；13 个热层 Session，passing 热条目 23、归档 40，共 68 个功能，无需沉降。
+
+### 环境与风险
+- 本 worktree 无 `.env`、SQLite/WAL/SHM、运行中的后端或 Milvus Cloud 配置；验证复用 `C:/Users/nnnnnn/Desktop/law_agent/backend/.venv/Scripts/python.exe`，导入的是当前 worktree 代码。没有清理其他工作树数据，也没有启动 Docker。
+- 真实服务启动和模型评分未重跑，BE-049 继续 `in_progress`；已有 GLM 失败与旧版隔离基线不能当作当前共享知识库验证结果。
+- 开始时已有 13 个未提交文件且与本轮修改重叠，保留全部原修改，不代为提交；旧 Session 的命令仅作历史记录，当前入口以 README 为准。
+
+## Session 052：评测复用业务存储（2026-09-19）
+
+### 本轮目标
+- 按用户要求，RAG 评测不再使用独立 Milvus 集合或 SQLite 数据库，直接跟随当前服务配置。
+
+### 本轮计划
+- 文档先行：同步 README、PRODUCT、ARCHITECTURE、RELIABILITY、`.env.example`、feature_list 和历史基线说明。
+- 代码随后移除 `law_agent_eval*` 强制校验与评测专用配置注入；`prepare` 的全量删除保留为显式 `--reset`。
+- 运行评测单测、CLI/JSON/编译检查，提交清晰 commit；不启动 Docker，收尾确认 Docker 保持关闭。
+
+### 当前风险
+- 共享存储意味着 `prepare --reset` 会删除当前数据库中的全部文档及向量，不能在不可重建的知识库执行。
+- `docs/evaluation-baseline.md` 的旧报告仍记录隔离配置，只作为历史结果，需重新运行共享配置后才能形成新基线。
+
 ## Session 051：明确测试环境清理步骤（2026-09-19）
 
 ### 本轮已完成
@@ -73,15 +103,13 @@
 - 使用 `MILVUS_COLLECTION_NAME=law_agent_eval` 尝试真实 workflow，初始化阶段因 `127.0.0.1:19530` 无法连接失败；没有生成或填写虚构的 RAG 基线分数。
 - BE-049 仍为 `in_progress`。启动 Docker/Milvus、Embedding/LLM、Reranker 后，按 README 执行 `prepare → workflow → api-smoke`，确认报告内容后再改为 `passing`。
 
-### 下一轮直接执行
+### 当前评测命令（Session 053 更新）
+
+已导入测试文档时直接运行 workflow；需要 prepare 时，先按 README 的快速开始启动后端。
+
 ```powershell
 cd backend
-$env:MILVUS_COLLECTION_NAME="law_agent_eval"
-$env:SQLITE_DB_PATH="data/law_agent_eval.db"
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
-uv run python scripts/evaluate_rag.py prepare --base-url http://127.0.0.1:8000 --reset-eval
 uv run python scripts/evaluate_rag.py workflow --cases tests/evaluation/rag_cases.jsonl
-uv run python scripts/evaluate_rag.py api-smoke --base-url http://127.0.0.1:8000
 ```
 
 ## 当前已验证
