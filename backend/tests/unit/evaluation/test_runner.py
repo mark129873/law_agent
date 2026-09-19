@@ -45,6 +45,27 @@ class FakeJudge:
         return JudgeScore(correctness=5, completeness=4, groundedness=5, citation_accuracy=5).apply_gate(case.must_cite)
 
 
+class FakeTraceSink:
+    """最小 trace fake：验证直调评测不会绕过 trace 生命周期。"""
+
+    def __init__(self, trace_id: str) -> None:
+        self.trace_id = trace_id
+        self.calls: list[tuple[str, str]] = []
+
+    def start_trace(self, *, session_id: str, question: str) -> None:
+        self.calls.append(("start", session_id))
+
+    def start_span(self, *, node: str, parent=None):
+        self.calls.append(("span", node))
+        return None
+
+    def record_event(self, *, name: str, payload: dict[str, str]) -> None:
+        self.calls.append(("event", name))
+
+    def end_trace(self, *, output=None, error=None, metadata=None) -> None:
+        self.calls.append(("end", "error" if error else "ok"))
+
+
 @pytest.mark.asyncio
 async def test_workflow_collector_keeps_events_metrics_and_judge() -> None:
     cases = [
@@ -72,6 +93,30 @@ async def test_workflow_collector_keeps_events_metrics_and_judge() -> None:
     assert results[0].metrics["retrieval_hit_at_1"] == 1.0
     assert results[0].judge is not None and results[0].judge.passed is True
     assert results[1].metrics["retrieval_empty"] is True
+
+
+@pytest.mark.asyncio
+async def test_workflow_collector_can_trace_direct_evaluation() -> None:
+    sinks: list[FakeTraceSink] = []
+
+    def factory() -> FakeTraceSink:
+        sink = FakeTraceSink(f"trace-{len(sinks) + 1}")
+        sinks.append(sink)
+        return sink
+
+    case = EvaluationCase(
+        id="trace",
+        category="local_factual",
+        question="有依据的问题",
+        expected_status="SUCCESS",
+        expected_sources=["法条.txt"],
+    )
+    results = await evaluate_workflow_cases(FakeWorkflow(), [case], FakeJudge(), factory)
+
+    assert results[0].trace_id == "trace-1"
+    assert sinks[0].calls[0] == ("start", "evaluation-trace")
+    assert ("event", "plan") in sinks[0].calls
+    assert sinks[0].calls[-1] == ("end", "ok")
 
 
 def test_report_writes_json_and_markdown(tmp_path: Path) -> None:

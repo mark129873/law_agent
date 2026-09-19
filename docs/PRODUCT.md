@@ -81,3 +81,4 @@ RAG 评测系统用于评估生成答案的质量、回归验证和失败分析�
 - 评测结果输出 JSON 和 Markdown；不新增评测前端页面，不把密钥、Authorization 或完整敏感配置写入报告。
 - 质量评测直接调用工作流，依据问题、答案要点、检索证据和最终回答评估正确性、完整性、依据支持及引用准确性；检索与 grounding 指标辅助定位问题。评测入口只保留数据准备和质量评测，不包含 API/SSE 冒烟测试。
 - 评测 Judge 默认复用主 LLM；需要隔离评测模型时，可通过 `EVAL_JUDGE_PROVIDER` 与 `EVAL_JUDGE_MODEL` 单独配置。
+- 开启 `LANGFUSE_ENABLED` 后，评测每条案例会记录独立 trace 和 Judge span；报告中的 trace ID 只用于开发者排障，不改变终端问答行为。

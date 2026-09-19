@@ -422,6 +422,10 @@ npm run build                                      # tsc 类型检查 + 生产�
 引用精确率/召回率、grounding 结果、LLM Judge 分数、失败案例和延迟统计。真实 LLM Judge
 可通过 `EVAL_JUDGE_PROVIDER` / `EVAL_JUDGE_MODEL` 独立配置；未配置时回退主 LLM。
 
+当 `LANGFUSE_ENABLED=true` 时，直调评测为每条案例创建 `evaluation-<case_id>` trace，
+复用节点 span 与 LLM generation 采集，并将 Judge 调用放入 `evaluation_judge` span；
+`EvaluationCaseResult.trace_id` 写入报告，供失败案例回查完整 Prompt、路由、检索事件和模型输出。
+
 评测复用 `Settings` 当前配置的 `MILVUS_COLLECTION_NAME` 和 `SQLITE_DB_PATH`，不额外创建集合或数据库，
 其中工作流直接访问当前向量库，`prepare` 经服务端文档 API 维护元数据与向量。评测默认不清理数据，只有显式执行
 `prepare --reset` 才会通过文档 API 删除当前数据库中的全部文档并重新导入测试文档。

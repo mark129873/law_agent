@@ -64,6 +64,7 @@ class EvaluationCaseResult(BaseModel):
     event_types: list[str] = Field(default_factory=list)
     status_events: list[dict[str, Any]] = Field(default_factory=list)
     node_durations: dict[str, int] = Field(default_factory=dict)
+    trace_id: str = ""
     metrics: dict[str, float | int | bool | None] = Field(default_factory=dict)
     judge: JudgeScore | None = None
     judge_error: str = ""

@@ -10,15 +10,17 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import Any, Callable
 
 from app.agent.events import event_emitter_var
 from app.agent.services.llm_service import LLMService
+from app.agent.trace_context import trace_span_var
 from app.config.settings import Settings
-from app.containers import build_evaluation_judge_provider, create_container
+from app.containers import _build_trace_sink_factory, build_evaluation_judge_provider, create_container
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
 from app.domain.services.qa_workflow import QaWorkflow, QaStreamEvent
+from app.domain.services.trace_sink import TraceSink, trace_sink_var
 from app.evaluation.dataset import dataset_sha256
 from app.evaluation.judge import EvaluationJudge
 from app.evaluation.metrics import citation_metrics, retrieval_metrics, source_names, summarize_results
@@ -29,93 +31,162 @@ async def evaluate_workflow_cases(
     workflow: QaWorkflow,
     cases: list[EvaluationCase],
     judge: EvaluationJudge | None = None,
+    trace_sink_factory: Callable[[], TraceSink | None] | None = None,
 ) -> list[EvaluationCaseResult]:
-    """对任意 QaWorkflow 执行评测；可注入 fake 以测试整个收集逻辑。"""
+    """对任意 QaWorkflow 执行评测；可选地为每条案例建立 Langfuse trace。"""
     results: list[EvaluationCaseResult] = []
     for case in cases:
         started = perf_counter()
         events: list[QaStreamEvent] = []
-        token = event_emitter_var.set(events.append)
+        trace_sink = trace_sink_factory() if trace_sink_factory is not None else None
+        trace_token = trace_sink_var.set(trace_sink) if trace_sink is not None else None
+        trace_finished = False
+        trace_id = ""
         try:
-            final = await workflow.ainvoke(
-                {
-                    "question": case.question,
-                    "history": [],
-                    "conversation_id": f"evaluation-{case.id}",
-                    "web_search_requested": case.use_web_search,
-                }
-            )
-        except Exception as error:
-            results.append(
-                EvaluationCaseResult(
-                    case_id=case.id,
-                    category=case.category,
-                    question=case.question,
-                    expected_status=case.expected_status,
-                    expected_sources=case.expected_sources,
-                    duration_ms=_elapsed_ms(started),
-                    completed=False,
-                    error_type=type(error).__name__,
-                    error_message=_safe_error(error),
-                )
-            )
-            continue
-        finally:
-            event_emitter_var.reset(token)
+            if trace_sink is not None:
+                trace_sink.start_trace(session_id=f"evaluation-{case.id}", question=case.question)
+                trace_id = str(getattr(trace_sink, "trace_id", "") or "")
 
-        evidence = _as_dict_list(final.get("evidence") or final.get("ranked_evidence") or [])
-        citations = _as_dict_list(final.get("citations") or [])
-        answer = str(final.get("answer") or final.get("final_answer") or "")
-        actual_status = str(final.get("rag_status") or final.get("capability_status") or "")
-        grounding_passed = final.get("grounding_passed")
-        grounding = grounding_passed if isinstance(grounding_passed, bool) else None
-        metrics = retrieval_metrics(evidence, case.expected_sources)
-        metrics.update(citation_metrics(citations, case.expected_sources, case.must_cite))
-        metrics["status_match"] = actual_status == case.expected_status
-        metrics["grounding_passed"] = grounding
-        node_durations = _trace_durations(final.get("trace") or [])
-        result = EvaluationCaseResult(
-            case_id=case.id,
-            category=case.category,
-            question=case.question,
-            expected_status=case.expected_status,
-            actual_status=actual_status,
-            status_match=actual_status == case.expected_status,
-            grounding_passed=grounding,
-            expected_sources=case.expected_sources,
-            retrieved_sources=source_names(evidence),
-            citations=citations,
-            evidence=_compact_evidence(evidence),
-            answer=answer,
-            event_types=[event.type for event in events],
-            status_events=[
-                {
-                    "node": event.node,
-                    "label": event.label,
-                    "phase": event.phase,
-                    "duration_ms": event.duration_ms,
-                }
-                for event in events
-                if event.type == "status"
-            ],
-            node_durations=node_durations,
-            metrics=metrics,
-            duration_ms=_elapsed_ms(started),
-        )
-
-        if judge is not None:
+            event_token = event_emitter_var.set(events.append)
             try:
-                result.judge = await judge.score(
-                    case,
-                    answer=answer,
-                    evidence=result.evidence,
-                    citations=citations,
-                    actual_status=actual_status,
+                final = await workflow.ainvoke(
+                    {
+                        "question": case.question,
+                        "history": [],
+                        "conversation_id": f"evaluation-{case.id}",
+                        "web_search_requested": case.use_web_search,
+                    }
                 )
             except Exception as error:
-                # Judge 故障不能掩盖工作流结果；报告中单独记录，后续案例继续执行。
-                result.judge_error = _safe_error(error)
-        results.append(result)
+                safe_error = _safe_error(error)
+                if trace_sink is not None:
+                    trace_sink.end_trace(
+                        error=safe_error,
+                        metadata={"evaluation_case_id": case.id},
+                    )
+                    trace_finished = True
+                results.append(
+                    EvaluationCaseResult(
+                        case_id=case.id,
+                        category=case.category,
+                        question=case.question,
+                        expected_status=case.expected_status,
+                        expected_sources=case.expected_sources,
+                        trace_id=trace_id,
+                        duration_ms=_elapsed_ms(started),
+                        completed=False,
+                        error_type=type(error).__name__,
+                        error_message=safe_error,
+                    )
+                )
+                continue
+            finally:
+                event_emitter_var.reset(event_token)
+
+            evidence = _as_dict_list(final.get("evidence") or final.get("ranked_evidence") or [])
+            citations = _as_dict_list(final.get("citations") or [])
+            answer = str(final.get("answer") or final.get("final_answer") or "")
+            actual_status = str(final.get("rag_status") or final.get("capability_status") or "")
+            grounding_passed = final.get("grounding_passed")
+            grounding = grounding_passed if isinstance(grounding_passed, bool) else None
+            metrics = retrieval_metrics(evidence, case.expected_sources)
+            metrics.update(citation_metrics(citations, case.expected_sources, case.must_cite))
+            metrics["status_match"] = actual_status == case.expected_status
+            metrics["grounding_passed"] = grounding
+            node_durations = _trace_durations(final.get("trace") or [])
+            result = EvaluationCaseResult(
+                case_id=case.id,
+                category=case.category,
+                question=case.question,
+                expected_status=case.expected_status,
+                actual_status=actual_status,
+                status_match=actual_status == case.expected_status,
+                grounding_passed=grounding,
+                expected_sources=case.expected_sources,
+                retrieved_sources=source_names(evidence),
+                citations=citations,
+                evidence=_compact_evidence(evidence),
+                answer=answer,
+                event_types=[event.type for event in events],
+                status_events=[
+                    {
+                        "node": event.node,
+                        "label": event.label,
+                        "phase": event.phase,
+                        "duration_ms": event.duration_ms,
+                    }
+                    for event in events
+                    if event.type == "status"
+                ],
+                node_durations=node_durations,
+                trace_id=trace_id,
+                metrics=metrics,
+                duration_ms=_elapsed_ms(started),
+            )
+
+            _record_evaluation_events(trace_sink, events, evidence)
+            if judge is not None:
+                judge_started = perf_counter()
+                judge_span = trace_sink.start_span(node="evaluation_judge") if trace_sink else None
+                judge_token = trace_span_var.set(judge_span) if judge_span is not None else None
+                try:
+                    result.judge = await judge.score(
+                        case,
+                        answer=answer,
+                        evidence=result.evidence,
+                        citations=citations,
+                        actual_status=actual_status,
+                    )
+                except Exception as error:
+                    # Judge 故障不能掩盖工作流结果；报告中单独记录，后续案例继续执行。
+                    result.judge_error = _safe_error(error)
+                finally:
+                    if judge_token is not None:
+                        trace_span_var.reset(judge_token)
+                    if judge_span is not None:
+                        judge_span.end(duration_ms=_elapsed_ms(judge_started), error=result.judge_error or None)
+
+            if trace_sink is not None:
+                trace_sink.record_event(
+                    name="evaluation_result",
+                    payload={
+                        "case_id": case.id,
+                        "actual_status": actual_status,
+                        "grounding_passed": str(grounding),
+                        "evidence_count": str(len(evidence)),
+                        "citation_count": str(len(citations)),
+                    },
+                )
+                if result.judge is not None:
+                    trace_sink.record_event(
+                        name="judge_score",
+                        payload={
+                            "passed": str(result.judge.passed),
+                            "correctness": str(result.judge.correctness),
+                            "completeness": str(result.judge.completeness),
+                            "groundedness": str(result.judge.groundedness),
+                            "citation_accuracy": str(result.judge.citation_accuracy),
+                        },
+                    )
+                trace_sink.end_trace(
+                    output=answer,
+                    metadata={
+                        "evaluation_case_id": case.id,
+                        "actual_status": actual_status,
+                        "grounding_passed": str(grounding),
+                        "judge_passed": str(result.judge.passed if result.judge else False),
+                    },
+                )
+                trace_finished = True
+            results.append(result)
+        finally:
+            if trace_sink is not None and not trace_finished:
+                trace_sink.end_trace(
+                    error="evaluation case aborted",
+                    metadata={"evaluation_case_id": case.id},
+                )
+            if trace_token is not None:
+                trace_sink_var.reset(trace_token)
     return results
 
 
@@ -130,15 +201,20 @@ async def run_workflow_evaluation(
     container = create_container(settings)
     vector_store = container.resolve(VectorStore)
     await vector_store.initialize()
+    trace_sink_factory = _build_trace_sink_factory(settings)
     try:
         workflow = container.resolve(QaWorkflow)
         primary = container.resolve(LLMProvider)
         judge_provider = build_evaluation_judge_provider(settings, primary)
         judge = EvaluationJudge(LLMService(judge_provider))
-        results = await evaluate_workflow_cases(workflow, cases, judge)
+        results = await evaluate_workflow_cases(workflow, cases, judge, trace_sink_factory)
         settings_snapshot = _settings_snapshot(settings, primary.model_name, judge.model_name)
     finally:
         await vector_store.close()
+        if trace_sink_factory is not None:
+            shutdown = getattr(trace_sink_factory, "shutdown", None)
+            if callable(shutdown):
+                shutdown()
 
     report, report_dir = build_and_write_report(
         results,
@@ -213,6 +289,49 @@ def _trace_durations(trace: Any) -> dict[str, int]:
 
 def _elapsed_ms(started: float) -> int:
     return int((perf_counter() - started) * 1000)
+
+
+def _record_evaluation_events(
+    trace_sink: TraceSink | None,
+    events: list[QaStreamEvent],
+    evidence: list[dict[str, Any]],
+) -> None:
+    """把直调评测中不会经过 ChatService 的流程事件补进 trace。"""
+    if trace_sink is None:
+        return
+    for event in events:
+        if event.type == "plan":
+            trace_sink.record_event(
+                name="plan",
+                payload={"sub_queries": "；".join(event.sub_queries)[:1000]},
+            )
+        elif event.type in {"sources", "web_sources"}:
+            trace_sink.record_event(
+                name=event.type,
+                payload={
+                    "count": str(len(event.sources)),
+                    "sources": "；".join(source_names(_as_dict_list(event.sources)))[:1000],
+                },
+            )
+        elif event.type == "web_search_notice":
+            trace_sink.record_event(
+                name=event.type,
+                payload={"code": event.code, "message": event.message[:500]},
+            )
+        elif event.type == "regenerating":
+            trace_sink.record_event(name=event.type, payload={})
+        elif event.type == "think":
+            trace_sink.record_event(
+                name=event.type,
+                payload={"node": event.node, "text": event.text[:500]},
+            )
+    trace_sink.record_event(
+        name="retrieval_summary",
+        payload={
+            "evidence_count": str(len(evidence)),
+            "sources": "；".join(source_names(evidence))[:1000],
+        },
+    )
 
 
 def _safe_error(error: Exception) -> str:
