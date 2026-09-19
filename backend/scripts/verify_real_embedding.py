@@ -4,9 +4,11 @@
 运行前提：Milvus standalone 已启动（backend/docker-compose.yml）。
 """
 import asyncio
-import os
+import sys
+from pathlib import Path
 
-os.chdir(r"C:\Users\nnnnnn\Desktop\law_agent\backend")
+_BACKEND_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_BACKEND_ROOT))
 
 from app.common.logging import setup_logging
 from app.config.settings import Settings

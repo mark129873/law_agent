@@ -66,8 +66,8 @@ Frontend (React)  --HTTP/SSE-->  FastAPI
 
 ### 1. 克隆项目并创建配置
 ```bash
-git clone https://github.com/mark129873/law_agent_harness.git
-cd law_agent_harness
+git clone https://github.com/mark129873/law_agent.git
+cd law_agent
 cp backend/.env.example backend/.env
 ```
 ### 2. 配置 Milvus

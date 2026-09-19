@@ -14,6 +14,18 @@
 ### 代码交付
 - 主图与 RAG 子图流程保持不变；核心代码与同步文档已提交为 `79f6f8a`，本页和进度记录的收尾修订随后提交。
 
+## Session 061：全项目代码与文档一致性审计（2026-09-19）
+
+### 本轮已完成
+- 修正 `docs/ARCHITECTURE.md` 中过期的 RRF 预截断值和测试数量；同步 `feature_list.json` 的 `LANGFUSE_BASE_URL` 字段名，并将旧交接快照明确标为历史，避免与 Langfuse 当前默认开启冲突。
+- 修正 `backend/scripts/verify_ollama_stream.py`、`verify_real_embedding.py`、`verify_real_e2e.py` 的硬编码用户目录；README 克隆地址同步当前 Git remote。
+
+### 验证与结论
+- 后端全量：259 passed、5 skipped（Milvus 集成服务不可达）、1 warning；前端 `npm run build` 通过。
+- compileall、LangGraph Mermaid 导出、RAG 评测 CLI help、Settings/.env.example 40 字段覆盖、JSON、`git diff --check` 通过；活动代码与文档不再引用旧 Planner Provider 配置。
+- BE-049 状态与真实质量结论不变；本轮未重新执行依赖 Ollama embedding/真实 LLM 的 RAG 质量评测。
+- 审计改动待本轮提交。
+
 ## Session 059：直调 RAG 评测接入 Langfuse（2026-09-19）
 
 ### 本轮已完成
@@ -193,13 +205,13 @@ cd backend
 uv run python scripts/evaluate_rag.py workflow --cases tests/evaluation/rag_cases.jsonl
 ```
 
-## 当前已验证
+## 历史验证快照（旧 Session，已被上方 Session 060 覆盖）
 - **法律条文边界优先 Chunk 切分（BE-052）已 passing**：`DocumentPipeline.chunk_text` 识别行首“第 X 条”标题，短法条可合并，超长法条不再被 `chunk_size` 从中间截断；普通文本仍按段落与滑窗处理。20 个定向测试、真实专利法第四十二条完整性探针、全量 pytest 227 passed/1 warning 通过。
 - 现在明确可用的部分：
-  - **Agent 模块一期重写 + 思考块 + Langfuse trace + 全量 Prompt 优化 + 精排状态语义修复 + Reranker 模型统一 + 低质量兜底 Agent 删除 + Tavily Remote MCP 搜索全部 passing（BE-032~048 + FE-001~017；BE-030 deprecated）**：主图含 14 个业务节点 + RAG 子图 10 节点 + Tavily Web Search + Plugin Stub + 服务层 + status/think 双事件 + 豆包式思考块 + Langfuse 三级追踪 + 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾。BE-049 评测运行器已实现但真实基线待补。
+  - **Agent 模块一期重写 + 思考块 + Langfuse trace + 全量 Prompt 优化 + 精排状态语义修复 + Reranker 模型统一 + 低质量兜底 Agent 删除 + Tavily Remote MCP 搜索全部 passing（BE-032~048 + FE-001~017；BE-030 deprecated）**：主图含 12 个业务节点（含 START/END 共 14 个图节点）+ RAG 子图 10 节点 + Tavily Web Search + Plugin Stub + 服务层 + status/think 双事件 + 豆包式思考块 + Langfuse 三级追踪 + 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾。BE-049 评测运行器已实现但真实基线待补。
   - **Tavily Remote MCP 搜索（BE-048/FE-017）**：按钮状态通过 `use_web_search` 传递；`WebSearchPort` → Tavily Streamable HTTP `tavily_search` → `observation_node` → Answer/grounding/final；只在按钮开启时实际联网，搜索结果以 300 字网页预览经 `web_sources` 展示，完整原始/规范化数据写入 `backend/log/web_search/search-<UTC>-<UUID>.log`，落盘失败 fail-closed；真实 Remote MCP 已返回 5 条来源并完成 SSE/持久化验收。
   - **全量 Prompt 优化（BE-044，本轮新增）**：12 个 Prompt 统一五段结构（角色/任务/格式/规则/纪律）+ JSON 纪律（禁 markdown 代码块）+ 示例值防锚定标注 + answer_generator 明确【来源：文件名】格式硬约束 + grounding 降误判（实质一致即可/无关数字不算法律数据/宁可放行）。**编排器"不 finish"误诊修正**（Langfuse 时间线取证：闲聊打回真凶是重复执行 direct_answer，非 judge）——regenerating：RAG 2→0、闲聊 3→0；RAG 回答从 65 字重复堆砌变一句精准+来源标注。
-  - **Langfuse trace（BE-043，本轮新增）**：domain TraceSink/TraceSpan 端口 + trace_sink_var（ContextVar）；infrastructure/trace/langfuse_sink.py（langfuse 4.15.2）；ChatService 记 trace 生命周期与流程事件、with_node_status 压/弹节点 span（子图嵌套）、LLMService 三路径记 generation；.env 开关 LANGFUSE_ENABLED（默认 false，缺密钥 WARN 降级，全方法吞异常）。
+  - **Langfuse trace（BE-043，本轮新增）**：domain TraceSink/TraceSpan 端口 + trace_sink_var（ContextVar）；infrastructure/trace/langfuse_sink.py（langfuse 4.15.2）；ChatService 记 trace 生命周期与流程事件、with_node_status 压/弹节点 span（子图嵌套）、LLMService 三路径记 generation；当时 `.env` 开关 LANGFUSE_ENABLED 默认 false，现行默认已改为 true；缺密钥仍 WARN 降级，全方法吞异常。
   - **真实云端验证通过**（jp.cloud.langfuse.com，用户 .env 预置密钥）：E2E trace 含 29 节点 span / 11 generation（model+Prompt+输出）/ 15 think + 2 regenerating 事件。
   - **精排状态语义修复（BE-045）**：`RERANK_ENABLED=false` 被识别为主动关闭，使用 RRF 但不再显示“精排不可用”；CrossEncoder 真失败仍保留 degraded/WARN；启动日志记录 `rerank_enabled` 与 `reranker_device`。
   - **Reranker 模型统一（BE-046）**：生产配置、检查脚本、`.env.example`、README 和架构文档统一为 `cross-encoder/ms-marco-MiniLM-L-6-v2`；检查脚本下载到根目录 `.model` 后从本地目录加载并执行样本打分。

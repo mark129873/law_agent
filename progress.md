@@ -1,7 +1,7 @@
 # progress.md -- 会话进度日志
 
 ## 当前已验证状态
-- 当前主工作树：`C:\Users\nnnnnn\Desktop\law_agent`（`feature/auto_coder`，核心代码提交 `79f6f8a`）；`codex/archive-cleanup` 隔离 worktree 保留在历史提交 `73255d6`，未合并分支为空。
+- 当前主工作树：`C:\Users\nnnnnn\Desktop\law_agent`（`feature/auto_coder`，核心代码提交 `79f6f8a`，全项目审计改动待提交）；`codex/archive-cleanup` 隔离 worktree 保留在历史提交 `73255d6`，未合并分支为空。
 - 标准启动路径：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`（`MILVUS_PROVIDER` 默认 `cloud` 读取 `MILVUS_CLOUD_*`；本地 standalone 必须显式设为 `local` 并启动 Docker）
 - 标准验证路径：`cd backend && uv run pytest tests -q -rs`；本轮 259 passed、5 skipped（Milvus 集成服务不可达）、1 warning；服务配置齐全后启动并检查 `/api/health`。
 - Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ Reranker 模型统一（BE-046）+ 低质量兜底 Agent 删除（BE-047）+ Tavily Remote MCP 搜索（BE-048/FE-017）全部 passing：主图 + Local Legal RAG 子图 + Tavily Web Search + Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
@@ -17,6 +17,11 @@
 - 真实复评：`prepare --reset` 在首份文档 embedding 阶段因本机无 Ollama 服务失败，已删除本次产生的失败元数据记录，未改写已有真实评测指标；下一轮需恢复 Ollama 后再验证质量变化。
 - 法律条文边界优先 Chunk 切分（BE-052）已 passing：识别行首法条标题，短法条可合并，超长法条保持原子性；普通文本仍使用原有段落与滑窗规则。
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md、progress-archive-031-040.md（Session 001~040 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
+
+### Session 061（全项目代码与文档一致性审计）（2026-09-19）
+- 修正架构文档的 RRF 预截断值（20→32）和测试统计（单元 186、集成 66、接口 12、自动化合计 264；本轮 259 passed/5 skipped/1 warning）；修正功能清单的 `LANGFUSE_BASE_URL` 字段名，并把交接文档旧快照明确标为历史。
+- 修正三个真实验证脚本的硬编码用户目录，改为按 `__file__` 定位 backend；README 克隆地址与当前 remote 同步为 `mark129873/law_agent.git`。
+- 验证：后端全量 pytest 259 passed、5 skipped、1 warning；前端 `npm run build` 通过；compileall、LangGraph 图导出、评测 CLI help、JSON 与 `git diff --check` 通过；Settings 与 `.env.example` 均覆盖 40 个配置字段，活动代码无旧 Planner Provider 引用。
 
 ### Session 059（直调 RAG 评测接入 Langfuse）（2026-09-19）
 - 根因确认：`workflow` 评测直接调用 `QaWorkflow.ainvoke()`，原先绕过 `ChatService`，因此真实评测报告没有 Langfuse trace，只有工作流内置节点摘要。
