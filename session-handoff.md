@@ -1,5 +1,31 @@
 # 会话交接
 
+## Session 059：直调 RAG 评测接入 Langfuse（2026-09-19）
+
+### 本轮已完成
+- 确认原有 `workflow` 评测直接调用 `QaWorkflow.ainvoke()`，绕过 `ChatService`，所以真实评测没有 Langfuse trace；保留现有业务入口，不改成依赖 HTTP/SSE。
+- 评测运行器现在按案例创建 `evaluation-<case_id>` trace，复用节点 span 与 LLM generation，补记 plan/think/sources/retrieval/evaluation 事件，并把 Judge 调用放进 `evaluation_judge` span。
+- `LangfuseTraceSink` 使用 v4 一等 `session_id`，暴露 trace ID；评测报告 JSON 的 `EvaluationCaseResult.trace_id` 可直接回查；评测结束显式 shutdown 等待批量上报。
+
+### 验证与结论
+- 第二轮真实共享评测报告：`backend/log/evaluation/20260919T053533Z-7f6b9aab/`；23/23 完成、0 workflow failure、23/23 唯一 trace 可从 Langfuse 查询。
+- 指标：Hit@5/Recall@5=0.913、MRR=0.8406、grounding 通过率=0.8696、Judge 通过率=0.5217、平均延迟 11.24s；BE-049 继续 `in_progress`。
+- LF-002 trace 证明首轮及恢复轮均未召回专利法第三十五至三十八条，导致证据不足和 Judge 完整性扣分；本轮只补可观测性，不修改检索算法、数据集预期或门槛。
+- 定向 trace/评测测试 16 passed；全量 pytest 258 passed、5 skipped、1 warning；compileall、JSON、diff 检查通过。评测后 SQLite 与 Milvus `law_chunks` 已清理。
+- 提交：`a004376 feat: trace direct rag evaluation with langfuse`。
+
+## Session 058：真实共享 RAG 评测与 clean-state 收尾（2026-09-19）
+
+### 本轮已完成
+- 使用当前 `backend/.env` 启动后端并完成真实 `prepare`/`workflow`：主 LLM 为 DeepSeek，Judge `follow` 复用主 LLM，Embedding 为 Ollama，Milvus Cloud 集合为 `law_chunks`，启用本地 MiniLM Reranker。
+- `prepare` 导入 5 份法律测试文档；`workflow` 完成 23/23 条案例，0 条 workflow failure。报告目录为 `backend/log/evaluation/20260919T051128Z-514ba54b/`，原始 JSON/Markdown 报告保留。
+- 按 `docs/RELIABILITY.md` 清理当前 SQLite 数据库、评测临时数据库和 Milvus `law_chunks` 集合；没有把测试语料留在共享知识库中。
+
+### 验证与结论
+- Hit@5/Recall@5=0.913、MRR=0.8623、grounding 通过率=0.8261、Judge 通过率=0.5217、平均延迟约 11.0s。
+- 11 条状态预期不匹配、4 条 grounding 失败、11 条 Judge 未通过；BE-049 继续 `in_progress`，本轮不修改数据集预期、不降低质量门槛。
+- 下一步先区分数据集状态契约（尤其联网搜索关闭时的 `DISABLED`）与实际检索/回答质量问题，再决定是否进入查询链路优化。
+
 ## Session 057：规划器与评测 Judge 配置收敛（2026-09-19）
 
 ### 本轮已完成

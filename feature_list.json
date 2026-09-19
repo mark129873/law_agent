@@ -204,7 +204,7 @@
       "name": "RAG 端到端评测系统",
       "description": "基于现有法律测试文档和 QaWorkflow 评估 RAG 生成质量：工作流直调收集最终回答、证据、引用、grounding 与耗时，LLM Judge 评估正确性、完整性、依据支持和引用准确性；计算 Recall@K、MRR 等辅助指标并输出 JSON/Markdown 报告。仅保留 prepare/workflow，复用当前知识库配置，支持独立 Judge 模型。",
       "status": "in_progress",
-      "evidence": "2026-09-19：规划器统一复用主 LLM，评测配置改用 JudgeProvider，默认主 LLM 为 DeepSeek；定向 25 passed、全量 257 passed/5 skipped/1 warning；真实共享评测待重跑。commit 6934409。"
+      "evidence": "2026-09-19：直调 workflow 接入 Langfuse，每案例 trace/Judge span/trace_id；真实共享评测 23/23 完成、23/23 trace 可回查，Hit@5/Recall@5=0.913、MRR=0.8406、Judge 通过率=0.5217，质量未达门槛，保持 in_progress。报告 20260919T053533Z-7f6b9aab；commit a004376。"
     },
     {
       "id": "BE-050",

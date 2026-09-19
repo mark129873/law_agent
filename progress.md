@@ -1,16 +1,29 @@
 # progress.md -- 会话进度日志
 
 ## 当前已验证状态
-- 当前主工作树：`C:\Users\nnnnnn\Desktop\law_agent`（`feature/auto_coder`，HEAD `6934409`）；`codex/archive-cleanup` 隔离 worktree 已同步到同一提交，未合并分支为空。
+- 当前主工作树：`C:\Users\nnnnnn\Desktop\law_agent`（`feature/auto_coder`，HEAD `a004376`）；`codex/archive-cleanup` 隔离 worktree 保留在历史提交 `73255d6`，未合并分支为空。
 - 标准启动路径：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`（`MILVUS_PROVIDER` 默认 `cloud` 读取 `MILVUS_CLOUD_*`；本地 standalone 必须显式设为 `local` 并启动 Docker）
 - 标准验证路径：`cd backend && uv run pytest tests -q -rs`；本轮 257 passed、5 skipped（Milvus 不可达）、1 warning；服务配置齐全后启动并检查 `/api/health`。
 - Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ Reranker 模型统一（BE-046）+ 低质量兜底 Agent 删除（BE-047）+ Tavily Remote MCP 搜索（BE-048/FE-017）全部 passing：主图 + Local Legal RAG 子图 + Tavily Web Search + Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
 - 当前 Reranker：全项目统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；`check_rerank_local.py` 首次下载到根目录 `.model/cross-encoder/ms-marco-MiniLM-L-6-v2` 并执行 CPU 样本打分。本地 `.env` 已切换为该模型并开启 `RERANK_ENABLED=true`；无法使用时仍按既有故障降级契约记录 WARN。
 - 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；grounding 未通过且预算耗尽时直接进入 `final_answer_node`，不再调用额外兜底 LLM；其他重试机制不变
-- 当前最高优先级未完成功能：BE-049 已保留 prepare/workflow 生成质量评测、数据集和旧版隔离配置历史基线；仍需在共享知识库配置下重跑真实模型评测，不能将旧基线写成当前配置已验证。
-- 当前 blocker：此 worktree 尚无 `.env` 和 Milvus Cloud 连接配置；旧版真实 workflow 23 条中 13 条出现 GLM `ConnectError`/HTTP 400，模型稳定性问题待验证。前端未改动。
+- 当前最高优先级未完成功能：BE-049 已完成一次共享知识库真实模型评测，但质量未达门槛；报告保留在 `backend/log/evaluation/20260919T051128Z-514ba54b/`，不能将本次结果写成 passing。
+- 当前 blocker：最新真实 workflow 23/23 完成且无基础设施失败，但 `status_match_rate=0.5217`、`judge_pass_rate=0.5217`；部分本地证据不足/联网搜索关闭案例与当前产品契约或数据集预期不一致，另有检索证据不足案例待决定是否修正数据集或查询链路。Langfuse 已能按案例回查完整 trace；前端未改动。
 - 法律条文边界优先 Chunk 切分（BE-052）已 passing：识别行首法条标题，短法条可合并，超长法条保持原子性；普通文本仍使用原有段落与滑窗规则。
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md、progress-archive-031-040.md（Session 001~040 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
+
+### Session 059（直调 RAG 评测接入 Langfuse）（2026-09-19）
+- 根因确认：`workflow` 评测直接调用 `QaWorkflow.ainvoke()`，原先绕过 `ChatService`，因此真实评测报告没有 Langfuse trace，只有工作流内置节点摘要。
+- 最小改动：评测运行器按案例建立 `evaluation-<case_id>` trace，把节点 span、LLM generation、流程事件和 `evaluation_judge` span 接入同一条链路；`EvaluationCaseResult` 保存 `trace_id`；Langfuse v4 使用一等 `session_id`，评测结束显式 shutdown 等待批量上报。
+- 真实验证：第二轮共享配置评测 23/23 完成、0 条 workflow failure、23/23 唯一 trace 可查询；Hit@5/Recall@5=0.913、MRR=0.8406、grounding=0.8696、Judge 通过率=0.5217、平均延迟 11.24s。报告：`backend/log/evaluation/20260919T053533Z-7f6b9aab/`。
+- Langfuse 取证：LF-002 首轮及恢复轮均显示缺少专利法第三十五至三十八条证据，导致状态不足和 Judge 完整性扣分；本轮未擅自修改检索算法、数据集预期或质量门槛。
+- 验证：trace/评测定向 16 passed；全量 `uv run pytest tests -q -rs` 为 258 passed、5 skipped、1 warning；compileall、JSON 与 `git diff --check` 通过；评测后已清理 SQLite 和 Milvus `law_chunks`。commit `a004376`。
+
+### Session 058（真实共享 RAG 评测与 clean-state 收尾）（2026-09-19）
+- 使用当前本地配置启动后端：主 LLM 为 DeepSeek、Judge `follow` 复用主 LLM，Embedding 为 Ollama，Milvus Cloud 使用 `law_chunks`，启用 MiniLM Reranker。
+- `prepare` 导入 5 份测试文档；`workflow` 运行 23 条案例，23/23 完成、0 条 workflow failure。结果：Hit@5/Recall@5=0.913、MRR=0.8623、grounding 通过率=0.8261、Judge 通过率=0.5217、平均延迟 11.0s；质量尚未达到 passing。
+- 报告：`backend/log/evaluation/20260919T051128Z-514ba54b/`；真实 Judge 使用 `deepseek-v4-flash`。评测后按 RELIABILITY 清理 SQLite（含临时评测库）和 Milvus `law_chunks`，保留报告工件。
+- 结论：BE-049 继续保持 `in_progress`。11 条状态预期不匹配、4 条 grounding 失败和 11 条 Judge 未通过案例需要后续区分数据集契约问题与检索/回答质量问题，未在本轮擅自改数据集或放宽门槛。
 
 ### Session 057（规划器与评测 Judge 配置收敛）（2026-09-19）
 - 规划器删除独立 Provider/模型配置，工作流构建器、RAG 子图和主图节点统一复用同一个主 LLM 实例；`PlannerProvider` 改为仅历史记录，代码配置移除。
