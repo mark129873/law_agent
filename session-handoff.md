@@ -1,5 +1,17 @@
 # 会话交接
 
+## Session 055：archive-cleanup 合并收尾（2026-09-19）
+
+### 本轮已完成
+- 从 Codex snapshot `a779df5` 恢复 `codex/archive-cleanup`，与当前 `feature/auto_coder` 的后续评测重构完成冲突整合。
+- 保留当前 `corpus.py` 与 `prepare/workflow` 评测入口，不恢复已经删除的 `api-smoke` / `http_smoke`；当前工作区 DeepSeek V4 Flash 修改已由 `898393a` 提交。
+- 合并提交 `c92e777` 已快进合入 `feature/auto_coder`；主工作树和 archive-cleanup worktree 均干净且指向同一提交。
+
+### 验证与结论
+- `uv run pytest tests -q -rs`：257 passed、5 skipped（Milvus 不可达）、1 warning。
+- CLI help、compileall、feature_list JSON、冲突标记和 `git diff --check` 均通过。
+- BE-049 继续 `in_progress`：真实共享 Milvus/LLM/Embedding/Reranker/Judge 评测尚未重跑，旧版隔离配置基线不代表当前配置。
+
 ## Session 053：RAG 生成质量评测（2026-09-19）
 
 ### 本轮已完成

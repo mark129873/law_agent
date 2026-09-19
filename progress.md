@@ -1,9 +1,9 @@
 # progress.md -- 会话进度日志
 
 ## 当前已验证状态
-- 当前工作树：`C:\Users\nnnnnn\.codex\worktrees\43a6\law_agent`（detached HEAD）；已有 Session 052 未提交修改予以保留。
+- 当前主工作树：`C:\Users\nnnnnn\Desktop\law_agent`（`feature/auto_coder`，HEAD `c92e777`）；`codex/archive-cleanup` 隔离 worktree 已同步到同一提交，未合并分支为空。
 - 标准启动路径：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`（`MILVUS_PROVIDER` 默认 `cloud` 读取 `MILVUS_CLOUD_*`；本地 standalone 必须显式设为 `local` 并启动 Docker）
-- 标准验证路径：`cd backend && uv run pytest tests -q -rs`；本轮使用已有虚拟环境的 Python 执行同一测试集，256 passed、5 skipped（Milvus 不可达）、1 warning；服务配置齐全后启动并检查 `/api/health`。
+- 标准验证路径：`cd backend && uv run pytest tests -q -rs`；本轮 257 passed、5 skipped（Milvus 不可达）、1 warning；服务配置齐全后启动并检查 `/api/health`。
 - Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ Reranker 模型统一（BE-046）+ 低质量兜底 Agent 删除（BE-047）+ Tavily Remote MCP 搜索（BE-048/FE-017）全部 passing：主图 + Local Legal RAG 子图 + Tavily Web Search + Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
 - 当前 Reranker：全项目统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；`check_rerank_local.py` 首次下载到根目录 `.model/cross-encoder/ms-marco-MiniLM-L-6-v2` 并执行 CPU 样本打分。本地 `.env` 已切换为该模型并开启 `RERANK_ENABLED=true`；无法使用时仍按既有故障降级契约记录 WARN。
 - 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；grounding 未通过且预算耗尽时直接进入 `final_answer_node`，不再调用额外兜底 LLM；其他重试机制不变
@@ -11,6 +11,12 @@
 - 当前 blocker：此 worktree 尚无 `.env` 和 Milvus Cloud 连接配置；旧版真实 workflow 23 条中 13 条出现 GLM `ConnectError`/HTTP 400，模型稳定性问题待验证。前端未改动。
 - 法律条文边界优先 Chunk 切分（BE-052）已 passing：识别行首法条标题，短法条可合并，超长法条保持原子性；普通文本仍使用原有段落与滑窗规则。
 - 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md、progress-archive-031-040.md（Session 001~040 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
+
+### Session 055（archive-cleanup 合并收尾）（2026-09-19）
+- 从 `refs/codex/snapshots/bd9e467f0a2c692deaa8ed62908fd148d6ea2e54` 恢复 `codex/archive-cleanup`，与后续评测重构整合；保留 `corpus.py` 与 `prepare/workflow` 入口，不恢复已删除的 `api-smoke/http_smoke`。
+- 当前工作区 DeepSeek V4 Flash 配置已由 `898393a` 提交；archive-cleanup 合并提交 `c92e777` 已快进合入 `feature/auto_coder`。
+- 验证：全量 pytest 257 passed、5 skipped、1 warning；CLI help、compileall、JSON、冲突标记和 diff 检查通过。
+- BE-049 仍为 `in_progress`；真实共享 Milvus/LLM/Judge 质量评测尚未重跑，旧版基线不作为当前配置结论。
 
 ### Session 053（评测收敛为 RAG 生成质量）（2026-09-19）
 - 按用户确认删除 api-smoke 子命令、实现、专用测试和报告渲染；文档导入迁移到 `app/evaluation/corpus.py`，保留 prepare/workflow。

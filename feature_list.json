@@ -204,7 +204,7 @@
       "name": "RAG 端到端评测系统",
       "description": "基于现有法律测试文档和 QaWorkflow 评估 RAG 生成质量：工作流直调收集最终回答、证据、引用、grounding 与耗时，LLM Judge 评估正确性、完整性、依据支持和引用准确性；计算 Recall@K、MRR 等辅助指标并输出 JSON/Markdown 报告。仅保留 prepare/workflow，复用当前知识库配置，支持独立 Judge 模型。",
       "status": "in_progress",
-      "evidence": "2026-09-19：移除 api-smoke，保留 prepare/workflow；全量 pytest 256 passed、5 skipped、1 warning，CLI/编译检查通过。23 条案例保留；旧版真实基线与 13 条 GLM 失败见 docs/evaluation-baseline.md，共享配置真实评测待重跑。"
+      "evidence": "2026-09-19：archive-cleanup 合入 c92e777；257 passed、5 skipped、1 warning，CLI/编译/JSON/diff 检查通过。BE-049 仍 in_progress，真实共享 Milvus/LLM/Judge 评测待重跑。"
     },
     {
       "id": "BE-050",
