@@ -64,7 +64,7 @@
       "name": "Agent 服务层（LLM/Milvus/Reranker/Citation）",
       "description": "LLMService 适配 LLMProvider（structured_invoke=chat+JSON 容错+重试 1 次+安全默认）；MilvusService 适配 VectorStore 端口（不直连 SDK）；RerankerService 使用 llama serve `/v1/rerank` 的 Qwen3 GGUF，失败降级 RRF 序 + reranker_degraded；CitationService 引用构建。Settings 新增 Embedding/Reranker HTTP 与模型路径配置。",
       "status": "passing",
-      "evidence": "2026-09-20：llama serve Qwen3 HTTP 适配器、RRF 降级与 24 个定向/268 个全量测试通过；双真实服务协议验收通过，提交号收尾后补入。"
+      "evidence": "2026-09-20：llama serve Qwen3 HTTP 适配器、RRF 降级与 24 个定向/268 个全量测试通过；双真实服务协议验收通过；commit ac7ba5c。"
     },
     {
       "id": "BE-034",
@@ -169,7 +169,7 @@
       "name": "区分精排主动关闭与模型故障降级",
       "description": "RERANK_ENABLED=false 时继续使用 RRF 融合序，但以 disabled 状态和“精排已关闭”思考文案展示；llama serve Reranker 请求异常仍以 degraded 状态、WARN 日志和故障文案展示；启动脚本按 LLAMA_DEVICE 非空与否决定是否追加 --device。",
       "status": "passing",
-      "evidence": "2026-09-20：disabled/degraded 两态、WARN 日志、空设备不传 --device 均通过协议测试和真实启动验收；提交号收尾后补入。"
+      "evidence": "2026-09-20：disabled/degraded 两态、WARN 日志、空设备不传 --device 均通过协议测试和真实启动验收；commit ac7ba5c。"
     },
     {
       "id": "BE-046",
@@ -233,7 +233,7 @@
       "name": "llama serve Qwen3 Embedding 与 Reranker",
       "description": "通过两个独立 llama serve HTTP 服务接入 Qwen3-Embedding-0.6B-Q8_0.gguf 与 qwen3-reranker-0.6b-q8_0.gguf；模型路径、服务地址、LLAMA_DEVICE 与 LLAMA_CONTEXT_SIZE 均由环境配置，空设备值不追加 --device；Embedding 使用 /v1/embeddings，Reranker 使用 /v1/rerank，服务失败继续按既有契约降级 RRF。",
       "status": "passing",
-      "evidence": "2026-09-20：Vulkan1 双服务真实加载与接口验收通过；Embedding 1024 维、Reranker 排序正确；24 定向/268 全量测试通过，提交号收尾后补入。",
+      "evidence": "2026-09-20：Vulkan1 双服务真实加载与接口验收通过；Embedding 1024 维、Reranker 排序正确；24 定向/268 全量测试通过；commit ac7ba5c。",
       "testedAt": "2026-09-20"
     }
   ]

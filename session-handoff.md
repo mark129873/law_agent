@@ -14,7 +14,7 @@
 - BE-049 仍为 `in_progress`：尚未用新模型重跑 23 条真实 RAG 质量评测，不报告质量收益或新指标。
 
 ### 代码交付
-- 提交号：收尾提交后补入。
+- 提交：`ac7ba5c feat: switch embedding and reranker to llama serve`。
 
 ## Session 062：固定真实 RAG 质量评测 Provider 边界（2026-09-19）
 

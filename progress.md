@@ -15,7 +15,7 @@
 - 新增 `scripts/start_llama_servers.py`：从 `.env` 读取两个 GGUF 路径、地址、`LLAMA_DEVICE` 和 `LLAMA_CONTEXT_SIZE`，分别启动 `--embedding` / `--rerank`；设备为空不传 `--device`。默认上下文 4096 是双进程显存稳定性的部署参数，设为 0 可恢复模型默认值。
 - 删除 sentence-transformers/torch 等旧精排依赖并同步 `uv.lock`；同步 Settings、容器、评测快照、README、ARCHITECTURE、PRODUCT、RELIABILITY、`.env.example` 和功能清单。
 - 验证：24 个定向测试、268 个全量测试通过（5 个 Milvus 集成跳过、1 warning）；compileall、`uv lock --check` 通过；`Vulkan1` 真实双服务启动、Embedding 2 条/1024 维、Reranker 2 条且相关文档排名第一；后端 `/api/health` 返回 `ok`。
-- 风险：BE-049 尚未使用新模型重跑真实质量评测，不能把本轮协议/启动通过写成检索质量提升；提交号在收尾提交后补入。
+- 风险：BE-049 尚未使用新模型重跑真实质量评测，不能把本轮协议/启动通过写成检索质量提升；commit `ac7ba5c`。
 
 ### Session 062（固定真实 RAG 质量评测 Provider 边界）（2026-09-19）
 - 文档与 CLI 明确真实质量评测固定使用 DeepSeek 主 LLM、当前 Milvus、MiniLM Reranker 和 Ollama Embedding；Ollama/GLM 对话 Provider 的通用协议测试不计入质量结论。
