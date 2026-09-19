@@ -1,5 +1,22 @@
 # 会话交接
 
+## Session 057：规划器与评测 Judge 配置收敛（2026-09-19）
+
+### 本轮已完成
+- 删除规划器独立 `PlannerProvider`、`PLANNER_PROVIDER`、`PLANNER_MODEL` 配置及装配分支；`create_qa_workflow` 与 `AgentGraphBuilder` 现在只接收并复用主 LLM，RAG 子图规划、主图路由/编排、回答和校验使用同一 Provider 实例。
+- 将评测 Judge 的配置枚举改为 `JudgeProvider`，`follow` 仍复用主 LLM，显式 Provider/模型时构造独立 Judge。
+- 按用户最新设定把 `Settings.llm_provider` 默认值改为 DeepSeek，并同步 `.env.example`、README、ARCHITECTURE、PRODUCT 与默认值测试；本地 `.env` 保留 DeepSeek 且移除废弃的 `PLANNER_*` 字段。
+- 运行时、配置测试和评测配置测试均保留中文注释与原有日志/安全边界；未改变 API/SSE 契约。
+
+### 验证与结论
+- 定向测试：25 passed；全量 `cd backend && uv run pytest tests -q -rs`：257 passed、5 skipped（Milvus 集成服务不可达）、1 warning。
+- compileall、LangGraph Mermaid 导出、`feature_list.json` JSON 校验、`git diff --check` 通过；等价启动命令 `cd backend && uv run python -m uvicorn ...` 成功，`GET /api/health` 返回 200，启动日志确认 `llm_provider=deepseek`。
+- 提交：`6934409 refactor: unify planner llm and rename judge provider`。
+
+### 环境与风险
+- 测试前按 RELIABILITY 要求清理了当前 SQLite 测试库并执行 `scripts/reset_milvus.py --yes`；本地 `backend/.env` 未纳入 Git，密钥未提交。
+- BE-049 仍为 `in_progress`：真实共享 Milvus/Embedding/LLM/Reranker/Judge 质量评测尚未重跑；旧版隔离配置基线仍不能代表当前共享配置。
+
 ## Session 055：archive-cleanup 合并收尾（2026-09-19）
 
 ### 本轮已完成
