@@ -190,7 +190,7 @@
       "name": "Tavily Remote MCP 联网搜索后端",
       "description": "通过 WebSearchPort 与 TavilyMcpSearchClient 接入官方 Remote MCP Streamable HTTP；按钮显式请求才调用 tavily_search，结果经 web_search_entry_node→observation_node→回答生成→grounding→final；支持配置状态、web_sources/web_search_notice SSE、失败不编造、grounding 重试复用结果；每次搜索将完整 MCP 原始响应和规范化结果原子写入永久独立 JSON 日志，脱敏且落盘失败闭合为失败。",
       "status": "passing",
-      "evidence": "2026-09-16：Fake MCP 8、主图 8、API 12 全通过；真实 Tavily SSE 返回 5 条来源并新增 1 个完整日志，按钮关闭未触网；真实 Milvus/GLM RAG E2E 通过；commit 21a19df。"
+      "evidence": "2026-09-16：Fake MCP 8、主图 8、API 12 全通过；真实 Tavily SSE 返回 5 条来源并新增 1 个完整日志，按钮关闭未触网；真实 Milvus/GLM RAG 通用 E2E 通过（非 BE-049 质量评测）；commit 21a19df。"
     },
     {
       "id": "FE-017",
@@ -202,9 +202,9 @@
     {
       "id": "BE-049",
       "name": "RAG 端到端评测系统",
-      "description": "基于现有法律测试文档和 QaWorkflow 评估 RAG 生成质量：工作流直调收集最终回答、证据、引用、grounding 与耗时，LLM Judge 评估正确性、完整性、依据支持和引用准确性；计算 Recall@K、MRR 等辅助指标并输出 JSON/Markdown 报告。仅保留 prepare/workflow，复用当前知识库配置，支持独立 Judge 模型。",
+      "description": "基于现有法律测试文档和 QaWorkflow 评估 RAG 生成质量：固定复用主 LangGraph 的 DeepSeek + Milvus + 开启 Reranker，Ollama 仅负责 Embedding；工作流直调收集回答、证据、引用、grounding 与耗时，Judge 仅允许 follow/deepseek，输出 JSON/Markdown 与 Recall@K、MRR 等指标。仅保留 prepare/workflow，其他 LLM Provider 不纳入真实质量评测。",
       "status": "in_progress",
-      "evidence": "2026-09-19：依据 Langfuse 失败 trace 优化恢复锚点、召回候选、路由、回答与 Judge 门控；全量 259 passed。真实复评因本机无 Ollama embedding 服务未完成，保持 in_progress；commit 79f6f8a。"
+      "evidence": "2026-09-19：固定真实评测为 DeepSeek+Milvus+Reranker，保留 Ollama Embedding并拒绝其他LLM；全量264 passed、5 skipped、1 warning。真实复评仍因本机无 Ollama embedding 服务未完成，保持 in_progress；commit 71e71b4。"
     },
     {
       "id": "BE-050",
@@ -216,7 +216,7 @@
     {
       "id": "BE-051",
       "name": "DeepSeek LLM Provider",
-      "description": "新增 DeepSeek OpenAI 兼容 Chat Completions Provider，主问答统一复用主 LLM，评测 Judge 可通过环境变量独立选择；使用 DEEPSEEK_API_KEY 认证，思考模式固定关闭。",
+      "description": "新增 DeepSeek OpenAI 兼容 Chat Completions Provider，主问答统一复用主 LLM；通用评测装配可通过环境变量独立选择 Judge，BE-049 真实质量评测固定使用 DeepSeek；使用 DEEPSEEK_API_KEY 认证，思考模式固定关闭。",
       "status": "passing",
       "evidence": "2026-09-18：DeepSeek chat/stream 协议测试通过，thinking=disabled；当前 DEEPSEEK_API_KEY 实测 deepseek-chat 返回非空答案，容器主模型选择测试通过。"
     },

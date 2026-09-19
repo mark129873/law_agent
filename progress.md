@@ -1,14 +1,19 @@
 # progress.md -- 会话进度日志
 
 ## 当前已验证状态
-- 当前主工作树：`C:\Users\nnnnnn\Desktop\law_agent`（`feature/auto_coder`，核心代码提交 `79f6f8a`，全项目审计提交 `09f4b64`）；`codex/archive-cleanup` 隔离 worktree 保留在历史提交 `73255d6`，未合并分支为空。
+- 当前主工作树：`C:\Users\nnnnnn\Desktop\law_agent`（`feature/auto_coder`，真实评测边界提交 `71e71b4`，全项目审计提交 `09f4b64`）；`codex/archive-cleanup` 隔离 worktree 保留在历史提交 `73255d6`，未合并分支为空。
 - 标准启动路径：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`（`MILVUS_PROVIDER` 默认 `cloud` 读取 `MILVUS_CLOUD_*`；本地 standalone 必须显式设为 `local` 并启动 Docker）
-- 标准验证路径：`cd backend && uv run pytest tests -q -rs`；本轮 259 passed、5 skipped（Milvus 集成服务不可达）、1 warning；服务配置齐全后启动并检查 `/api/health`。
+- 标准验证路径：`cd backend && uv run pytest tests -q -rs`；本轮 264 passed、5 skipped（Milvus 集成服务不可达）、1 warning；服务配置齐全后启动并检查 `/api/health`。
 - Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ Reranker 模型统一（BE-046）+ 低质量兜底 Agent 删除（BE-047）+ Tavily Remote MCP 搜索（BE-048/FE-017）全部 passing：主图 + Local Legal RAG 子图 + Tavily Web Search + Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
 - 当前 Reranker：全项目统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；`check_rerank_local.py` 首次下载到根目录 `.model/cross-encoder/ms-marco-MiniLM-L-6-v2` 并执行 CPU 样本打分。本地 `.env` 已切换为该模型并开启 `RERANK_ENABLED=true`；无法使用时仍按既有故障降级契约记录 WARN。
 - 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；grounding 未通过且预算耗尽时直接进入 `final_answer_node`，不再调用额外兜底 LLM；其他重试机制不变
 - 当前最高优先级未完成功能：BE-049 已完成一次共享知识库真实模型评测，但质量未达门槛；报告保留在 `backend/log/evaluation/20260919T053533Z-7f6b9aab/`，不能将本次结果写成 passing。
-- 当前 blocker：本轮基于 Langfuse 失败 trace 完成查询恢复、路由、回答和 Judge 优化，但重新 `prepare --reset` 时本机没有 Ollama embedding 服务（11434 无监听），因此没有新的真实质量分数；BE-049 继续 `in_progress`，前端未改动。
+- 当前 blocker：本轮已将真实质量评测固定为 DeepSeek + Milvus + Reranker，Ollama 仅保留为 Embedding，并拒绝其他 LLM Provider；本机仍没有 Ollama embedding 服务（11434 无监听），因此没有新的真实质量分数；BE-049 继续 `in_progress`，前端未改动。
+
+### Session 062（固定真实 RAG 质量评测 Provider 边界）（2026-09-19）
+- 文档与 CLI 明确真实质量评测固定使用 DeepSeek 主 LLM、当前 Milvus、MiniLM Reranker 和 Ollama Embedding；Ollama/GLM 对话 Provider 的通用协议测试不计入质量结论。
+- `run_workflow_evaluation` 在创建真实容器前校验 `LLM_PROVIDER=deepseek`、Milvus、`RERANK_ENABLED=true`，并限制 Judge 为 `follow/deepseek`；报告显式记录 `embedding_provider=ollama`。主图与 RAG 子图拓扑未改。
+- 全量 `uv run pytest tests -q -rs`：264 passed、5 skipped、1 warning；真实复评仍因本机无 Ollama embedding 服务未执行。提交：`71e71b4`。
 
 ### Session 060（Langfuse 驱动的 RAG 提示词与评测门控优化）（2026-09-19）
 - 根因：Langfuse LF-002 等 trace 显示恢复查询丢失专利法条号等精确锚点；`互联网` 被误判为联网意图；Judge 未把期望/实际状态纳入通过门槛，且对产品允许的来源文件引用过严。

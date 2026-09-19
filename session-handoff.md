@@ -1,5 +1,19 @@
 # 会话交接
 
+## Session 062：固定真实 RAG 质量评测 Provider 边界（2026-09-19）
+
+### 本轮已完成
+- 将真实 `workflow` 质量评测的基线固定为 DeepSeek 主 LLM、当前 Milvus、开启的 MiniLM Reranker 和 Ollama Embedding；Ollama 只负责向量化，不再作为真实评测的问答/Judge LLM。
+- `run_workflow_evaluation` 在创建容器前拒绝 Ollama/GLM 主 LLM、Ollama/GLM Judge、非 Milvus 配置和关闭 Reranker；`JudgeProvider` 的通用装配能力与独立 Provider 协议测试保留。
+- README、ARCHITECTURE、PRODUCT、RELIABILITY、`.env.example`、CLI 帮助和 BE-049 已同步；主图与 RAG 子图节点、边和流程未改变。
+
+### 验证与结论
+- `cd backend && uv run pytest tests -q -rs`：264 passed、5 skipped（Milvus 集成服务不可达）、1 warning。
+- 定向配置测试 9 passed；`git diff --check` 通过。真实质量评测尚未重跑：本机没有 Ollama embedding 服务，BE-049 继续 `in_progress`，没有新增质量分数。
+
+### 代码交付
+- 提交：`71e71b4 fix: constrain real rag evaluation stack`。
+
 ## Session 060：Langfuse 驱动的 RAG 提示词与评测门控优化（2026-09-19）
 
 ### 本轮已完成
