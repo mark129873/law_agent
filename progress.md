@@ -1,7 +1,7 @@
 # progress.md -- 会话进度日志
 
 ## 当前已验证状态
-- 当前主工作树：`C:\Users\nnnnnn\Desktop\law_agent`（`feature/auto_coder`，核心代码提交 `79f6f8a`，全项目审计改动待提交）；`codex/archive-cleanup` 隔离 worktree 保留在历史提交 `73255d6`，未合并分支为空。
+- 当前主工作树：`C:\Users\nnnnnn\Desktop\law_agent`（`feature/auto_coder`，核心代码提交 `79f6f8a`，全项目审计提交 `09f4b64`）；`codex/archive-cleanup` 隔离 worktree 保留在历史提交 `73255d6`，未合并分支为空。
 - 标准启动路径：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`（`MILVUS_PROVIDER` 默认 `cloud` 读取 `MILVUS_CLOUD_*`；本地 standalone 必须显式设为 `local` 并启动 Docker）
 - 标准验证路径：`cd backend && uv run pytest tests -q -rs`；本轮 259 passed、5 skipped（Milvus 集成服务不可达）、1 warning；服务配置齐全后启动并检查 `/api/health`。
 - Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ Reranker 模型统一（BE-046）+ 低质量兜底 Agent 删除（BE-047）+ Tavily Remote MCP 搜索（BE-048/FE-017）全部 passing：主图 + Local Legal RAG 子图 + Tavily Web Search + Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md

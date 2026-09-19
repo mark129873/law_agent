@@ -24,7 +24,7 @@
 - 后端全量：259 passed、5 skipped（Milvus 集成服务不可达）、1 warning；前端 `npm run build` 通过。
 - compileall、LangGraph Mermaid 导出、RAG 评测 CLI help、Settings/.env.example 40 字段覆盖、JSON、`git diff --check` 通过；活动代码与文档不再引用旧 Planner Provider 配置。
 - BE-049 状态与真实质量结论不变；本轮未重新执行依赖 Ollama embedding/真实 LLM 的 RAG 质量评测。
-- 审计改动待本轮提交。
+- 审计改动已提交为 `09f4b64`。
 
 ## Session 059：直调 RAG 评测接入 Langfuse（2026-09-19）
 
