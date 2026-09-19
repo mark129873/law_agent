@@ -95,7 +95,6 @@ def build_graph():
     llm = LLMService(_StubLLM())
     return AgentGraphBuilder(
         llm=llm,
-        planner=LLMService(_StubLLM()),
         milvus=MilvusService(_StubEmbedding(), _StubVectorStore()),
         reranker=RerankerService(_StubScorer()),
     ).build()

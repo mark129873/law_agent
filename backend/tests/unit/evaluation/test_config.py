@@ -1,6 +1,6 @@
 """BE-049 Judge 与 Milvus 配置测试。"""
 
-from app.config.settings import Settings
+from app.config.settings import JudgeProvider, Settings
 from app.containers import build_evaluation_judge_provider, create_container
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
@@ -15,6 +15,7 @@ def test_judge_defaults_to_the_primary_provider() -> None:
     primary = PrimaryFake()
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
 
+    assert settings.eval_judge_provider is JudgeProvider.FOLLOW
     assert build_evaluation_judge_provider(settings, primary) is primary
 
 

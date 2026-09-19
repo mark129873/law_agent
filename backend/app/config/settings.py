@@ -64,13 +64,8 @@ class LlmProvider(str, Enum):
     DEEPSEEK = "deepseek"
 
 
-class PlannerProvider(str, Enum):
-    """规划器 Provider 枚举（BE-030）。
-
-    FOLLOW 表示跟随 LLM_PROVIDER 使用同一个模型实例；
-    任务分解对模型能力最敏感，本地小模型规划质量不稳，
-    可显式指定 glm 用强模型规划、本地模型执行。
-    """
+class JudgeProvider(str, Enum):
+    """RAG 评测 Judge 的 Provider 枚举（BE-049）。"""
 
     FOLLOW = "follow"
     OLLAMA = "ollama"
@@ -123,7 +118,7 @@ class Settings(BaseSettings):
     milvus_collection_name: str = "law_chunks"
 
     # ---- 大模型 Provider ----
-    llm_provider: LlmProvider = LlmProvider.OLLAMA
+    llm_provider: LlmProvider = LlmProvider.DEEPSEEK
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3.5:4b"
     # 向量化模型独立配置：embedding 模型与对话模型通常是不同的模型
@@ -140,17 +135,10 @@ class Settings(BaseSettings):
     # 显著拉长首字延迟（真实环境曾达 30~40s）；默认关闭以获得即时流式输出
     llm_enable_thinking: bool = False
 
-    # ---- 规划器 Provider（BE-030 统一规划工作流）----
-    # 规划节点把问题拆解为子查询，对模型能力最敏感；
-    # follow=复用主 LLM Provider 实例，ollama/glm/deepseek=按所选 Provider 的
-    # 连接配置构造独立实例（模型名可用 planner_model 单独覆盖）
-    planner_provider: PlannerProvider = PlannerProvider.FOLLOW
-    planner_model: str = ""  # 空串表示用所选 Provider 的默认对话模型
-
     # ---- RAG 评测 Judge（BE-049）----
     # follow 且模型名为空时复用主 LLM；填写模型名或显式选择 Provider
     # 时构造独立 Judge，避免把评测逻辑写进问答工作流。
-    eval_judge_provider: PlannerProvider = PlannerProvider.FOLLOW
+    eval_judge_provider: JudgeProvider = JudgeProvider.FOLLOW
     eval_judge_model: str = ""
 
     # ---- Agent 服务（一期重写 BE-033）----

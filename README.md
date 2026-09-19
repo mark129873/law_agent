@@ -106,13 +106,13 @@ uv run python scripts/check_rerank_model/check_rerank_local.py
 cd backend
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
-若使用 Ollama：
+当前默认使用 DeepSeek，需配置 `DEEPSEEK_API_KEY`；也可切换其他 Provider。若使用 Ollama：
 ```bash
 ollama serve
 ollama pull qwen3.5:4b
 ollama pull nomic-embed-text:latest
 ```
-若使用 GLM，设置 `LLM_PROVIDER=glm` 和 `GLM_API_KEY`；若使用 DeepSeek，设置 `LLM_PROVIDER=deepseek` 和 `DEEPSEEK_API_KEY`，默认模型为 `deepseek-v4-flash`，思考模式固定关闭。
+若使用 GLM，设置 `LLM_PROVIDER=glm` 和 `GLM_API_KEY`；若切换为 DeepSeek，设置 `LLM_PROVIDER=deepseek` 和 `DEEPSEEK_API_KEY`，默认模型为 `deepseek-v4-flash`，思考模式固定关闭。
 
 
 ### 5. 启动前端

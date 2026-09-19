@@ -39,7 +39,6 @@ def create_qa_workflow(
     llm: LLMProvider,
     embedding: EmbeddingService,
     vector_store: VectorStore,
-    planner: LLMProvider | None = None,
     reranker: RerankerService | None = None,
     agent_config: AgentConfig | None = None,
     rag_config: LegalRAGConfig | None = None,
@@ -49,14 +48,14 @@ def create_qa_workflow(
 
     为什么返回类型标注为端口：调用方（装配点）只需知道拿到的是
     QaWorkflow 实现，LangGraph 与建造细节被封禁在本模块内部。
-    依赖全部显式注入：planner 缺省跟随主 LLM（BE-030 约定延续），
+    依赖全部显式注入：规划器与回答节点统一复用主 LLM，
     reranker 缺省按全局配置构造本地 CrossEncoder（懒加载，加载失败
     自动降级 RRF 序）。
     """
+    llm_service = LLMService(llm)
     return LangGraphQaWorkflow(
         AgentGraphBuilder(
-            llm=LLMService(llm),
-            planner=LLMService(planner or llm),
+            llm=llm_service,
             milvus=MilvusService(embedding, vector_store),
             reranker=reranker or _default_reranker(),
             agent_config=agent_config,

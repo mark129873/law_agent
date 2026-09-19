@@ -208,9 +208,9 @@ DELETE /api/documents/{id}：向量按 document_id 删除 + 元数据删除（�
 
 ### 面向对象结构
 - `AgentGraphBuilder`（建造者，agent/graph.py）：按设计 §3 拓扑装配主图，Local Legal RAG 子图作为复合节点接入（显式输入/输出过滤）；装配与条件边规则集中一处。
-- `LangGraphQaWorkflow`（适配器）：显式实现 `QaWorkflow` 领域端口；`astream` = ainvoke + ContextVar 事件队列排空（规避 langgraph 1.2.11 子图 custom 事件不上浮的实测缺陷）；对外唯一入口 `create_qa_workflow(llm, embedding, vector_store, planner, reranker, …)` 工厂。
+- `LangGraphQaWorkflow`（适配器）：显式实现 `QaWorkflow` 领域端口；`astream` = ainvoke + ContextVar 事件队列排空（规避 langgraph 1.2.11 子图 custom 事件不上浮的实测缺陷）；对外唯一入口 `create_qa_workflow(llm, embedding, vector_store, reranker, …)` 工厂。
 - 节点命名（设计 §2.1）：带 LLM 的节点以 `_agent` 结尾（意图路由/编排/检索规划/查询变体/证据评估/恢复规划/直接回答/回答生成/校验），确定性节点以 `_node` 结尾（动作路由/观察/策略路由/混合检索/证据重排/结果/stub/收尾）。
-- 模型分工：planner（PLANNER_PROVIDER）服务决策密集的轻节点（意图路由/顶层编排/RAG 子图规划），主 LLM 服务回答生成与 grounding 校验——强模型规划 + 快模型执行。
+- 模型统一：规划器（意图路由/顶层编排/RAG 子图规划）与回答生成、grounding 校验统一复用主 LLM Provider 实例，避免重复连接和独立规划器配置。
 
 ### 主图拓扑（由 scripts/export_qa_graph.py 生成，拓扑变更后重跑即可同步）
 
@@ -302,13 +302,11 @@ retrieval_planner_agent（检索计划，四类策略多选）
 |-------|------|------|
 | `DB_PROVIDER` | sqlite / mysql | sqlite |
 | `VECTOR_STORE_PROVIDER` | milvus（当前唯一已启用 Provider） | milvus |
-| `LLM_PROVIDER` | ollama / glm / deepseek | ollama |
+| `LLM_PROVIDER` | ollama / glm / deepseek | deepseek |
 | `DEEPSEEK_BASE_URL` | DeepSeek API 地址 | https://api.deepseek.com |
 | `DEEPSEEK_MODEL` | DeepSeek 对话模型 | `deepseek-v4-flash` |
 | `DEEPSEEK_API_KEY` | DeepSeek API Key（仅环境变量或 `.env`） | 空（`LLM_PROVIDER=deepseek` 时必填） |
-| `PLANNER_PROVIDER` | follow / ollama / glm / deepseek | follow（跟随 LLM_PROVIDER） |
-| `PLANNER_MODEL` | 模型名 | 空（用所选 Provider 的默认模型） |
-| `EVAL_JUDGE_PROVIDER` | follow / ollama / glm / deepseek | follow（默认复用主 LLM） |
+| `EVAL_JUDGE_PROVIDER` | follow / ollama / glm / deepseek | follow（默认复用主 LLM；其他值构造独立 Judge） |
 | `EVAL_JUDGE_MODEL` | 模型名 | 空（用主 LLM；非空时可独立指定 Judge） |
 | `LLM_ENABLE_THINKING` | true / false | false |
 | `RERANK_ENABLED` | true / false | true（CPU 且无 CUDA 实测较慢；false 表示主动使用 RRF 融合序，不应视为模型故障） |

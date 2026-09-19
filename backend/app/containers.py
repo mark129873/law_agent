@@ -20,7 +20,7 @@ from app.application.services.document_service import DocumentService
 from app.application.services.knowledge_service import KnowledgeIngestionService
 from app.application.services.rag_service import RagService
 from app.common.di import DIContainer
-from app.config.settings import PlannerProvider, Settings, VectorStoreProvider, get_settings
+from app.config.settings import JudgeProvider, Settings, VectorStoreProvider, get_settings
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
 from app.domain.services.embedding import EmbeddingService
@@ -127,29 +127,11 @@ def _build_named_llm_provider(settings: Settings, provider: str, model: str) -> 
 
 def build_evaluation_judge_provider(settings: Settings, primary: LLMProvider) -> LLMProvider:
     """构造评测 Judge；默认复用主模型，显式配置后才建立独立模型。"""
-    if settings.eval_judge_provider == PlannerProvider.FOLLOW and not settings.eval_judge_model:
+    if settings.eval_judge_provider == JudgeProvider.FOLLOW and not settings.eval_judge_model:
         return primary
-    provider = settings.llm_provider.value if settings.eval_judge_provider == PlannerProvider.FOLLOW else settings.eval_judge_provider.value
+    provider = settings.llm_provider.value if settings.eval_judge_provider == JudgeProvider.FOLLOW else settings.eval_judge_provider.value
     default_model = _default_llm_model(settings, provider)
     return _build_named_llm_provider(settings, provider, settings.eval_judge_model or default_model)
-
-
-def _build_planner(settings: Settings, container: DIContainer) -> LLMProvider:
-    """按配置构造规划器（工厂函数，BE-030）。
-
-    follow=复用主 LLM Provider 实例（零额外连接）；
-    ollama/glm/deepseek=按所选 Provider 的连接配置构造独立实例，
-    模型名可用 PLANNER_MODEL 单独覆盖。
-    为什么规划器可能用不同模型：任务分解对模型能力最敏感，
-    本地小模型规划质量不稳，强模型规划 + 快模型执行是常见组合。
-    """
-    if settings.planner_provider == PlannerProvider.FOLLOW:
-        return container.resolve(LLMProvider)
-    model = settings.planner_model  # 空串由各分支回退到该 Provider 默认模型
-    if settings.planner_provider in (PlannerProvider.OLLAMA, PlannerProvider.GLM, PlannerProvider.DEEPSEEK):
-        provider = settings.planner_provider.value
-        return _build_named_llm_provider(settings, provider, model or _default_llm_model(settings, provider))
-    raise NotImplementedError(f"规划器 Provider '{settings.planner_provider.value}' 尚未实现")
 
 
 def _build_document_pipeline(settings: Settings) -> DocumentPipeline:
@@ -257,7 +239,6 @@ def create_container(settings: Settings | None = None) -> DIContainer:
             c.resolve(LLMProvider),
             embedding=c.resolve(EmbeddingService),
             vector_store=c.resolve(VectorStore),
-            planner=_build_planner(settings, c),
             reranker=c.resolve(RerankerService),
             agent_config=AgentConfig(),
             rag_config=LegalRAGConfig(),

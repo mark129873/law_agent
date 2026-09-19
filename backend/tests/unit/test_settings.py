@@ -20,7 +20,7 @@ from app.config.settings import (
 
 
 def test_default_settings_use_current_generation_providers(monkeypatch: pytest.MonkeyPatch) -> None:
-    """默认配置应指向当前 Provider 代际：sqlite + milvus + ollama。"""
+    """默认配置应指向当前 Provider 代际：sqlite + milvus + deepseek。"""
     # 测试进程可能由 conftest 注入 LOG_DIR（隔离测试产物），此处清除以断言真实默认值
     monkeypatch.delenv("LOG_DIR", raising=False)
     # pymilvus 导入时会 load_dotenv 把 backend/.env 写进进程环境（BE-029 引入），
@@ -35,7 +35,7 @@ def test_default_settings_use_current_generation_providers(monkeypatch: pytest.M
     assert settings.milvus_cloud_uri == ""
     assert settings.milvus_uri == "http://127.0.0.1:19530"
     assert settings.resolved_milvus_uri == ""
-    assert settings.llm_provider is LlmProvider.OLLAMA
+    assert settings.llm_provider is LlmProvider.DEEPSEEK
     # BE-027：日志默认 INFO（保证"重要业务事件"默认可见），并落盘 backend/log/
     assert settings.log_level == "INFO"
     assert settings.log_dir == "log"
