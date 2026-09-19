@@ -1,9 +1,12 @@
-"""BE-049 Judge 与 Milvus 配置测试。"""
+"""BE-049 Judge、Milvus 与真实质量评测边界测试。"""
+
+import pytest
 
 from app.config.settings import JudgeProvider, Settings
 from app.containers import build_evaluation_judge_provider, create_container
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
+from app.evaluation.runner import validate_real_rag_evaluation_settings
 from app.infrastructure.llm.deepseek import DeepSeekProvider
 
 
@@ -58,3 +61,33 @@ def test_custom_collection_is_passed_to_milvus_adapter() -> None:
     store = container.resolve(VectorStore)
 
     assert store._collection_name == "test_collection"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"llm_provider": "ollama"}, "DeepSeek"),
+        ({"eval_judge_provider": "ollama"}, "follow 或 deepseek"),
+        ({"eval_judge_provider": "glm"}, "follow 或 deepseek"),
+        ({"rerank_enabled": False}, "Reranker"),
+    ],
+)
+def test_real_rag_evaluation_rejects_non_baseline_settings(overrides: dict[str, object], message: str) -> None:
+    """真实质量评测不得悄悄切到 Ollama/GLM 或关闭精排。"""
+    settings = Settings(_env_file=None, **overrides)  # type: ignore[call-arg]
+
+    with pytest.raises(ValueError, match=message):
+        validate_real_rag_evaluation_settings(settings)
+
+
+def test_real_rag_evaluation_allows_deepseek_follow_or_separate_judge() -> None:
+    """follow 与独立 DeepSeek Judge 都属于当前质量评测基线。"""
+    for judge_provider in ("follow", "deepseek"):
+        settings = Settings(
+            _env_file=None,  # type: ignore[call-arg]
+            llm_provider="deepseek",
+            eval_judge_provider=judge_provider,
+            rerank_enabled=True,
+        )
+
+        validate_real_rag_evaluation_settings(settings)

@@ -65,7 +65,11 @@ class LlmProvider(str, Enum):
 
 
 class JudgeProvider(str, Enum):
-    """RAG 评测 Judge 的 Provider 枚举（BE-049）。"""
+    """RAG 评测 Judge 的 Provider 枚举（BE-049）。
+
+    通用装配仍保留全部 Provider；真实 RAG 质量评测入口另行限制为
+    follow/deepseek，避免把其他对话模型结果混入质量基线。
+    """
 
     FOLLOW = "follow"
     OLLAMA = "ollama"
@@ -136,8 +140,8 @@ class Settings(BaseSettings):
     llm_enable_thinking: bool = False
 
     # ---- RAG 评测 Judge（BE-049）----
-    # follow 且模型名为空时复用主 LLM；填写模型名或显式选择 Provider
-    # 时构造独立 Judge，避免把评测逻辑写进问答工作流。
+    # 通用装配中 follow 且模型名为空时复用主 LLM；填写模型名或显式选择
+    # Provider 时构造独立 Judge。真实 RAG 质量评测入口只接受 follow/deepseek。
     eval_judge_provider: JudgeProvider = JudgeProvider.FOLLOW
     eval_judge_model: str = ""
 

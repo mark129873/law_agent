@@ -1,7 +1,8 @@
 """RAG 评测 CLI。
 
 入口保持薄：数据集、文档导入、工作流评测分别由 app.evaluation 模块负责，
-脚本只处理参数、运行配置和退出码。
+脚本只处理参数、运行配置和退出码。真实 workflow 评测固定使用
+DeepSeek + Milvus + Reranker，Ollama 仅作为 Embedding。
 """
 
 from __future__ import annotations
@@ -28,7 +29,10 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--reset", action="store_true", help="危险：删除当前数据库中的全部文档后再导入测试文档")
     prepare.add_argument("--output-root", default="log/evaluation")
 
-    workflow = subparsers.add_parser("workflow", help="直接调用 QaWorkflow 执行完整评测")
+    workflow = subparsers.add_parser(
+        "workflow",
+        help="使用 DeepSeek + Milvus + Reranker 直接调用 QaWorkflow 执行评测（Ollama 仅用于 Embedding）",
+    )
     workflow.add_argument("--cases", default="tests/evaluation/rag_cases.jsonl")
     workflow.add_argument("--output-root", default="log/evaluation")
 

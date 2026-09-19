@@ -126,8 +126,18 @@ npm run dev
 ## RAG 评测
 
 评测直接调用真实 `QaWorkflow`，根据测试问题、答案要点、检索证据和最终回答评估 RAG 生成质量。
-复用当前后端配置的 Milvus 知识库、Embedding、Reranker 和 LLM；这些依赖可用且测试文档已入库后，
-无需启动 HTTP 服务即可执行：
+真实质量评测固定使用以下链路：DeepSeek 主 LLM、当前配置的 Milvus、MiniLM Reranker，
+以及 Ollama Embedding（Ollama 在此路径只负责向量化，不负责问答或 Judge）。主 LangGraph 与 RAG
+子图按生产装配执行，不切换到其他 LLM Provider：
+
+- 主 LLM：`LLM_PROVIDER=deepseek`；
+- Embedding：`OLLAMA_EMBEDDING_MODEL`，入库和查询必须使用同一 Ollama 服务；
+- Reranker：`RERANK_ENABLED=true`，模型由 `RERANKER_MODEL_PATH` 指定；
+- 向量库：`MILVUS_PROVIDER` 与 `MILVUS_COLLECTION_NAME` 的当前配置。
+
+`workflow` 入口会在装配前拒绝 Ollama/GLM 主 LLM、Ollama/GLM Judge 和关闭 Reranker 的配置，
+避免把其他 Provider 的协议测试结果混入真实 RAG 质量结论。通用 Provider 测试仍独立保留。
+这些依赖可用且测试文档已入库后，无需启动 HTTP 服务即可执行：
 
 ```bash
 cd backend
@@ -147,7 +157,9 @@ LLM Judge 对每条回答按 0–5 分评分：
 Judge 通过条件为正确性 ≥4、完整性 ≥3、依据支持 ≥4；要求引用的案例还需引用准确性 ≥4。
 报告同时记录 grounding 校验结果、基于来源文件名的引用精确率/召回率，
 以及 Hit@K、Recall@K、MRR、耗时和失败案例，辅助定位生成质量问题。
-Judge 可通过 `EVAL_JUDGE_PROVIDER` 与 `EVAL_JUDGE_MODEL` 独立配置，默认使用主 LLM。
+Judge 默认通过 `EVAL_JUDGE_PROVIDER=follow` 复用 DeepSeek 主 LLM；如需独立 Judge，质量评测只允许
+`EVAL_JUDGE_PROVIDER=deepseek`，并可用 `EVAL_JUDGE_MODEL` 覆盖模型名。配置枚举中的其他 Provider
+仍服务于通用装配/协议测试，但不属于真实 RAG 质量评测。
 
 如果当前知识库还没有数据集对应的测试文档，先按“快速开始”启动后端，再在另一个终端导入：
 

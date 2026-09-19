@@ -306,7 +306,7 @@ retrieval_planner_agent（检索计划，四类策略多选）
 | `DEEPSEEK_BASE_URL` | DeepSeek API 地址 | https://api.deepseek.com |
 | `DEEPSEEK_MODEL` | DeepSeek 对话模型 | `deepseek-v4-flash` |
 | `DEEPSEEK_API_KEY` | DeepSeek API Key（仅环境变量或 `.env`） | 空（`LLM_PROVIDER=deepseek` 时必填） |
-| `EVAL_JUDGE_PROVIDER` | follow / ollama / glm / deepseek | follow（默认复用主 LLM；其他值构造独立 Judge） |
+| `EVAL_JUDGE_PROVIDER` | follow / ollama / glm / deepseek | follow（默认复用主 LLM；真实质量评测仅允许 follow/deepseek） |
 | `EVAL_JUDGE_MODEL` | 模型名 | 空（用主 LLM；非空时可独立指定 Judge） |
 | `LLM_ENABLE_THINKING` | true / false | false |
 | `RERANK_ENABLED` | true / false | true（CPU 且无 CUDA 实测较慢；false 表示主动使用 RRF 融合序，不应视为模型故障） |
@@ -406,8 +406,9 @@ npm run build                                      # tsc 类型检查 + 生产�
 
 ### 10.1 RAG 端到端评测（BE-049）
 
-评测系统是开发者侧能力，不改变终端用户问答 API。它使用现有测试法律文档、
-`QaWorkflow`、真实 Embedding、Milvus、Reranker 和 LLM，形成一套可复现的质量基线。
+评测系统是开发者侧能力，不改变终端用户问答 API。真实质量评测固定使用现有测试法律文档、
+`QaWorkflow`、DeepSeek 主 LLM、Ollama Embedding、Milvus 和 MiniLM Reranker，形成可复现的质量基线。
+Ollama 在这条评测链路中只负责 Embedding；Ollama/GLM 对话 Provider 的协议测试不计入 RAG 质量结论。
 
 质量评测统一通过 `workflow` 直接调用 `QaWorkflow.ainvoke()`，读取 `answer`、`rag_status`、
 `evidence`、`citations`、`grounding_passed` 和节点 trace。LLM Judge 对正确性、完整性、
@@ -419,8 +420,10 @@ npm run build                                      # tsc 类型检查 + 生产�
 期望来源、答案要点和是否必须引用。检索指标使用来源文件名匹配，不依赖随机生成的 chunk ID。
 
 评测报告同时输出 JSON 与 Markdown，包含数据集版本、Git commit、模型配置、Recall@K、MRR、
-引用精确率/召回率、grounding 结果、LLM Judge 分数、失败案例和延迟统计。真实 LLM Judge
-可通过 `EVAL_JUDGE_PROVIDER` / `EVAL_JUDGE_MODEL` 独立配置；未配置时回退主 LLM。
+引用精确率/召回率、grounding 结果、LLM Judge 分数、失败案例和延迟统计。真实 Judge 默认通过
+`EVAL_JUDGE_PROVIDER=follow` 复用 DeepSeek 主 LLM；需要独立模型时，真实质量评测只允许
+`EVAL_JUDGE_PROVIDER=deepseek`，并可通过 `EVAL_JUDGE_MODEL` 覆盖。配置枚举仍保留其他值供
+通用 Provider 装配和协议测试使用，但评测入口会拒绝它们。
 
 当 `LANGFUSE_ENABLED=true` 时，直调评测为每条案例创建 `evaluation-<case_id>` trace，
 复用节点 span 与 LLM generation 采集，并将 Judge 调用放入 `evaluation_judge` span；

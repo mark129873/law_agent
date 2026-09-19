@@ -15,7 +15,7 @@ from typing import Any, Callable
 from app.agent.events import event_emitter_var
 from app.agent.services.llm_service import LLMService
 from app.agent.trace_context import trace_span_var
-from app.config.settings import Settings
+from app.config.settings import JudgeProvider, LlmProvider, Settings, VectorStoreProvider
 from app.containers import _build_trace_sink_factory, build_evaluation_judge_provider, create_container
 from app.domain.repositories.llm_provider import LLMProvider
 from app.domain.repositories.vector_store import VectorStore
@@ -25,6 +25,25 @@ from app.evaluation.dataset import dataset_sha256
 from app.evaluation.judge import EvaluationJudge
 from app.evaluation.metrics import citation_metrics, retrieval_metrics, source_names, summarize_results
 from app.evaluation.models import EvaluationCase, EvaluationCaseResult, EvaluationReport
+
+
+def validate_real_rag_evaluation_settings(settings: Settings) -> None:
+    """校验真实 RAG 质量评测的固定基线，防止误跑成其他 Provider 评测。"""
+    # 真实质量结论必须来自当前主 LangGraph 的 DeepSeek 路径；通用 Provider
+    # 的协议测试仍可单独运行，但不能混入 BE-049 的质量报告。
+    if settings.llm_provider is not LlmProvider.DEEPSEEK:
+        raise ValueError(
+            "真实 RAG 质量评测固定使用 DeepSeek 主 LLM；请设置 LLM_PROVIDER=deepseek。"
+        )
+    if settings.vector_store_provider is not VectorStoreProvider.MILVUS:
+        raise ValueError("真实 RAG 质量评测固定使用 Milvus 向量库。")
+    if not settings.rerank_enabled:
+        raise ValueError("真实 RAG 质量评测必须开启 Reranker；请设置 RERANK_ENABLED=true。")
+    if settings.eval_judge_provider not in (JudgeProvider.FOLLOW, JudgeProvider.DEEPSEEK):
+        raise ValueError(
+            "真实 RAG 质量评测的 Judge 仅允许 follow 或 deepseek；"
+            "Ollama/GLM 仅用于通用 Provider 测试。"
+        )
 
 
 async def evaluate_workflow_cases(
@@ -202,6 +221,7 @@ async def run_workflow_evaluation(
     output_root: str | Path = "log/evaluation",
 ) -> tuple[EvaluationReport, Path]:
     """装配真实工作流、初始化向量库并写出一份评测报告。"""
+    validate_real_rag_evaluation_settings(settings)
     container = create_container(settings)
     vector_store = container.resolve(VectorStore)
     await vector_store.initialize()
@@ -357,6 +377,7 @@ def _settings_snapshot(settings: Settings, primary_model: str, judge_model: str)
     return {
         "llm_provider": settings.llm_provider.value,
         "llm_model": primary_model,
+        "embedding_provider": "ollama",
         "embedding_model": settings.ollama_embedding_model,
         "milvus_provider": settings.milvus_provider.value,
         "milvus_uri": settings.resolved_milvus_uri,

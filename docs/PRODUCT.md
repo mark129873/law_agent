@@ -77,10 +77,10 @@ RAG 评测系统用于评估生成答案的质量、回归验证和失败分析�
 - 向量库默认连接 Milvus Cloud；开发者通过 `MILVUS_PROVIDER=local` 显式切回本地 standalone。两种部署对用户侧上传、检索和参考文档展示行为保持一致。当前主 LLM 默认使用 DeepSeek；也可通过 `LLM_PROVIDER` 切换 Provider，DeepSeek 思考模式固定关闭。
 
 - 评测使用仓库内的法律测试文档，并复用当前 Milvus 集合和 SQLite 数据库；默认不清理数据，只有显式执行 `prepare --reset` 才会删除当前数据库中的全部文档，因此重置只适合可重建的测试知识库。
-- 真实 LLM 评测结果具有模型和网络波动性，报告用于展示趋势与失败案例，不把单次分数伪装成绝对正确率。
+- 真实质量评测固定使用 DeepSeek 主 LLM + Milvus + 开启的 MiniLM Reranker；Embedding 保留使用 Ollama，且 Ollama 只承担向量化。Ollama/GLM 对话 Provider 的协议测试与质量评测隔离。模型和网络具有波动性，报告用于展示趋势与失败案例，不把单次分数伪装成绝对正确率。
 - 评测结果输出 JSON 和 Markdown；不新增评测前端页面，不把密钥、Authorization 或完整敏感配置写入报告。
 - 质量评测直接调用工作流，依据问题、答案要点、检索证据和最终回答评估正确性、完整性、依据支持及引用准确性；检索与 grounding 指标辅助定位问题。评测入口只保留数据准备和质量评测，不包含 API/SSE 冒烟测试。
-- 评测 Judge 默认复用主 LLM；需要隔离评测模型时，可通过 `EVAL_JUDGE_PROVIDER` 与 `EVAL_JUDGE_MODEL` 单独配置。
+- 评测 Judge 默认复用 DeepSeek 主 LLM；需要隔离评测模型时，真实质量评测只允许通过 `EVAL_JUDGE_PROVIDER=deepseek` 与 `EVAL_JUDGE_MODEL` 配置，其他 Provider 不参与质量评测。
 - `LANGFUSE_ENABLED` 默认开启；密钥缺失或 Langfuse 不可达时仅记录 WARN 并降级，不阻断终端问答。评测每条案例会记录独立 trace 和 Judge span；报告中的 trace ID 只用于开发者排障，不改变终端问答行为。
 - 评测恢复轮会保留缺失证据中的法条号、期限和主体等关键锚点，扩大召回后再统一精排；主图和 RAG 子图的节点、边及恢复流程不变。
 - 评测 Judge 遵循产品引用协议：`【来源：文件名】` 与证据来源一致即可，不把“未要求引用”的直接回答因无本地证据判为不 grounded；期望状态与实际状态不一致时不通过。
