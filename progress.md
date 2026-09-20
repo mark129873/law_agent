@@ -5,10 +5,16 @@
 - 标准启动路径：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`（`MILVUS_PROVIDER` 默认 `cloud` 读取 `MILVUS_CLOUD_*`；本地 standalone 必须显式设为 `local` 并启动 Docker）
 - 标准验证路径：`cd backend && uv run pytest tests -q -rs`；本轮 268 passed、5 skipped（Milvus 集成服务不可达）、1 warning；标准后端启动和 `/api/health` 均通过。
 - Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ llama serve Qwen3 Embedding/Reranker（BE-053）+ 低质量兜底 Agent 删除（BE-047）+ Tavily Remote MCP 搜索（BE-048/FE-017）全部完成当前代码验证：主图 + Local Legal RAG 子图 + Tavily Web Search + Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
-- 当前 Embedding/Reranker：两个独立 `llama serve` 进程分别加载 `Qwen3-Embedding-0.6B-Q8_0.gguf` 与 `qwen3-reranker-0.6b-q8_0.gguf`；路径、地址、`LLAMA_DEVICE` 和 `LLAMA_CONTEXT_SIZE` 均由 `.env` 配置，当前设备为 `Vulkan1`、上下文为 4096。启动器真实双服务验收通过，Embedding 返回 1024 维，Reranker 返回正确排序；服务请求失败仍按 RRF 降级。
+- 当前 Embedding/Reranker：两个独立 `llama serve` 进程分别加载 `Qwen3-Embedding-0.6B-Q8_0.gguf` 与 `qwen3-reranker-0.6b-q8_0.gguf`；默认端口固定为 Embedding `11436`、Reranker `11435`，与 Ollama 对话 `11434` 分离；路径、地址、`LLAMA_DEVICE` 和 `LLAMA_CONTEXT_SIZE` 均由 `.env` 配置，当前设备为 `Vulkan1`、上下文为 4096。启动器真实双服务验收通过，Embedding 返回 1024 维，Reranker 返回正确排序；服务请求失败仍按 RRF 降级。
 - 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；grounding 未通过且预算耗尽时直接进入 `final_answer_node`，不再调用额外兜底 LLM；其他重试机制不变
 - 当前最高优先级未完成功能：BE-049 已完成一次共享知识库真实模型评测，但质量未达门槛；报告保留在 `backend/log/evaluation/20260919T053533Z-7f6b9aab/`，不能将本次结果写成 passing。
 - 当前 blocker：本轮完成的是新模型服务和协议/启动验收，尚未用新 Embedding/Reranker 重跑 23 条真实 RAG 质量评测，因此没有新的质量分数或质量收益结论；BE-049 继续 `in_progress`，前端未改动。
+
+### Session 064（解决 Ollama 与 Embedding 端口冲突）（2026-09-20）
+- 根因：Ollama 对话默认 `11434`，Embedding llama serve 也默认 `11434`；切换 `LLM_PROVIDER=ollama` 时两个服务无法同时绑定。
+- 最小修复：保留 Ollama `11434`，把 Embedding 默认与本地配置迁移到 `11436`，Reranker 保持 `11435`；同步 Settings、`.env.example`、README、ARCHITECTURE、端口回归测试和当前交接记录。
+- 验证：端口配置断言 19 passed；全量 pytest 268 passed、5 skipped、1 warning；Embedding `11436` 与 Reranker `11435` 真实双服务加载成功，Embedding 返回 1024 维、Reranker 排序正确；Settings 与 `.env.example` 仍为 43/43 字段覆盖。
+- 提交号在本轮收尾提交后补入；BE-049 真实质量评测边界不变。
 
 ### Session 063（切换 llama serve Qwen3 Embedding/Reranker）（2026-09-20）
 - 将 Embedding 从 Ollama 改为 `LlamaEmbeddingService`，调用 `/v1/embeddings`；将本地 MiniLM CrossEncoder 改为 `LlamaRerankScorer`，调用 `/v1/rerank`；两个适配器均保留响应校验和结构化日志，Reranker 请求失败继续降级 RRF。

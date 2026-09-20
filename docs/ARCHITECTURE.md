@@ -309,7 +309,7 @@ retrieval_planner_agent（检索计划，四类策略多选）
 | `EVAL_JUDGE_PROVIDER` | follow / ollama / glm / deepseek | follow（默认复用主 LLM；真实质量评测仅允许 follow/deepseek） |
 | `EVAL_JUDGE_MODEL` | 模型名 | 空（用主 LLM；非空时可独立指定 Judge） |
 | `LLM_ENABLE_THINKING` | true / false | false |
-| `EMBEDDING_BASE_URL` | llama serve Embedding Endpoint | `http://127.0.0.1:11434` |
+| `EMBEDDING_BASE_URL` | llama serve Embedding Endpoint（与 Ollama 对话端口分离） | `http://127.0.0.1:11436` |
 | `EMBEDDING_MODEL_PATH` | Embedding GGUF 文件路径（随请求发送给 llama serve） | 空（由 `.env` 配置） |
 | `RERANK_ENABLED` | true / false | true（CPU 且无 CUDA 实测较慢；false 表示主动使用 RRF 融合序，不应视为模型故障） |
 | `RERANKER_BASE_URL` | llama serve Reranker Endpoint | `http://127.0.0.1:11435` |

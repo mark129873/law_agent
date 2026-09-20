@@ -85,8 +85,10 @@ MILVUS_COLLECTION_NAME=law_chunks
 
 在 `backend/.env` 配置Embedding以及 Reranker GGUF 路径和服务地址, 并启动：
 
+端口约定：Ollama 对话服务保留默认的 `11434`，Embedding llama serve 使用 `11436`，Reranker 使用 `11435`，三者可以同时运行。
+
 ```dotenv
-EMBEDDING_BASE_URL=http://127.0.0.1:11434
+EMBEDDING_BASE_URL=http://127.0.0.1:11436
 EMBEDDING_MODEL_PATH=C:\Users\<user>\Desktop\model\Qwen3-Embedding-0.6B-Q8_0.gguf
 RERANKER_BASE_URL=http://127.0.0.1:11435
 RERANKER_MODEL_PATH=C:\Users\<user>\Desktop\model\qwen3-reranker-0.6b-q8_0.gguf
@@ -106,7 +108,7 @@ cd backend
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 当前默认使用 DeepSeek，需配置DEEPSEEK_API_KEY；并设置LLM_PROVIDER=deepseek
-若使用 Ollama, 则可以拉取qwen3.5:4b, 并设置LLM_PROVIDER=ollama
+若使用 Ollama, 则可以拉取qwen3.5:4b，保持 `OLLAMA_BASE_URL=http://127.0.0.1:11434`，并设置 `LLM_PROVIDER=ollama`
 若使用 GLM，则需配置 GLM_API_KEY，并设置 LLM_PROVIDER=glm
 
 ### 5. 启动前端

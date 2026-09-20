@@ -146,7 +146,8 @@ class Settings(BaseSettings):
     # ---- Agent 服务（一期重写 BE-033）----
     # Embedding 与 Reranker 由两个独立的 llama serve 进程提供；模型路径
     # 作为请求中的 model 字段传递，保证服务端模型与应用配置可追溯。
-    embedding_base_url: str = "http://127.0.0.1:11434"
+    # 与 Ollama 对话默认端口 11434 分离，避免切换 LLM_PROVIDER=ollama 时抢占端口。
+    embedding_base_url: str = "http://127.0.0.1:11436"
     embedding_model_path: str = ""
     # Rerank 总开关：默认开启（设计 §32 统一重排）。如果部署环境暂时
     # 不需要精排，可置 false 使用 RRF；服务仍会把“主动关闭”单独记录。

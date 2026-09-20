@@ -231,9 +231,9 @@
     {
       "id": "BE-053",
       "name": "llama serve Qwen3 Embedding 与 Reranker",
-      "description": "通过两个独立 llama serve HTTP 服务接入 Qwen3-Embedding-0.6B-Q8_0.gguf 与 qwen3-reranker-0.6b-q8_0.gguf；模型路径、服务地址、LLAMA_DEVICE 与 LLAMA_CONTEXT_SIZE 均由环境配置，空设备值不追加 --device；Embedding 使用 /v1/embeddings，Reranker 使用 /v1/rerank，服务失败继续按既有契约降级 RRF。",
+      "description": "通过两个独立 llama serve HTTP 服务接入 Qwen3-Embedding-0.6B-Q8_0.gguf 与 qwen3-reranker-0.6b-q8_0.gguf；默认端口为 Embedding 11436、Reranker 11435，与 Ollama 对话 11434 分离；模型路径、服务地址、LLAMA_DEVICE 与 LLAMA_CONTEXT_SIZE 均由环境配置，空设备值不追加 --device；Embedding 使用 /v1/embeddings，Reranker 使用 /v1/rerank，服务失败继续按既有契约降级 RRF。",
       "status": "passing",
-      "evidence": "2026-09-20：Vulkan1 双服务真实加载与接口验收通过；Embedding 1024 维、Reranker 排序正确；24 定向/268 全量测试通过；commit ac7ba5c。",
+      "evidence": "2026-09-20：Ollama 11434、Embedding 11436、Reranker 11435 端口隔离；真实双服务接口验收通过；19 定向/268 全量测试通过；提交号收尾后补入。",
       "testedAt": "2026-09-20"
     }
   ]

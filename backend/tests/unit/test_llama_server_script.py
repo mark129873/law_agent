@@ -4,7 +4,7 @@ from scripts.start_llama_servers import _server_command
 
 
 def test_empty_device_does_not_add_device_argument() -> None:
-    command = _server_command("embedding.gguf", "http://127.0.0.1:11434", "--embedding", "", 0)
+    command = _server_command("embedding.gguf", "http://127.0.0.1:11436", "--embedding", "", 0)
     assert "--device" not in command
 
 

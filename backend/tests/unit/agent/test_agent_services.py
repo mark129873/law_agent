@@ -286,7 +286,8 @@ def test_reranker_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
     settings = Settings(_env_file=None)  # 不读 .env，验证纯默认值
     assert settings.rerank_enabled is True  # 默认开启（设计 §32 忠实）
-    assert settings.embedding_base_url == "http://127.0.0.1:11434"
+    assert settings.ollama_base_url == "http://127.0.0.1:11434"
+    assert settings.embedding_base_url == "http://127.0.0.1:11436"
     assert settings.embedding_model_path == ""
     assert settings.reranker_base_url == "http://127.0.0.1:11435"
     assert settings.reranker_model_path == ""

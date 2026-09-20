@@ -1,5 +1,19 @@
 # 会话交接
 
+## Session 064：解决 Ollama 与 Embedding 端口冲突（2026-09-20）
+
+### 本轮已完成
+- 保留 Ollama 对话默认端口 `11434`，将 Embedding llama serve 默认端口改为 `11436`，Reranker 继续使用 `11435`；这样 `LLM_PROVIDER=ollama` 时可以与两个 Qwen3 服务同时启动。
+- 同步 `Settings`、当前本地 `.env`、`.env.example`、README、ARCHITECTURE 和端口回归测试；`EMBEDDING_BASE_URL` 仍可由环境变量覆盖。
+
+### 验证与结论
+- 端口配置定向测试 19 passed；全量 `uv run pytest tests -q -rs` 为 268 passed、5 skipped、1 warning。
+- `uv lock --check`、compileall、`git diff --check` 通过；真实启动器使用 `11436`/`11435` 双服务加载成功，Embedding 返回 1024 维，Reranker 相关文档排名第一。
+- Settings 与 `.env.example` 43/43 字段覆盖；当前工作树未跟踪 `.env`，没有新增敏感文件。BE-049 仍未重跑真实质量评测。
+
+### 代码交付
+- 提交号：收尾提交后补入。
+
 ## Session 063：切换 llama serve Qwen3 Embedding/Reranker（2026-09-20）
 
 ### 本轮已完成
