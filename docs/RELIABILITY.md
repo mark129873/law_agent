@@ -105,6 +105,8 @@ LOG_LEVEL=ERROR  # 仅输出 ERROR
 - **报告内容**：报告记录数据集版本、Git commit、Provider、模型名、指标、耗时和失败原因；敏感配置只记录“已配置/未配置”或模型名，禁止写入 API Key、Authorization 和完整环境变量。
 - **真实模型波动**：LLM Judge 结果不是确定性 CI 门禁。评测脚本遇到单条超时或 Judge 失败时继续执行并记录该案例，只有基础设施不可用、数据格式非法或报告无法写入时才返回非零退出码。
 - **Judge 约束**：真实质量评测的 Judge 只能跟随 DeepSeek 主 LLM 或单独使用 DeepSeek；只能依据问题、评测要点、系统回答、检索证据和引用评分，不允许把外部知识当作证据；Judge 模型与回答模型的实际名称必须写入报告。
+- **本轮质量优化数据集**：`backend/tests/evaluation/rag_cases.jsonl` 以仓库内真实法律文档为依据，固定扩充到 50 条，覆盖本地事实、多条件问题、对抗性问题、证据不足、能力边界和直接回答；优化前后必须使用同一份数据集和同一质量门槛比较。
+- **观测验收**：真实评测必须同时保留结构化日志和每条案例的 Langfuse `evaluation-<case_id>` trace；每条 trace 应能回查节点、检索事件、LLM generation、Judge span 与报告中的 `trace_id`。Langfuse 不可达时先修复配置/上报链路；修复失败不得用无观测的结果宣称质量提升。
 - **原始报告**：`backend/log/evaluation/` 属于排障和演示文档工件，保持 gitignore，不随普通测试清理删除；提交前只保留脱敏的汇总报告。
 
 ## 测试干净环境管理 
