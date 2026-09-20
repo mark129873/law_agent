@@ -20,14 +20,11 @@ _TECH_LIBS = {
     "fastapi", "httpx", "pymilvus", "sqlalchemy", "aiosqlite", "pypdf",
     "langgraph", "pydantic", "pydantic_settings", "uvicorn",
     "langfuse",  # BE-043：Langfuse 可观测平台锁定在 infrastructure/trace/
+    "mcp",  # BE-048：Python MCP SDK 只允许出现在 infrastructure/web_search/
 }
 
 # 全项目只允许在 app/agent/ 内导入 langgraph（工作流引擎隔离区）
 _LANGGRAPH_ALLOWED_PREFIX = "agent"
-
-# 重型本地推理库只允许在 app/agent/ 内导入（Reranker 服务隔离区，BE-033）
-_AGENT_ONLY_LIBS = {"sentence_transformers", "torch", "transformers", "accelerate"}
-
 
 def _imports_of(path: pathlib.Path) -> set[str]:
     """提取文件的全部顶层导入（import a / from a.b 均取首段）。"""
@@ -108,12 +105,11 @@ def test_langgraph_confined_to_agent_module() -> None:
     assert not violations, "langgraph 泄漏出 agent 隔离区：\n" + "\n".join(violations)
 
 
-def test_agent_heavy_libs_confined_to_agent_module() -> None:
-    """sentence_transformers/torch 等重型推理库只允许出现在 app/agent/ 内（BE-033）。"""
+def test_mcp_sdk_confined_to_web_search_infrastructure() -> None:
+    """MCP SDK 必须留在 Tavily 适配器内，Agent/应用层只依赖 WebSearchPort。"""
     violations = []
     for py in _iter_app_files():
         rel = py.relative_to(APP_ROOT).as_posix()
-        hits = _imports_of(py) & _AGENT_ONLY_LIBS
-        if hits and not rel.startswith(_LANGGRAPH_ALLOWED_PREFIX):
-            violations.append(f"{rel}: {sorted(hits)}")
-    assert not violations, "重型推理库泄漏出 agent 隔离区：\n" + "\n".join(violations)
+        if "mcp" in _imports_of(py) and rel != "infrastructure/web_search/tavily_mcp.py":
+            violations.append(rel)
+    assert not violations, "MCP SDK 泄漏到 Tavily 适配器之外：\n" + "\n".join(violations)

@@ -18,6 +18,38 @@ from app.agent.utils.think_utils import emit_think
 from app.agent.utils.trace_utils import make_trace
 from app.agent.utils.timing_utils import Timer
 
+# 多个全称/绝对词同时出现时，局部法条通常只能反驳前提，不能证明全量范围；
+# 这是状态判定的保守边界，不改变回答节点或 LangGraph 路由拓扑。
+_ABSOLUTE_SCOPE_WORDS = (
+    "每一家",
+    "所有主体",
+    "所有数据",
+    "全部情形",
+    "任何主体",
+    "任何单位和个人",
+    "一定构成",
+    "永久存储",
+)
+
+
+def _guard_absolute_scope(grade: EvidenceGrade, query: str) -> EvidenceGrade:
+    """把“能谨慎回答”与“证据覆盖全称范围”区分开。"""
+    if not grade.sufficient:
+        return grade
+    if sum(word in query for word in _ABSOLUTE_SCOPE_WORDS) < 2:
+        return grade
+    missing = list(grade.missing_evidence)
+    if not missing:
+        missing.append("覆盖全部主体、数据范围和期限的明确法律依据")
+    return grade.model_copy(
+        update={
+            "sufficient": False,
+            "confidence": min(float(grade.confidence), 0.79),
+            "missing_evidence": missing,
+            "reason": "问题包含多个全称或绝对范围词，现有局部材料不能证明全部范围",
+        }
+    )
+
 
 class EvidenceGraderAgent:
     """覆盖度 / 缺失证据 / 冲突 / 本地可恢复性评估（设计 §35）。"""
@@ -48,6 +80,7 @@ class EvidenceGraderAgent:
             EvidenceGrade,
             default=default,
         )
+        grade = _guard_absolute_scope(grade, original)
         # 思考内容（BE-042）：评估结论拼成中文（JSON 判读 → 一句话）
         if grade.sufficient:
             emit_think(

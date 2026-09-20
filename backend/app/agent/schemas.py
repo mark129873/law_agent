@@ -44,7 +44,7 @@ class GroundingCheck(BaseModel):
 class CapabilityResult(BaseModel):
     """所有 Capability 的统一输出结构（设计 §10）。
 
-    为什么统一：observation_node 只面对一种结果形状；RAG / Web Stub /
+    为什么统一：observation_node 只面对一种结果形状；RAG / Tavily Web /
     Plugin Stub / 直接回答的差异全部收进 status 与 metadata——
     新增 Capability 时主图路由与观察逻辑零改动（开闭原则）。
     """

@@ -26,14 +26,22 @@ QUERY_REWRITE_SYSTEM_PROMPT = (
     "2. 保留原意，补全省略的法律要素"
     "（如『离婚房子怎么分』→『离婚房产分割的法律规定』）；\n"
     "3. 把生活用语替换为法律术语（如『被开除』→『解除劳动合同』）；\n"
-    "4. 每条都是完整、可独立检索的短语，不注释、不解释；\n"
-    "5. 只输出 JSON 本身，不要任何其他内容。"
+    "4. 恢复检索时若给出证据缺口，必须保留法条号、期限/数字、主体等精确锚点；\n"
+    "5. 每条都是完整、可独立检索的短语，不注释、不解释；\n"
+    "6. 只输出 JSON 本身，不要任何其他内容。"
 )
 
 
-def build_rewrite_messages(original_query: str, normalized_query: str) -> list[ChatMessage]:
+def build_rewrite_messages(
+    original_query: str,
+    normalized_query: str,
+    missing_evidence: list[str] | None = None,
+) -> list[ChatMessage]:
     """组装改写器的消息列表。"""
+    user_content = f"【用户问题】\n{normalized_query or original_query}"
+    if missing_evidence:
+        user_content += "\n\n【本轮必须补齐的证据缺口】\n" + "；".join(missing_evidence)
     return [
         ChatMessage(role=MessageRole.SYSTEM, content=QUERY_REWRITE_SYSTEM_PROMPT),
-        ChatMessage(role=MessageRole.USER, content=f"【用户问题】\n{normalized_query or original_query}"),
+        ChatMessage(role=MessageRole.USER, content=user_content),
     ]

@@ -3,7 +3,7 @@
 // 按字面显示会出现星号噪声；react-markdown 默认不解析原始 HTML，无注入风险。
 import { useState } from 'react'
 import Markdown from 'react-markdown'
-import { Books, Brain, CaretDown } from '@phosphor-icons/react'
+import { Books, Brain, CaretDown, Globe } from '@phosphor-icons/react'
 import type { Message, ThoughtLine, ReferenceSource } from '../types'
 
 interface MessageBlockProps {
@@ -157,6 +157,74 @@ function ReferencePanel({ sources }: { sources: ReferenceSource[] }) {
   )
 }
 
+/**
+ * 联网搜索内容折叠面板：显示网页标题、可点击地址和最多 300 字预览。
+ * 完整正文不会进入前端消息，后端独立搜索日志才是完整留档依据。
+ */
+function WebSearchPanel({ sources }: { sources: ReferenceSource[] }) {
+  const [open, setOpen] = useState(false)
+  const panelId = `web-search-panel-${sources.length}`
+
+  return (
+    <div className="mt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-controls={panelId}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink-soft transition-colors hover:bg-elevated hover:text-ink active:scale-[0.98] motion-reduce:active:scale-100"
+      >
+        <Globe size={14} className="text-accent" aria-hidden />
+        联网搜索内容
+        <span className="rounded-full bg-accent-soft px-1.5 text-[11px] font-semibold text-accent">
+          {sources.length}
+        </span>
+        <CaretDown
+          size={12}
+          className={`transition-transform duration-200 motion-reduce:transition-none ${open ? 'rotate-180' : ''}`}
+          aria-hidden
+        />
+      </button>
+
+      {open && (
+        <ol id={panelId} className="ref-panel-in mt-2 max-h-96 list-none overflow-y-auto rounded-xl border border-line bg-elevated p-0">
+          {sources.map((item, index) => {
+            const title = item.title || item.source || '网页来源'
+            const preview = item.content.slice(0, 300)
+            const isSafeUrl = /^https?:\/\//i.test(item.url || '')
+            return (
+              <li key={`${item.url}-${index}`} className={index > 0 ? 'border-t border-line p-3' : 'p-3'}>
+                <div className="flex items-start gap-2">
+                  <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-accent-soft text-[11px] font-semibold text-accent">
+                    {index + 1}
+                  </span>
+                  <div className="min-w-0">
+                    {isSafeUrl ? (
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="break-words text-xs font-medium text-accent underline-offset-2 hover:underline"
+                      >
+                        {title}
+                      </a>
+                    ) : (
+                      <span className="break-words text-xs font-medium text-ink">{title}</span>
+                    )}
+                    {isSafeUrl && <p className="mt-0.5 break-all text-[10px] text-ink-faint">{item.url}</p>}
+                  </div>
+                </div>
+                <p className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-ink-soft">{preview}</p>
+                {item.truncated && <p className="mt-1 text-[10px] text-ink-faint">内容已截断，完整内容已保存到后端搜索日志</p>}
+              </li>
+            )
+          })}
+        </ol>
+      )}
+    </div>
+  )
+}
+
 export default function MessageBlock({
   message,
   streaming = false,
@@ -177,7 +245,9 @@ export default function MessageBlock({
 
   // 是否展示参考文档：仅"有来源 且 不在流式生成中"——
   // 生成中隐藏，让按钮按产品定义在回答完成后出现（避免流式期间布局跳动）
-  const hasSources = !streaming && !!message.sources && message.sources.length > 0
+  const allSources = !streaming ? message.sources ?? [] : []
+  const localSources = allSources.filter((item) => item.kind !== 'web')
+  const webSources = allSources.filter((item) => item.kind === 'web')
 
   // 助手消息：左侧平铺 + Markdown 渲染；流式光标放在内容之后
   return (
@@ -190,6 +260,12 @@ export default function MessageBlock({
         streaming={streaming}
         thinkingMs={thinkingMs}
       />
+      {message.webSearchNotice && (
+        <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-1 text-[11px] text-accent">
+          <Globe size={13} aria-hidden />
+          {message.webSearchNotice.message}
+        </div>
+      )}
       <Markdown
         components={{
           // 给常见元素补充与整体风格一致的间距（Markdown 默认渲染无样式）
@@ -214,7 +290,8 @@ export default function MessageBlock({
         <span className="ml-0.5 inline-block h-4 w-[3px] animate-pulse rounded-full bg-accent align-text-bottom motion-reduce:animate-none" />
       )}
       {/* 参考文档折叠面板（历史恢复的消息同样携带 sources，刷新后仍可查看） */}
-      {hasSources && <ReferencePanel sources={message.sources!} />}
+      {localSources.length > 0 && <ReferencePanel sources={localSources} />}
+      {webSources.length > 0 && <WebSearchPanel sources={webSources} />}
     </div>
   )
 }

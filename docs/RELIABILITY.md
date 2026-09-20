@@ -44,8 +44,9 @@
 | `document` | 文档元数据状态机、上传与删除 |
 | `document_pipeline` | 解析 → 清洗 → 段落切分 Pipeline |
 | `knowledge` | 向量化与入库编排 |
-| `embedding` | 向量生成服务 |
+| `embedding` | llama serve Embedding HTTP 服务调用与向量生成；启动器默认将双进程上下文限制为 `LLAMA_CONTEXT_SIZE=4096`，避免 KV cache 在显存中按模型默认长上下文过量预留 |
 | `rag` | 检索与上下文构建 |
+| `web_search` | Tavily Remote MCP 搜索调用、搜索结果落盘与失败状态 |
 | `conversation` | 会话生命周期与消息持久化 |
 | `chat` | 问答编排与流式输出 |
 | `llm` | 模型调用 |
@@ -57,9 +58,16 @@
 - **编码**：文件 handler 必须显式 `encoding="utf-8"`，否则 Windows 下中文日志可能乱码。
 - **多进程**：当前部署为单进程（uvicorn 未开 `--workers`），按天轮转安全；若将来启用多 worker，多进程会竞争同一文件，必须改为按 PID 分文件或集中式采集，不得直接沿用当前配置。
 
+### 联网搜索独立留档
+- 每次用户实际触发的 Tavily 搜索都生成一个独立文件：`LOG_DIR/web_search/search-<UTC时间>-<UUID>.log`；文件内容是完整 JSON，而不是仅写摘要。
+- 留档字段至少包括 `search_id`、`timestamp`、`request_id`、`conversation_id`、`query`、`tool_name`、脱敏后的参数、`status`、`duration_ms`、完整 MCP `content`/`structured_content`、完整规范化结果和错误信息。
+- 搜索日志永久保留，不参与 `app.log` 的按天轮转，也不由测试干净环境自动删除；需要清理时由运维人工执行。`backend/log/` 仍必须保持 gitignore。
+- 写入采用“临时文件 + 原子替换”，文件名使用 UTC 时间和 UUID，避免并发搜索互相覆盖。API Key 与 Authorization 只放在 MCP 请求头，禁止写入搜索日志、结构化日志、SSE 或前端。
+- 搜索结果未成功落盘时，搜索能力返回失败状态并向用户发出提示，不把未留档的数据继续作为成功答案展示；该失败必须同时记录 ERROR（含堆栈）。
+
 ### 使用约定（重要，曾踩坑）
 - `extra` 的键**禁止使用 LogRecord 保留字段**（`message`、`filename`、`name` 等）——重名会使日志调用自身抛 `KeyError`，曾导致业务 404 变成 500（由 API 集成测试在 `LOG_LEVEL=INFO` 下抓出）。
-- **密钥禁止进日志**：`GLM_API_KEY` 等敏感值不得出现在任何日志字段中；日志只允许记录模型名、消息数、长度等非敏感元数据。
+- **密钥禁止进日志**：`GLM_API_KEY`、`DEEPSEEK_API_KEY`、`TAVILY_API_KEY`、`MILVUS_CLOUD_TOKEN` 等敏感值不得出现在任何日志字段中；日志只允许记录模型名、工具名、消息数、长度、Milvus 是否使用认证等非敏感元数据。
 - **脱敏兜底**：`JsonFormatter` 对 `api_key`、`token`、`password`、`authorization`、`secret` 等敏感键名做黑名单处理（值替换为 `***`），作为"密钥禁止进日志"约定的机械保障，防止误写。
 
 ### 日志级别
@@ -81,24 +89,51 @@ LOG_LEVEL=ERROR  # 仅输出 ERROR
 - 取值优先级：进程环境变量 > `backend/.env` > 默认值。
 
 ### 各服务日志埋点规则
-按上方级别表在必要位置埋点：重要业务事件记 INFO、数据缺失但不影响主流程记 WARN、程序运行失败记 ERROR（必须带堆栈）。示例——DocumentService：上传记录文件大小与元数据、大小超限异常、删除输出剩余数量、元数据更新、文件未找到类错误；QaService：问答任务开始、检索结果（命中数与最高相似度）、回答生成（首 token 延迟/总耗时/长度——推理模型首字延迟是已知痛点必须可度量）、流式异常中断（区分模型侧与网络侧）、会话历史清空。
+按上方级别表在必要位置埋点：重要业务事件记 INFO、数据缺失但不影响主流程记 WARN、程序运行失败记 ERROR（必须带堆栈）。示例——DocumentService：上传记录文件大小与元数据、大小超限异常、删除输出剩余数量、元数据更新、文件未找到类错误；QaService：问答任务开始、检索结果（命中数与最高相似度）、回答生成（首 token 延迟/总耗时/长度——推理模型首字延迟是已知痛点必须可度量）、流式异常中断（区分模型侧与网络侧）、会话历史清空；WebSearch：搜索开始/完成/失败分别记录 `search_id`、结果数、耗时和留档路径，失败必须带堆栈。
 
 ## Langfuse 链路追踪（BE-043）
 
-- **开关与配置**：`LANGFUSE_ENABLED`（默认 false）+ `LANGFUSE_BASE_URL` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`（密钥只经 .env/环境注入，禁止提交与落日志）。关闭时 langfuse 模块零导入、零开销；开启但密钥缺失 → 启动期 WARN 降级为关闭（可观测故障不阻断业务）。
-- **采集范围**：每问一条 trace（session_id=conversation_id，input=问题，output=完整回答）→ 节点 span（with_node_status 包装器统一压栈/弹栈，含子图嵌套与异常路径）→ LLM generation（LLMService 统一入口：model/messages/output/耗时/重试轮次）；plan/think/sources/regenerating 记为 trace 事件留档。
+- **开关与配置**：`LANGFUSE_ENABLED`（默认 true）+ `LANGFUSE_BASE_URL` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`（密钥只经 .env/环境注入，禁止提交与落日志）。显式关闭时 langfuse 模块零导入、零开销；默认开启但密钥缺失 → 启动期 WARN 降级为关闭（可观测故障不阻断业务）。
+- **采集范围**：每问一条 trace（session_id=conversation_id，input=问题，output=完整回答）→ 节点 span（with_node_status 包装器统一压栈/弹栈，含子图嵌套与异常路径）→ LLM generation（LLMService 统一入口：model/messages/output/耗时/重试轮次）；plan/think/sources/regenerating 记为 trace 事件留档。开发者侧 `workflow` 评测直调在开启 Langfuse 时为每条案例创建 `evaluation-<case_id>` trace，并把 Judge 放入 `evaluation_judge` span；报告记录 trace ID 供失败回查。
 - **失败降级**：LangfuseTraceSink 全部方法内部吞异常并记 WARN（`service=trace`）——Langfuse 不可达或上报失败绝不影响问答业务。
-- **与日志的分工**：结构化日志是"进程内排障事实"（必开、落盘）；Langfuse 是"跨请求 LLM 观测平台"（默认关、可选开）。两者共用同一计时源与节点名，不互相替代。
+- **与日志的分工**：结构化日志是"进程内排障事实"（必开、落盘）；Langfuse 是"跨请求 LLM 观测平台"（默认开、可显式关闭）。两者共用同一计时源与节点名，不互相替代。
+
+## RAG 端到端评测（BE-049）
+
+- **执行范围**：真实质量评测固定使用 DeepSeek 主 LLM、llama serve Qwen3 Embedding、Milvus 和开启的 Qwen3 Reranker，通过工作流直调与 LLM Judge 评估生成质量；Ollama 对话模型、GLM 等其他 LLM Provider 不属于这条质量评测路径。`prepare` 只负责数据导入，不执行 HTTP/SSE 冒烟；接口契约由既有 API 集成测试覆盖。
+- **数据一致性**：评测复用当前服务配置的 `MILVUS_COLLECTION_NAME` 和 `SQLITE_DB_PATH`，以便测量实际知识库；默认评测不清理数据，`prepare --reset` 是显式的全量删除操作，只能在可重建的测试知识库执行。
+- **报告内容**：报告记录数据集版本、Git commit、Provider、模型名、指标、耗时和失败原因；敏感配置只记录“已配置/未配置”或模型名，禁止写入 API Key、Authorization 和完整环境变量。
+- **真实模型波动**：LLM Judge 结果不是确定性 CI 门禁。评测脚本遇到单条超时或 Judge 失败时继续执行并记录该案例，只有基础设施不可用、数据格式非法或报告无法写入时才返回非零退出码。
+- **Judge 约束**：真实质量评测的 Judge 只能跟随 DeepSeek 主 LLM 或单独使用 DeepSeek；只能依据问题、评测要点、系统回答、检索证据和引用评分，不允许把外部知识当作证据；Judge 模型与回答模型的实际名称必须写入报告。
+- **本轮质量优化数据集**：`backend/tests/evaluation/rag_cases.jsonl` 以仓库内真实法律文档为依据，固定扩充到 50 条，覆盖本地事实、多条件问题、对抗性问题、证据不足、能力边界和直接回答；优化前后必须使用同一份数据集和同一质量门槛比较。
+- **观测验收**：真实评测必须同时保留结构化日志和每条案例的 Langfuse `evaluation-<case_id>` trace；每条 trace 应能回查节点、检索事件、LLM generation、Judge span 与报告中的 `trace_id`。Langfuse 不可达时先修复配置/上报链路；修复失败不得用无观测的结果宣称质量提升。
+- **原始报告**：`backend/log/evaluation/` 属于排障和演示文档工件，保持 gitignore，不随普通测试清理删除；提交前只保留脱敏的汇总报告。
 
 ## 测试干净环境管理 
 
 ### 作用
 干净环境管理保证测试从一个已知的空白状态启动，避免历史遗留数据干扰测试结果，引发未知异常。
 
-### 重置机制 (测试前需运行)
-1. 删除 sqlite数据库中的原先的测试数据
-2. 删除 Milvus 中的知识库集合：在 Milvus 服务运行的前提下执行 `cd backend && uv run python scripts/reset_milvus.py`（幂等删除 `law_chunks` 集合，下次启动/入库自动重建）
-3. 删除完成之后, 明确输出: 测试干净环境管理完成, 清理xxx文件, 删除xxx数据库内容
+### 重置机制（测试前必须运行）
+
+当前仓库只使用测试环境。下次 Codex 执行测试前，先停止正在运行的后端进程，再按下面固定顺序清理；不需要人工确认或临时判断云端/本地路径。
+
+1. 删除 SQLite 数据库中的历史测试数据。命令会读取当前 `SQLITE_DB_PATH`，同时清理 SQLite 可能产生的 `-wal` / `-shm` 文件：
+
+   ```powershell
+   cd backend
+   uv run python -c "from pathlib import Path; from app.config.settings import get_settings; p=Path(get_settings().resolved_sqlite_db_path); [q.unlink(missing_ok=True) for q in (p, Path(str(p)+'-wal'), Path(str(p)+'-shm'))]; print(f'清理 SQLite 测试数据库: {p}')"
+   ```
+
+2. 删除 Milvus 中当前配置的知识库集合。脚本会根据 `MILVUS_PROVIDER` 选择 `MILVUS_CLOUD_*` 或 `MILVUS_*`，`--yes` 是测试环境的固定参数：
+
+   ```powershell
+   uv run python scripts/reset_milvus.py --yes
+   ```
+
+   脚本幂等删除 `MILVUS_COLLECTION_NAME` 指定的集合；集合不存在时也算成功，下次启动或入库会自动重建。
+
+3. 两步完成后明确输出：`测试干净环境管理完成：已清理 SQLite 测试数据库，并删除 Milvus 测试知识库集合 <collection>`。
 
 ### 需要重置干净环境的场景
 - 开工测试之前

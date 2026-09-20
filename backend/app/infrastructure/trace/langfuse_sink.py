@@ -20,7 +20,7 @@ from app.domain.services.trace_sink import TraceSink, TraceSpan
 logger = logging.getLogger("app.infrastructure.trace")
 
 # langfuse 延迟到本模块内部导入：关闭（工厂不构造）时零导入成本
-from langfuse import Langfuse  # noqa: E402  —  本模块即 langfuse 隔离区
+from langfuse import Langfuse, propagate_attributes  # noqa: E402  —  本模块即 langfuse 隔离区
 
 
 class LangfuseTraceSpan:
@@ -79,9 +79,33 @@ class LangfuseTraceSink:
     def __init__(self, client: Langfuse) -> None:
         self._client = client
         self._trace: Any | None = None
+        self._trace_attributes_context: Any | None = None
+
+    @property
+    def trace_id(self) -> str:
+        """返回当前 trace ID，供评测报告回查 Langfuse。"""
+        return str(getattr(self._trace, "trace_id", "") or "")
+
+    def _close_trace_attributes(self) -> None:
+        """退出请求级属性上下文，避免并发请求之间串 session。"""
+        context = self._trace_attributes_context
+        self._trace_attributes_context = None
+        if context is None:
+            return
+        try:
+            context.__exit__(None, None, None)
+        except Exception as error:  # noqa: BLE001——可观测失败不阻断业务
+            logger.warning("Langfuse trace attributes close failed", extra={"service": "trace", "error": str(error)})
 
     def start_trace(self, *, session_id: str, question: str) -> None:
         try:
+            # Langfuse v4 用 propagate_attributes 写入一等 session.id；
+            # 不能只把 session_id 放进普通 metadata，否则 trace.list(session_id=...) 无法检索。
+            self._trace_attributes_context = propagate_attributes(
+                session_id=session_id,
+                trace_name="chat",
+            )
+            self._trace_attributes_context.__enter__()
             # 根 observation 即 UI 中的 trace；input=用户问题
             self._trace = self._client.start_observation(
                 name="chat",
@@ -89,6 +113,7 @@ class LangfuseTraceSink:
                 metadata={"session_id": session_id},
             )
         except Exception as error:  # noqa: BLE001
+            self._close_trace_attributes()
             logger.warning("Langfuse trace start failed", extra={"service": "trace", "error": str(error)})
 
     def start_span(self, *, node: str, parent: TraceSpan | None = None) -> TraceSpan | None:
@@ -133,6 +158,8 @@ class LangfuseTraceSink:
             self._trace.end()
         except Exception as error_:  # noqa: BLE001
             logger.warning("Langfuse trace end failed", extra={"service": "trace", "error": str(error_)})
+        finally:
+            self._close_trace_attributes()
 
 
 class LangfuseTraceSinkFactory:
@@ -165,6 +192,15 @@ class LangfuseTraceSinkFactory:
     # 让实例满足 TraceSinkFactory（Callable[[], TraceSink | None]）口径：
     # containers 直接注入实例，ChatService 按可调用对象使用
     __call__ = create
+
+    def shutdown(self) -> None:
+        """评测进程收尾时等待批量上报完成；生产进程仍由 SDK 生命周期管理。"""
+        if self._client is None:
+            return
+        try:
+            self._client.shutdown()
+        except Exception as error:  # noqa: BLE001——可观测失败不阻断评测
+            logger.warning("Langfuse client shutdown failed", extra={"service": "trace", "error": str(error)})
 
 
 def null_trace_sink_factory() -> TraceSink | None:

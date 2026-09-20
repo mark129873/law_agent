@@ -1,22 +1,311 @@
 # 会话交接
 
-## 当前已验证
+## Session 065：50 条真实 RAG 质量优化与验收（2026-09-20）
+
+### 本轮已完成
+- `backend/tests/evaluation/rag_cases.jsonl` 已扩充到 50 条真实案例，覆盖本地事实、多条件、对抗性、证据不足、能力边界和直接回答；5 份仓库法律文档均有对应来源。
+- 在不改变 LangGraph 主图和 Legal RAG 子图节点/边/路由的前提下，优化回答 Prompt、证据 Grader 的错误前提/范围边界、来源标记归一化、单/多法源证据排序和多条件回答规则。
+- Langfuse 与结构化日志均已验证可用；评测按 `evaluation-<case_id>` 建立 trace，含节点 span、LLM generation 和 `evaluation_judge`。
+
+### 验证与结论
+- 全量：`cd backend && uv run pytest tests -q -rs` → `276 passed、5 skipped、1 warning`。
+- 最终真实报告：`backend/log/evaluation/20260920T074628Z-e10d1123/`；50/50 完成、0 workflow failure、状态匹配率 1.00、grounding 通过率 1.00、Judge 通过率 1.00；Recall@5 0.92、MRR 0.92、引用精确率 0.895。
+- Langfuse 对账：50/50 个 session 均存在；抽查 LF-001、MC-005、EI-005 均可回查 `answer_generator_agent`、`evaluation_judge` 等观测。
+- 评测前用非破坏性 `prepare` 导入 5 份测试文档，评测结束仅按 prepare 返回的 5 个 ID 删除；API 复核剩余文档数为 0，未执行 `prepare --reset` 或 Milvus 全量 reset。
+- BE-049 已达到当前数据集质量验收，功能清单应保持 `passing`；剩余观察项是来源级 Recall@5 仍为 0.92，不是本轮质量门槛 blocker。
+
+### 后续注意
+- 后续改变 Prompt、Embedding/Reranker、Milvus 配置或数据集时，必须重新运行同一 50 条 `workflow` 并生成新报告；不要复用本轮指标。
+- 本地临时服务由本轮启动器拉起；如需关闭，只停止本轮启动的后端和两个 llama serve 进程，不要影响用户已有的 Ollama `11434` 服务。
+
+## Session 064：解决 Ollama 与 Embedding 端口冲突（2026-09-20）
+
+### 本轮已完成
+- 保留 Ollama 对话默认端口 `11434`，将 Embedding llama serve 默认端口改为 `11436`，Reranker 继续使用 `11435`；这样 `LLM_PROVIDER=ollama` 时可以与两个 Qwen3 服务同时启动。
+- 同步 `Settings`、当前本地 `.env`、`.env.example`、README、ARCHITECTURE 和端口回归测试；`EMBEDDING_BASE_URL` 仍可由环境变量覆盖。
+
+### 验证与结论
+- 端口配置定向测试 19 passed；全量 `uv run pytest tests -q -rs` 为 268 passed、5 skipped、1 warning。
+- `uv lock --check`、compileall、`git diff --check` 通过；真实启动器使用 `11436`/`11435` 双服务加载成功，Embedding 返回 1024 维，Reranker 相关文档排名第一。
+- Settings 与 `.env.example` 43/43 字段覆盖；当前工作树未跟踪 `.env`，没有新增敏感文件。BE-049 仍未重跑真实质量评测。
+
+### 代码交付
+- 提交：`5f680d2 fix: separate ollama and embedding ports`。
+
+## Session 063：切换 llama serve Qwen3 Embedding/Reranker（2026-09-20）
+
+### 本轮已完成
+- Embedding 改为 `LlamaEmbeddingService`，通过 `EMBEDDING_BASE_URL` + `EMBEDDING_MODEL_PATH` 调用 llama serve `/v1/embeddings`；Reranker 改为 `LlamaRerankScorer`，通过 `RERANKER_BASE_URL` + `RERANKER_MODEL_PATH` 调用 `/v1/rerank`。
+- 新增 `scripts/start_llama_servers.py`，从环境配置启动两个独立服务；`LLAMA_DEVICE` 非空才追加 `--device`，`LLAMA_CONTEXT_SIZE` 默认 4096，设为 0 不追加 `--ctx-size`。本地配置使用 Vulkan1 和两个 Qwen3 GGUF 路径，`.env` 未纳入 Git。
+- 删除旧 MiniLM/sentence-transformers/torch 依赖及本地下载脚本；同步 Settings、容器、评测快照、文档、测试和 `uv.lock`。Embedding 失败仍由上层按现有入库错误契约处理，Reranker 失败仍降级 RRF。
+
+### 验证与结论
+- `uv run pytest tests -q -rs`：268 passed、5 skipped（Milvus 集成服务不可达）、1 warning；定向 llama 协议/配置/启动参数测试 24 passed。
+- `uv run python -m compileall -q app scripts`、`uv lock --check` 通过；后端标准启动成功，`GET /api/health` 返回 `ok`。
+- 真实 `start_llama_servers.py` 使用 `Vulkan1` 双服务并行加载成功；Embedding 返回 2 条、1024 维，Reranker 返回 2 条且相关文档排名第一。设备报告显示 RX 7700 XT 12272 MiB、11313 MiB free；默认模型上下文会导致双进程 KV cache 额外预留，因此启动器默认使用 4096。
+- BE-049 仍为 `in_progress`：尚未用新模型重跑 23 条真实 RAG 质量评测，不报告质量收益或新指标。
+
+### 代码交付
+- 提交：`ac7ba5c feat: switch embedding and reranker to llama serve`。
+
+## Session 062：固定真实 RAG 质量评测 Provider 边界（2026-09-19）
+
+### 本轮已完成
+- 将真实 `workflow` 质量评测的基线固定为 DeepSeek 主 LLM、当前 Milvus、开启的 MiniLM Reranker 和 Ollama Embedding；Ollama 只负责向量化，不再作为真实评测的问答/Judge LLM。
+- `run_workflow_evaluation` 在创建容器前拒绝 Ollama/GLM 主 LLM、Ollama/GLM Judge、非 Milvus 配置和关闭 Reranker；`JudgeProvider` 的通用装配能力与独立 Provider 协议测试保留。
+- README、ARCHITECTURE、PRODUCT、RELIABILITY、`.env.example`、CLI 帮助和 BE-049 已同步；主图与 RAG 子图节点、边和流程未改变。
+
+### 验证与结论
+- `cd backend && uv run pytest tests -q -rs`：264 passed、5 skipped（Milvus 集成服务不可达）、1 warning。
+- 定向配置测试 9 passed；`git diff --check` 通过。真实质量评测尚未重跑：本机没有 Ollama embedding 服务，BE-049 继续 `in_progress`，没有新增质量分数。
+
+### 代码交付
+- 提交：`71e71b4 fix: constrain real rag evaluation stack`。
+
+## Session 060：Langfuse 驱动的 RAG 提示词与评测门控优化（2026-09-19）
+
+### 本轮已完成
+- 依据已有真实 Langfuse `evaluation-*` trace 与 RAG 报告，定位 LF-002 等案例的核心问题：恢复查询丢失法条号/期限锚点、`互联网` 误触发 Web 路由、证据 Grader 把旁支主题当必答项、回答遇到局部缺证据时整体拒答，以及 Judge 与产品引用/状态契约不一致。
+- 在不改变主图和 Legal RAG 子图节点/边拓扑的前提下，恢复规划器将精确缺口传递给查询变体；混合召回 `top_k` 调为 30、精排候选上限调为 32；增加显式联网意图守卫；收窄证据 Grader 范围；回答按子问题逐项输出；Judge 纳入状态门槛并遵循 `【来源：文件名】` 协议；Langfuse 默认开启；同步 EI-001 数据集契约。
+
+### 验证与结论
+- `cd backend && uv run pytest tests -q -rs`：259 passed、5 skipped（Milvus 集成服务不可达）、1 warning。
+- `compileall`、`feature_list.json` JSON、`git diff --check` 通过；标准 `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000` 启动成功，`GET /api/health` 返回 200，启动日志确认 `llm_provider=deepseek`、Milvus Cloud 可连接。
+- 本轮真实复评在 `prepare --reset` 首份文档 embedding 阶段失败：本机无 Ollama 进程、服务或 11434 监听；只清理了本次失败产生的单条元数据，未把旧报告分数冒充优化后结果。BE-049 继续 `in_progress`，恢复 Ollama 后需重跑共享知识库评测。
+
+### 代码交付
+- 主图与 RAG 子图流程保持不变；核心代码与同步文档已提交为 `79f6f8a`，本页和进度记录的收尾修订随后提交。
+
+## Session 061：全项目代码与文档一致性审计（2026-09-19）
+
+### 本轮已完成
+- 修正 `docs/ARCHITECTURE.md` 中过期的 RRF 预截断值和测试数量；同步 `feature_list.json` 的 `LANGFUSE_BASE_URL` 字段名，并将旧交接快照明确标为历史，避免与 Langfuse 当前默认开启冲突。
+- 修正 `backend/scripts/verify_ollama_stream.py`、`verify_real_embedding.py`、`verify_real_e2e.py` 的硬编码用户目录；README 克隆地址同步当前 Git remote。
+
+### 验证与结论
+- 后端全量：259 passed、5 skipped（Milvus 集成服务不可达）、1 warning；前端 `npm run build` 通过。
+- compileall、LangGraph Mermaid 导出、RAG 评测 CLI help、Settings/.env.example 40 字段覆盖、JSON、`git diff --check` 通过；活动代码与文档不再引用旧 Planner Provider 配置。
+- BE-049 状态与真实质量结论不变；本轮未重新执行依赖 Ollama embedding/真实 LLM 的 RAG 质量评测。
+- 审计改动已提交为 `09f4b64`。
+
+## Session 059：直调 RAG 评测接入 Langfuse（2026-09-19）
+
+### 本轮已完成
+- 确认原有 `workflow` 评测直接调用 `QaWorkflow.ainvoke()`，绕过 `ChatService`，所以真实评测没有 Langfuse trace；保留现有业务入口，不改成依赖 HTTP/SSE。
+- 评测运行器现在按案例创建 `evaluation-<case_id>` trace，复用节点 span 与 LLM generation，补记 plan/think/sources/retrieval/evaluation 事件，并把 Judge 调用放进 `evaluation_judge` span。
+- `LangfuseTraceSink` 使用 v4 一等 `session_id`，暴露 trace ID；评测报告 JSON 的 `EvaluationCaseResult.trace_id` 可直接回查；评测结束显式 shutdown 等待批量上报。
+
+### 验证与结论
+- 第二轮真实共享评测报告：`backend/log/evaluation/20260919T053533Z-7f6b9aab/`；23/23 完成、0 workflow failure、23/23 唯一 trace 可从 Langfuse 查询。
+- 指标：Hit@5/Recall@5=0.913、MRR=0.8406、grounding 通过率=0.8696、Judge 通过率=0.5217、平均延迟 11.24s；BE-049 继续 `in_progress`。
+- LF-002 trace 证明首轮及恢复轮均未召回专利法第三十五至三十八条，导致证据不足和 Judge 完整性扣分；本轮只补可观测性，不修改检索算法、数据集预期或门槛。
+- 定向 trace/评测测试 16 passed；全量 pytest 258 passed、5 skipped、1 warning；compileall、JSON、diff 检查通过。评测后 SQLite 与 Milvus `law_chunks` 已清理。
+- 提交：`a004376 feat: trace direct rag evaluation with langfuse`。
+
+## Session 058：真实共享 RAG 评测与 clean-state 收尾（2026-09-19）
+
+### 本轮已完成
+- 使用当前 `backend/.env` 启动后端并完成真实 `prepare`/`workflow`：主 LLM 为 DeepSeek，Judge `follow` 复用主 LLM，Embedding 为 Ollama，Milvus Cloud 集合为 `law_chunks`，启用本地 MiniLM Reranker。
+- `prepare` 导入 5 份法律测试文档；`workflow` 完成 23/23 条案例，0 条 workflow failure。报告目录为 `backend/log/evaluation/20260919T051128Z-514ba54b/`，原始 JSON/Markdown 报告保留。
+- 按 `docs/RELIABILITY.md` 清理当前 SQLite 数据库、评测临时数据库和 Milvus `law_chunks` 集合；没有把测试语料留在共享知识库中。
+
+### 验证与结论
+- Hit@5/Recall@5=0.913、MRR=0.8623、grounding 通过率=0.8261、Judge 通过率=0.5217、平均延迟约 11.0s。
+- 11 条状态预期不匹配、4 条 grounding 失败、11 条 Judge 未通过；BE-049 继续 `in_progress`，本轮不修改数据集预期、不降低质量门槛。
+- 下一步先区分数据集状态契约（尤其联网搜索关闭时的 `DISABLED`）与实际检索/回答质量问题，再决定是否进入查询链路优化。
+
+## Session 057：规划器与评测 Judge 配置收敛（2026-09-19）
+
+### 本轮已完成
+- 删除规划器独立 `PlannerProvider`、`PLANNER_PROVIDER`、`PLANNER_MODEL` 配置及装配分支；`create_qa_workflow` 与 `AgentGraphBuilder` 现在只接收并复用主 LLM，RAG 子图规划、主图路由/编排、回答和校验使用同一 Provider 实例。
+- 将评测 Judge 的配置枚举改为 `JudgeProvider`，`follow` 仍复用主 LLM，显式 Provider/模型时构造独立 Judge。
+- 按用户最新设定把 `Settings.llm_provider` 默认值改为 DeepSeek，并同步 `.env.example`、README、ARCHITECTURE、PRODUCT 与默认值测试；本地 `.env` 保留 DeepSeek 且移除废弃的 `PLANNER_*` 字段。
+- 运行时、配置测试和评测配置测试均保留中文注释与原有日志/安全边界；未改变 API/SSE 契约。
+
+### 验证与结论
+- 定向测试：25 passed；全量 `cd backend && uv run pytest tests -q -rs`：257 passed、5 skipped（Milvus 集成服务不可达）、1 warning。
+- compileall、LangGraph Mermaid 导出、`feature_list.json` JSON 校验、`git diff --check` 通过；等价启动命令 `cd backend && uv run python -m uvicorn ...` 成功，`GET /api/health` 返回 200，启动日志确认 `llm_provider=deepseek`。
+- 提交：`6934409 refactor: unify planner llm and rename judge provider`。
+
+### 环境与风险
+- 测试前按 RELIABILITY 要求清理了当前 SQLite 测试库并执行 `scripts/reset_milvus.py --yes`；本地 `backend/.env` 未纳入 Git，密钥未提交。
+- BE-049 仍为 `in_progress`：真实共享 Milvus/Embedding/LLM/Reranker/Judge 质量评测尚未重跑；旧版隔离配置基线仍不能代表当前共享配置。
+
+## Session 055：archive-cleanup 合并收尾（2026-09-19）
+
+### 本轮已完成
+- 从 Codex snapshot `a779df5` 恢复 `codex/archive-cleanup`，与当前 `feature/auto_coder` 的后续评测重构完成冲突整合。
+- 保留当前 `corpus.py` 与 `prepare/workflow` 评测入口，不恢复已经删除的 `api-smoke` / `http_smoke`；当前工作区 DeepSeek V4 Flash 修改已由 `898393a` 提交。
+- 合并提交 `c92e777` 已快进合入 `feature/auto_coder`；主工作树和 archive-cleanup worktree 均干净且指向同一提交。
+
+### 验证与结论
+- `uv run pytest tests -q -rs`：257 passed、5 skipped（Milvus 不可达）、1 warning。
+- CLI help、compileall、feature_list JSON、冲突标记和 `git diff --check` 均通过。
+- BE-049 继续 `in_progress`：真实共享 Milvus/LLM/Embedding/Reranker/Judge 评测尚未重跑，旧版隔离配置基线不代表当前配置。
+
+## Session 056：环境配置字段同步（2026-09-19）
+
+### 本轮已完成
+- 对照 `backend/app/config/settings.py` 补齐 `backend/.env` 的显式配置字段，并同步 `.env.example` 的安全占位和当前默认值。
+- 当前本地配置使用 DeepSeek `deepseek-v4-flash`、Milvus Cloud、`law_chunks`、CPU MiniLM Reranker、Langfuse 和 Tavily；现有密钥仅保留在本地 `.env`。
+- README 与 ARCHITECTURE 的 DeepSeek 默认模型说明已同步；未引入 `WEB_SEARCH_ENABLED` 等已删除配置。
+
+### 验证与结论
+- 42 个 Settings 字段均可在 `.env` 与 `.env.example` 找到；Settings 实际解析成功。
+- `tests/unit/test_settings.py` 与评测单测共 27 passed；`git diff --check` 通过。
+- `.env` 仍由 `.gitignore` 排除，不提交密钥或本地连接地址。
+
+## Session 053：RAG 生成质量评测（2026-09-19）
+
+### 本轮已完成
+- 用户确认同时删除 api-smoke 子命令、实现与专用测试，保留 prepare/workflow；语料导入迁到 `app/evaluation/corpus.py`，默认追加与显式 `--reset` 行为保留。
+- README 标题改为「RAG 评测」，以正确性、完整性、依据支持、引用准确性和报告使用为主；同步架构、产品、可靠性、历史基线及 BE-049 描述。
+- 新增 CLI 回归覆盖旧命令被拒绝、prepare 入口迁移与默认不重置、workflow 加载数据集并调用质量评测器。
+
+### 验证与结论
+- 全量 pytest：256 passed、5 skipped（Milvus 不可达）、1 warning；包含既有 API 集成测试，未重新执行真实 LLM 评测。
+- CLI 主入口/prepare/workflow help、compileall、JSON、diff 检查通过；13 个热层 Session，passing 热条目 23、归档 40，共 68 个功能，无需沉降。
+
+### 环境与风险
+- 本 worktree 无 `.env`、SQLite/WAL/SHM、运行中的后端或 Milvus Cloud 配置；验证复用 `C:/Users/nnnnnn/Desktop/law_agent/backend/.venv/Scripts/python.exe`，导入的是当前 worktree 代码。没有清理其他工作树数据，也没有启动 Docker。
+- 真实服务启动和模型评分未重跑，BE-049 继续 `in_progress`；已有 GLM 失败与旧版隔离基线不能当作当前共享知识库验证结果。
+- 开始时已有 13 个未提交文件且与本轮修改重叠，保留全部原修改，不代为提交；旧 Session 的命令仅作历史记录，当前入口以 README 为准。
+
+## Session 052：评测复用业务存储（2026-09-19）
+
+### 本轮目标
+- 按用户要求，RAG 评测不再使用独立 Milvus 集合或 SQLite 数据库，直接跟随当前服务配置。
+
+### 本轮计划
+- 文档先行：同步 README、PRODUCT、ARCHITECTURE、RELIABILITY、`.env.example`、feature_list 和历史基线说明。
+- 代码随后移除 `law_agent_eval*` 强制校验与评测专用配置注入；`prepare` 的全量删除保留为显式 `--reset`。
+- 运行评测单测、CLI/JSON/编译检查，提交清晰 commit；不启动 Docker，收尾确认 Docker 保持关闭。
+
+### 当前风险
+- 共享存储意味着 `prepare --reset` 会删除当前数据库中的全部文档及向量，不能在不可重建的知识库执行。
+- `docs/evaluation-baseline.md` 的旧报告仍记录隔离配置，只作为历史结果，需重新运行共享配置后才能形成新基线。
+
+## Session 051：明确测试环境清理步骤（2026-09-19）
+
+### 本轮已完成
+- 更新 `docs/RELIABILITY.md` 的测试干净环境管理：固定先清理 SQLite 测试数据库及 `-wal`/`-shm` 文件，再执行 `uv run python scripts/reset_milvus.py --yes` 删除当前配置的 Milvus 测试集合。
+- 明确当前全部为测试环境，不再要求下次 Codex 对云端/本地或 `--yes` 做人工判断；脚本仍按 `MILVUS_PROVIDER` 读取对应连接配置。
+
+### 验证与结论
+- 本轮仅修改文档和会话记录，没有执行实际数据删除；已通过 `git diff --check` 和 JSON 解析检查。
+
+## Session 050：Milvus 显式部署选择与 DeepSeek（2026-09-18）
+
+### 本轮已完成
+- 新增独立 `MILVUS_PROVIDER=cloud|local` 配置，默认 `cloud`；选择 cloud 时只读取 `MILVUS_CLOUD_URI/TOKEN`，选择 local 时只读取 `MILVUS_URI/TOKEN`。
+- 新增 `DeepSeekProvider`，主模型、Planner、评测 Judge 均可通过 Provider 配置选择；请求固定 `thinking.type=disabled`。
+- 同步 `.env.example`、README、ARCHITECTURE、PRODUCT、RELIABILITY、init、feature_list 与运行记录。
+
+### 验证与结论
+- 定向测试 29 passed；全量测试 255 passed、5 skipped、1 warning。
+- 当前 `.env` 的 cloud Milvus 初始化成功；DeepSeek `deepseek-chat` 实际调用返回非空答案；未提交 `.env` 或密钥。
+- 当前 BE-049 的 GLM 稳定性 blocker 不变；本轮未改前端和评测逻辑。
+
+## Session 049：Milvus Cloud 默认连接（2026-09-18）
+
+### 本轮已完成
+- `Settings` 优先读取 `MILVUS_CLOUD_URI` / `MILVUS_CLOUD_TOKEN`，并把 API Key 传入 `MilvusVectorStore`；旧 `MILVUS_URI` / `MILVUS_TOKEN` 保留给 standalone 回退。
+- README、`.env.example`、ARCHITECTURE、PRODUCT、RELIABILITY、init 和 feature_list 已同步；`reset_milvus.py` 对带认证配置要求 `--yes`，防止默认云端误删集合。
+- 保留 `tmp/milvus_cloud_smoke.py` 与 `tmp/milvus_lite_smoke.py` 作为独立手工验证脚本，不读取项目业务代码。
+
+### 验证与结论
+- 当前 `.env` 的真实云端配置通过项目装配链连接：`authenticated=true`、集合不存在时保持懒建；应用启动完成，`GET /api/health` 返回 `{"status":"ok"}`。
+- 定向测试 14 passed；全量 `uv run pytest tests -q -rs` 为 250 passed、5 skipped、1 warning；compileall、feature_list JSON、`git diff --check` 通过。
+- 未执行云端集合重置；BE-049 的 GLM 稳定性 blocker 保持不变。
+
+## Session 048：测试数据同步与真实 RAG 基线（2026-09-18）
+
+### 本轮已完成
+- 同步用户删除的两份测试文本：评测案例从 24 条调整为 23 条；真实 E2E 脚本不再引用已删除专利法 Markdown；pytest 数据集测试校验所有 expected source 文件真实存在。
+- 使用 5 份当前测试文档导入独立 Milvus 集合 `law_agent_eval`。
+- 真实 workflow 报告：`20260918T132908Z-cabbe758`，23 条中 10 条完成、13 条因 GLM `ConnectError`/HTTP 400 失败；完成样本 Hit@5 90%、MRR 0.8333。
+- API/SSE 冒烟最近一次 2/2 通过：`api-smoke-20260918T133249Z-0ddb95`。
+- 新增脱敏摘要 `docs/evaluation-baseline.md`，并同步 README、feature_list、progress。
+
+### 验证与结论
+- Milvus 恢复后 `uv run pytest tests -q -rs`：254 passed、1 warning；评测单测 12 passed。
+- `compileall`、CLI help、`npm run build`、`git diff --check` 通过。
+- BE-049 仍为 `in_progress`：检索完成样本可形成基线，但模型调用失败率过高，不能把本次结果标为质量门禁通过。
+
+## Session 047：跳过 Milvus 的离线收尾（2026-09-18）
+
+### 本轮已完成
+- 按用户要求关闭 Docker Desktop；不删除容器、镜像或卷，也不执行恢复出厂。
+- 在不依赖 Milvus 的前提下完成评测模块验证：评测单测 12 passed，全量后端 249 passed、5 skipped、1 warning。
+- `compileall`、评测 CLI help、`frontend/npm run build`、`git diff --check` 均通过。
+
+### 当前状态
+- BE-049 代码与离线验证已完成，真实 `QaWorkflow` / Milvus / Embedding / LLM / Judge 基线尚未生成。
+- 继续执行真实评测前，需先恢复 Docker/Milvus；完成后再运行下方 Session 046 的 `prepare → workflow → api-smoke`。
+
+## Session 046：RAG 评测演示文档与双入口运行器（2026-09-18）
+
+### 本轮已完成
+- 新增 `backend/tests/evaluation/rag_cases.jsonl`，共 23 条案例：本地事实、多条件、证据不足、对抗前提和 direct control；已移除已删除的 `民事诉讼法2021.md` 对应案例。
+- `QaWorkflow` 已在 `app/containers.py` 统一注册，ChatService 与评测器复用同一工作流；Milvus 集合名支持 `MILVUS_COLLECTION_NAME`，评测默认要求 `law_agent_eval*` 隔离集合。
+- 新增 `app/evaluation/`：JSONL 校验、Recall/Hit@K、MRR、引用精确率/召回率、grounding/状态匹配、节点耗时、脱敏错误、结构化 LLM Judge、JSON/Markdown 报告。
+- 新增 `scripts/evaluate_rag.py`：`prepare` 通过文档 API 重置并导入当前 5 份测试文档；`workflow` 直调真实 QaWorkflow；`api-smoke` 验证真实 HTTP/SSE 事件顺序、来源持久化和错误边界。
+- 文档定位统一为 RAG 评测演示文档，已同步 `README.md`、`docs/ARCHITECTURE.md`、`docs/PRODUCT.md`、`docs/RELIABILITY.md`、`.env.example`。
+
+### 本轮验证与未完成
+- 首次 `uv run pytest tests -q -rs`：246 passed、5 skipped（Milvus 不可达）、1 warning；后续离线收尾全量结果为 249 passed、5 skipped、1 warning。
+- `uv run pytest tests/unit/evaluation -q -rs`：12 passed；`compileall`、CLI help、`git diff --check` 通过。
+- 使用 `MILVUS_COLLECTION_NAME=law_agent_eval` 尝试真实 workflow，初始化阶段因 `127.0.0.1:19530` 无法连接失败；没有生成或填写虚构的 RAG 基线分数。
+- BE-049 仍为 `in_progress`。启动 Docker/Milvus、Embedding/LLM、Reranker 后，按 README 执行 `prepare → workflow → api-smoke`，确认报告内容后再改为 `passing`。
+
+### 当前评测命令（Session 053 更新）
+
+已导入测试文档时直接运行 workflow；需要 prepare 时，先按 README 的快速开始启动后端。
+
+```powershell
+cd backend
+uv run python scripts/evaluate_rag.py workflow --cases tests/evaluation/rag_cases.jsonl
+```
+
+## 历史验证快照（旧 Session，已被上方 Session 060 覆盖）
+- **法律条文边界优先 Chunk 切分（BE-052）已 passing**：`DocumentPipeline.chunk_text` 识别行首“第 X 条”标题，短法条可合并，超长法条不再被 `chunk_size` 从中间截断；普通文本仍按段落与滑窗处理。20 个定向测试、真实专利法第四十二条完整性探针、全量 pytest 227 passed/1 warning 通过。
 - 现在明确可用的部分：
-  - **Agent 模块一期重写 + 思考块 + Langfuse trace + 全量 Prompt 优化 + 精排状态语义修复 + Reranker 模型统一 + 低质量兜底 Agent 删除全部 passing（BE-032~047 + FE-001~016；BE-030 deprecated）**：主图 14 节点 + RAG 子图 10 节点 + 服务层 + status/think 双事件 + 豆包式思考块 + Langfuse 三级追踪 + 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾。
+  - **Agent 模块一期重写 + 思考块 + Langfuse trace + 全量 Prompt 优化 + 精排状态语义修复 + Reranker 模型统一 + 低质量兜底 Agent 删除 + Tavily Remote MCP 搜索全部 passing（BE-032~048 + FE-001~017；BE-030 deprecated）**：主图含 12 个业务节点（含 START/END 共 14 个图节点）+ RAG 子图 10 节点 + Tavily Web Search + Plugin Stub + 服务层 + status/think 双事件 + 豆包式思考块 + Langfuse 三级追踪 + 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾。BE-049 评测运行器已实现但真实基线待补。
+  - **Tavily Remote MCP 搜索（BE-048/FE-017）**：按钮状态通过 `use_web_search` 传递；`WebSearchPort` → Tavily Streamable HTTP `tavily_search` → `observation_node` → Answer/grounding/final；只在按钮开启时实际联网，搜索结果以 300 字网页预览经 `web_sources` 展示，完整原始/规范化数据写入 `backend/log/web_search/search-<UTC>-<UUID>.log`，落盘失败 fail-closed；真实 Remote MCP 已返回 5 条来源并完成 SSE/持久化验收。
   - **全量 Prompt 优化（BE-044，本轮新增）**：12 个 Prompt 统一五段结构（角色/任务/格式/规则/纪律）+ JSON 纪律（禁 markdown 代码块）+ 示例值防锚定标注 + answer_generator 明确【来源：文件名】格式硬约束 + grounding 降误判（实质一致即可/无关数字不算法律数据/宁可放行）。**编排器"不 finish"误诊修正**（Langfuse 时间线取证：闲聊打回真凶是重复执行 direct_answer，非 judge）——regenerating：RAG 2→0、闲聊 3→0；RAG 回答从 65 字重复堆砌变一句精准+来源标注。
-  - **Langfuse trace（BE-043，本轮新增）**：domain TraceSink/TraceSpan 端口 + trace_sink_var（ContextVar）；infrastructure/trace/langfuse_sink.py（langfuse 4.15.2）；ChatService 记 trace 生命周期与流程事件、with_node_status 压/弹节点 span（子图嵌套）、LLMService 三路径记 generation；.env 开关 LANGFUSE_ENABLED（默认 false，缺密钥 WARN 降级，全方法吞异常）。
+  - **Langfuse trace（BE-043，本轮新增）**：domain TraceSink/TraceSpan 端口 + trace_sink_var（ContextVar）；infrastructure/trace/langfuse_sink.py（langfuse 4.15.2）；ChatService 记 trace 生命周期与流程事件、with_node_status 压/弹节点 span（子图嵌套）、LLMService 三路径记 generation；当时 `.env` 开关 LANGFUSE_ENABLED 默认 false，现行默认已改为 true；缺密钥仍 WARN 降级，全方法吞异常。
   - **真实云端验证通过**（jp.cloud.langfuse.com，用户 .env 预置密钥）：E2E trace 含 29 节点 span / 11 generation（model+Prompt+输出）/ 15 think + 2 regenerating 事件。
   - **精排状态语义修复（BE-045）**：`RERANK_ENABLED=false` 被识别为主动关闭，使用 RRF 但不再显示“精排不可用”；CrossEncoder 真失败仍保留 degraded/WARN；启动日志记录 `rerank_enabled` 与 `reranker_device`。
   - **Reranker 模型统一（BE-046）**：生产配置、检查脚本、`.env.example`、README 和架构文档统一为 `cross-encoder/ms-marco-MiniLM-L-6-v2`；检查脚本下载到根目录 `.model` 后从本地目录加载并执行样本打分。
-  - **测试体系**：自动化 226 个（unit 156 含 agent 99 / integration 70 含 agent 12 与 API 9）；test_milvus_vector_store.py 5 例需真实 Milvus（不可达自动跳过）。
-- 最近一轮实际跑过的验证（2026-09-14，Session 041）：
-  - Milvus 集合重置后全量 `uv run pytest tests -q -rs` → **226 passed, 1 warning**；相关精排测试 37 passed。
+  - **测试体系**：自动化 254 个；本轮评测单测 12 个，`test_milvus_vector_store.py` 5 例本轮已实际执行。
+- 最近一轮实际跑过的验证（2026-09-16，Session 045 补充）：
+  - Docker/Milvus 可用时全量 `uv run pytest tests -q -rs` → **242 passed, 1 warning**；5 个 Milvus 用例均实际执行。
+  - `frontend/npm run build` → **tsc + Vite 构建通过**；`git diff --check` 与 `feature_list.json` JSON 校验通过。
+  - 真实 Tavily SSE E2E：状态接口返回 `configured=true`；真实 `tavily_search` 返回 5 条来源，`web_sources→delta→done`、来源持久化、完整 JSON 日志和无 Authorization/Key 泄漏断言通过；按钮关闭时返回 `WEB_SEARCH_NOT_ENABLED` 且无远程调用/新日志。
+  - 真实 RAG E2E：`scripts/verify_real_e2e.py` 上传 TXT/MD 均 `201 ready`，真实 Milvus/GLM 流式回答含“二十年”和专利法来源，sources 持久化一致；测试会话和新增测试文档已清理。
+  - 既有后端/前端启动路径未改变：`backend` 仍按 Docker + uvicorn 启动，`frontend` 仍按 Vite 启动；本轮 1 个永久搜索日志已保留且未进入 Git；CUA 浏览器 inventory helper 不可用，未完成可见浏览器回归。
   - 真实后端启动日志确认 `rerank_enabled=false`；上传专利法 TXT 后提问“发明专利权的保护期限是多少年？”返回“二十年”、第四十二条来源 10 条，SSE 思考文案为“证据按融合排序完成（精排已关闭）”。
   - `frontend/npm run build` 通过；本次改动涉及后端 SSE 文案，无需前端代码改动。
   - 当前本地 `.env` 已切换为 MiniLM 本地目录并开启 `RERANK_ENABLED=true`；旧 Qwen3 性能记录仅属于 Session 041 的历史验证，不再是当前启动配置。
   - README 本地相对链接 5 个均有效，2 个 Mermaid 代码块与全部 Markdown 围栏闭合；配置、API、仓库地址和功能边界已对照当前代码核验。
   - 最近一次真实 E2E 仍为 Session 034：GLM+Milvus 全断言通过，RAG 回答一句精准+【来源】一次通过；闲聊 curl 实测 0 regenerating。
-- 验证后已清理：本轮创建的测试会话/专利法文档已删除，`law_chunks` 集合已 drop，Milvus 三个容器保持运行状态但集合为空；`backend/data/law_agent.db` 仍为 gitignore 的本地数据库文件。
+- 验证后已清理：本轮创建的测试会话/新增专利法文档已删除，未触碰既有知识库数据；Milvus 三个容器保持运行状态；`backend/data/law_agent.db` 与搜索日志仍按 gitignore 留在本地。
+
+## 本轮改动（Session 045：通过 Tavily Remote MCP 增加联网搜索）
+- 文档先行同步 `docs/PRODUCT.md`、`docs/ARCHITECTURE.md`、`docs/RELIABILITY.md`，并同步 README、Mermaid 图、`feature_list.json`、`progress.md`。
+- 后端新增 `WebSearchPort`、Tavily Remote MCP Streamable HTTP 适配器与 MCP v1 依赖（`mcp>=1.28,<2`）；新增 `TAVILY_API_KEY`、`TAVILY_MCP_URL`、搜索深度/条数配置、状态 API、`use_web_search` 请求参数、`web_sources`/`web_search_notice` SSE。
+- 每次搜索在 `backend/log/web_search/` 独立生成完整 JSON `.log`，临时文件 + 原子替换、递归脱敏、永久保留；日志写入失败返回失败 tag，不将内存结果作为成功来源继续展示。
+- 主图接线为 QueryRouter → Orchestrator → Web Search → observation → Orchestrator → Answer → Grounding → Final；按钮关闭时关键词只触发“请先开启按钮”提示，不调用 MCP；grounding 重试复用已获取结果。
+- 前端新增持久在线模式按钮、配置 tag、网页来源折叠区、合法 URL、300 字预览和历史来源恢复；保留 Plugin Stub，删除旧 Web Search Stub。
+- 验证：Docker/Milvus 可用时全量后端 **242 passed、1 warning**；前端 `npm run build` 通过；真实 Tavily SSE E2E 返回 5 条来源、日志和持久化断言通过；按钮关闭不触网；真实 RAG E2E 通过；浏览器可见回归因 CUA inventory helper 不可用未完成。
+- 交接风险：部署环境需配置 `TAVILY_API_KEY`；本轮真实远程响应已验证，后续若 Tavily 返回结构变更应优先检查适配器的结构化/文本归一化日志。
+
+## 本轮改动（Session 054：法律条文边界优先 Chunk 切分）
+- `backend/app/application/services/document_pipeline.py`：新增法条标题识别与原子法条切分；普通文本仍保留原有段落/滑窗策略。
+- `backend/tests/unit/test_document_pipeline.py`：新增超长法条不截断回归测试。
+- 同步 `docs/ARCHITECTURE.md`、`docs/PRODUCT.md`、`feature_list.json`、`progress.md`。
+- 验证：Milvus/后端健康检查通过；20 个定向测试、真实专利法第四十二条完整性探针、全量 pytest 227 passed、1 warning；`git diff --check` 通过。
+- 风险：未识别到明确法条标题的扫描件或普通文本仍使用原滑窗规则。
 
 ## 本轮改动（Session 044：添加 MIT 开源协议）
 - 新增根目录 `LICENSE`，采用标准 MIT License 文本，版权主体为 `law_agent contributors`。
@@ -78,7 +367,7 @@
 - 已知缺陷：无
 - 未验证路径：
   - Langfuse 自托管实例未验证（用户用云版；开关口径一致）
-  - Ollama LLM 路径真实 E2E、MySQL 8.0、Web Search 二期（既有未验证项）
+  - Ollama LLM 路径真实 E2E、MySQL 8.0
 - 下一轮会话需要注意的风险：
   - **pymilvus load_dotenv 副作用升级**：.env 现含 LANGFUSE_ENABLED=true，会灌入测试进程环境——新增 API/集成测试时必须在 Settings 显式 `langfuse_enabled=False`（test_api 夹具已示范），否则测试触真实观测平台
   - **langfuse v4 查询口径**：验证/导出要用 `api.trace.get(id)` 完整详情或 observations.get_many 带 fields——get_many 裸调不返回 input/output/model，别误判为上报缺失
@@ -88,16 +377,16 @@
   - 既有风险不变：每问题 LLM 调用 5~8 次；BE-017 字面锚点三方联动
   - **ADR 体系已删除（Session 035）**：注释/文档不得再新增 ADR-XXXX 引用；架构决策统一引用 docs/ARCHITECTURE.md
   - **Windows 端口清理**：停 uvicorn/npm 后子进程可能残留占端口，需 netstat 找 PID + taskkill //F
-- 下一步最佳动作（需用户决定）：失败查询链路优化（已量化：最坏 20 次 LLM/24 检索/3 重排；方案=恢复轮经济模式+零新增早退+同能力防重入护栏+预算参数可配）；可选产品增强（会话重命名/停止按钮/CORS 收敛）；MySQL 8.0 接入；Web Search 二期立项
+ - 下一步最佳动作（需用户决定）：继续失败查询链路优化（已量化：最坏 20 次 LLM/24 检索/3 重排；方案=恢复轮经济模式+零新增早退+同能力防重入护栏+预算参数可配）；可选产品增强（会话重命名/停止按钮/CORS 收敛）；MySQL 8.0 接入
 - 这一步中哪些东西不要动：后端 API 契约（§7 SSE）；领域层零技术依赖（langfuse 已入守护名单，只允许 infrastructure/trace）；**trace_sink_var 的注入时机（必须在图任务创建前 set）**；**LangfuseTraceSink 全方法吞异常原则**；双预算常量；BE-017 字面锚点联动
 
 ## 命令
-- Milvus 启动：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone`
+- Milvus 默认：`backend/.env` 配置 `MILVUS_CLOUD_URI` / `MILVUS_CLOUD_TOKEN`；本地 standalone 才执行 `cd backend && docker start milvus-etcd milvus-minio milvus-standalone`
 - 后端启动：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 干净环境重置（两步）：删除 `backend/data/` + `uv run python scripts/reset_milvus.py`
-- 后端验证：`cd backend && uv run pytest tests -q`（全量 226 个；Milvus 未启动时 5 例自动跳过）
+- 干净环境重置（两步）：删除 `backend/data/` + 本地执行 `uv run python scripts/reset_milvus.py`，云端确认目标后执行 `uv run python scripts/reset_milvus.py --yes`
+- 后端验证：`cd backend && uv run pytest tests -q -rs`（本轮 250 passed、5 skipped、1 warning）
 - 前端构建/启动：`cd frontend && npm run build` / `npm run dev`
-- 端到端：启动服务器后 `PYTHONPATH=backend uv run --with httpx python backend/scripts/verify_real_e2e.py`
+- 端到端：启动服务器后 `PYTHONPATH=backend uv run --with httpx python backend/scripts/verify_real_e2e.py`；联网搜索真实 SSE E2E 使用 `use_web_search=true`，结果保留在 `backend/log/web_search/`
 - Langfuse 云端查证：`api.trace.list / api.trace.get(id)`（完整详情含 observations IO）
 - 图导出：`cd backend && uv run python scripts/export_qa_graph.py`
 

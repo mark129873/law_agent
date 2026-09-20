@@ -19,6 +19,26 @@ _REQUEST_TYPE_LABELS = {
     "direct": "一般性对话，将直接回答",
 }
 
+# 关闭按钮时仍需识别“我想联网”的明确意图，才能在不触网的前提下
+# 返回“请先开启按钮”的提示。这里使用高置信度的产品词，而不是把所有
+# 法律问题都当成 Web 请求；真正的远程调用仍由 web_search_requested 守卫。
+_WEB_SEARCH_HINTS = (
+    "联网",
+    "上网",
+    "网页",
+    "网上",
+    "搜索",
+    "搜一下",
+    "查一下",
+    "最新",
+    "实时",
+    "今日新闻",
+    "latest",
+    "search",
+    "browse",
+    "web search",
+)
+
 
 class QueryRouterAgent:
     """Query normalize / Intent classify / 请求类型判断 / 基础条件提取。
@@ -34,11 +54,43 @@ class QueryRouterAgent:
     async def __call__(self, state: AgentState) -> dict:
         timer = Timer()
         question = state["question"]
-        # 安全默认：解析失败 → 原问题透传 + 法律问题走检索（宁可多检索不可漏依据）
-        default = QueryRouterOutput(normalized_query=question)
-        routed = await self._llm.structured_invoke(
-            build_router_messages(question), QueryRouterOutput, default=default
-        )
+        requested = bool(state.get("web_search_requested"))
+        route_guarded = False
+        if requested:
+            # 联网按钮是显式产品开关，不能让 LLM 把用户已经选择的能力
+            # 改路到本地 RAG；同时跳过一次无必要的意图分类调用。
+            routed = QueryRouterOutput(
+                normalized_query=question,
+                intent="web_request",
+                request_type="web",
+            )
+            model_name = "explicit_ui_mode"
+        else:
+            if _looks_like_web_search(question):
+                # 按钮关闭且问题明确要求网络信息时，仍走标准 QueryRouter →
+                # Orchestrator → Web 节点路径；Web 节点会返回 DISABLED，
+                # 因而只提示用户，不会调用 Tavily。
+                routed = QueryRouterOutput(
+                    normalized_query=question,
+                    intent="web_request",
+                    request_type="web",
+                )
+                model_name = "explicit_ui_guard"
+            else:
+                # 安全默认：解析失败 → 原问题透传 + 法律问题走检索（宁可多检索不可漏依据）
+                default = QueryRouterOutput(normalized_query=question)
+                routed = await self._llm.structured_invoke(
+                    build_router_messages(question), QueryRouterOutput, default=default
+                )
+                # 模型偶尔把“现行法律/是否规定”误判成联网请求；只有用户
+                # 明确表达联网意图才允许进入 Web 能力，避免按钮关闭时丢掉
+                # 本地 RAG 能回答的法律问题。
+                if routed.request_type == "web" and not _looks_like_web_search(question):
+                    routed = routed.model_copy(
+                        update={"intent": "legal_question", "request_type": "local_rag"}
+                    )
+                    route_guarded = True
+                model_name = self._llm.model_name
         # 思考内容（BE-042）：把结构化判读拼成一句中文，前端思考块可读
         emit_think(
             "query_router_agent",
@@ -50,18 +102,27 @@ class QueryRouterAgent:
             "intent": routed.intent,
             "request_type": routed.request_type,
             "extracted_conditions": routed.extracted_conditions,
-            # Web Search 开关由配置注入（一期 Stub：默认 False → DISABLED）
-            "web_search_enabled": self._config.web_search_enabled_default,
+            # 该字段只描述请求是否由前端按钮触发，不来自全局配置。
+            "web_search_requested": requested,
             "trace": [
                 make_trace(
                     "query_router_agent",
                     "success",
                     timer.elapsed_ms(),
                     extra={
-                        "model": self._llm.model_name,
+                        "model": model_name,
                         "intent": routed.intent,
                         "request_type": routed.request_type,
+                        "route_guarded": route_guarded,
                     },
                 )
             ],
         }
+
+
+def _looks_like_web_search(question: str) -> bool:
+    """判断用户是否明确提到网页/最新信息；仅用于关闭按钮时的提示路由。"""
+    # “互联网”是法律问题中的常见主体词，不应因包含“联网”子串而
+    # 被误判为联网请求；其余显式搜索词仍按原规则识别。
+    normalized = question.casefold().replace("互联网", "")
+    return any(hint.casefold() in normalized for hint in _WEB_SEARCH_HINTS)

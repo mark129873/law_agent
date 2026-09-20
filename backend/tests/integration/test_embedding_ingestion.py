@@ -1,10 +1,10 @@
 """Embedding 服务与知识库入库测试。
 
 两类验证：
-1. OllamaEmbeddingService 协议行为（MockTransport 注入，不依赖本机服务）。
+1. LlamaEmbeddingService 协议行为（MockTransport 注入，不依赖本机服务）。
 2. 知识库入库端到端：内存 Fake 向量库 + 确定性测试 embedding，验证
-   Pipeline → Embedding → VectorStore 全链路（本机 Ollama 未开启
-   --embeddings，真实向量生成待环境就绪后补验，见 feature_list 记录）。
+   Pipeline → Embedding → VectorStore 全链路（真实 llama serve 由独立
+   启动器管理，自动化测试不触发本机模型服务）。
 """
 
 import hashlib
@@ -17,15 +17,15 @@ from app.application.services.document_pipeline import DocumentParserFactory, Do
 from app.application.services.knowledge_service import KnowledgeIngestionService
 from app.domain.services.embedding import EmbeddingService
 from app.infrastructure.document_parser.text_parser import TextParser
-from app.infrastructure.embedding.ollama_embedding import OllamaEmbeddingService
+from app.infrastructure.embedding.llama_embedding import LlamaEmbeddingService
 from tests.fakes import InMemoryVectorStore
 
 # ---- 协议级测试 ----
 
 
 @pytest.mark.asyncio
-async def test_ollama_embedding_parses_batch() -> None:
-    """批量 embedding 应解析 embeddings 数组且顺序与输入一致。"""
+async def test_llama_embedding_parses_batch() -> None:
+    """批量 embedding 应解析 data 数组且按 index 恢复输入顺序。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         import json
@@ -33,21 +33,29 @@ async def test_ollama_embedding_parses_batch() -> None:
         payload = json.loads(request.content)
         assert payload["model"] == "test-embed"
         assert payload["input"] == ["第一条", "第二条"]
-        return httpx.Response(200, json={"embeddings": [[1.0, 0.0], [0.0, 1.0]]})
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"index": 1, "embedding": [0.0, 1.0]},
+                    {"index": 0, "embedding": [1.0, 0.0]},
+                ]
+            },
+        )
 
-    service = OllamaEmbeddingService("http://mock", "test-embed", transport=httpx.MockTransport(handler))
+    service = LlamaEmbeddingService("http://mock", "test-embed", transport=httpx.MockTransport(handler))
     vectors = await service.embed_documents(["第一条", "第二条"])
     assert vectors == [[1.0, 0.0], [0.0, 1.0]]
 
 
 @pytest.mark.asyncio
-async def test_ollama_embedding_rejects_count_mismatch() -> None:
+async def test_llama_embedding_rejects_count_mismatch() -> None:
     """返回向量数量与输入不一致时必须失败，防止错位入库。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"embeddings": [[1.0, 0.0]]})
+        return httpx.Response(200, json={"data": [{"index": 0, "embedding": [1.0, 0.0]}]})
 
-    service = OllamaEmbeddingService("http://mock", "test-embed", transport=httpx.MockTransport(handler))
+    service = LlamaEmbeddingService("http://mock", "test-embed", transport=httpx.MockTransport(handler))
     with pytest.raises(ValueError, match="数量不匹配"):
         await service.embed_documents(["第一条", "第二条"])
 
@@ -55,7 +63,7 @@ async def test_ollama_embedding_rejects_count_mismatch() -> None:
 @pytest.mark.asyncio
 async def test_embedding_empty_input_returns_empty() -> None:
     """空输入直接返回空列表，不发起网络请求。"""
-    service = OllamaEmbeddingService("http://mock", "test-embed")
+    service = LlamaEmbeddingService("http://mock", "test-embed")
     assert await service.embed_documents([]) == []
 
 
@@ -65,7 +73,7 @@ async def test_embedding_empty_input_returns_empty() -> None:
 class DeterministicEmbedding(EmbeddingService):
     """确定性测试 embedding：字符 bigram 哈希词袋，语义相近文本向量相近。
 
-    为什么自造向量：本机 Ollama 未开启 --embeddings；
+    为什么自造向量：真实 llama serve 不属于自动化测试依赖；
     该 Fake 保证"相同文本向量相同、不同文本向量不同"，
     足以验证入库与检索链路的正确性。
     """

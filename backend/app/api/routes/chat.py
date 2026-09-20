@@ -12,10 +12,11 @@ import json
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from app.api.dto import ChatStreamRequest
+from app.api.dto import ChatStreamRequest, WebSearchStatusResponse
 from app.api.errors import ConversationNotFoundApiError
 from app.application.services.chat_service import ChatService
 from app.application.services.conversation_service import ConversationNotFoundError
+from app.domain.services.web_search import WebSearchPort
 
 # 路由前缀统一挂在 /api/chat 下，具体端点只写子路径
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -39,6 +40,13 @@ def _sse_event(payload: dict) -> str:
     ensure_ascii=False 保证中文原样输出，前端无需二次解码。
     """
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+@router.get("/web-search/status", response_model=WebSearchStatusResponse)
+async def web_search_status(request: Request) -> WebSearchStatusResponse:
+    """返回 Tavily 是否已配置 API Key，不返回密钥值或请求头。"""
+    search_port: WebSearchPort = request.app.state.container.resolve(WebSearchPort)
+    return WebSearchStatusResponse(configured=search_port.configured)
 
 
 @router.post("/stream")
@@ -65,17 +73,31 @@ async def chat_stream(payload: ChatStreamRequest, request: Request) -> Streaming
         # - think：节点过程内容行（BE-042，决策输出/运行细节/流转说明，前端思考块）
         # - plan：检索规划产出的全部查询（检索策略展示，重规划时再次出现）
         # - sources：RAG 检索有命中时出现（参考文档数据源，重规划后以最新一批为准）
+        # - web_sources：联网搜索结果（标题、URL 与 300 字预览）
+        # - web_search_notice：联网搜索配置/空结果/失败 tag，不进入回答正文
         # - delta：逐段增量文本
         # - regenerating：校验打回重生成（前端据此清空已渲染增量）
         # - 正常结束追加 done 事件（带会话 id，前端可据此刷新会话列表）
         # - 任何异常（模型超时/服务内部错误）都转为 error 事件后正常
         #   结束流——已经推给前端的内容仍然有效，剩余部分以错误提示收尾
         try:
-            async for event in chat_service.stream_answer(payload.conversation_id, payload.question):
+            async for event in chat_service.stream_answer(
+                payload.conversation_id,
+                payload.question,
+                use_web_search=payload.use_web_search,
+            ):
                 if event.type == "plan":
                     yield _sse_event({"type": "plan", "sub_queries": list(event.sub_queries)})
                 elif event.type == "sources":
                     yield _sse_event({"type": "sources", "sources": list(event.sources)})
+                elif event.type == "web_sources":
+                    yield _sse_event({"type": "web_sources", "sources": list(event.sources)})
+                elif event.type == "web_search_notice":
+                    yield _sse_event({
+                        "type": "web_search_notice",
+                        "code": event.code,
+                        "message": event.message,
+                    })
                 elif event.type == "regenerating":
                     yield _sse_event({"type": "regenerating"})
                 elif event.type == "status":

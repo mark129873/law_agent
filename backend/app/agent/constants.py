@@ -32,6 +32,10 @@ CAPABILITY_LOCAL_EVIDENCE_INSUFFICIENT = "LOCAL_EVIDENCE_INSUFFICIENT"
 CAPABILITY_NOT_IMPLEMENTED = "NOT_IMPLEMENTED"
 CAPABILITY_DISABLED = "DISABLED"
 CAPABILITY_RETRIEVAL_ERROR = "RETRIEVAL_ERROR"
+CAPABILITY_WEB_SEARCH_EMPTY = "WEB_SEARCH_EMPTY"
+CAPABILITY_WEB_SEARCH_CONFIG_REQUIRED = "WEB_SEARCH_CONFIG_REQUIRED"
+CAPABILITY_WEB_SEARCH_ERROR = "WEB_SEARCH_ERROR"
+CAPABILITY_WEB_SEARCH_LOG_WRITE_FAILED = "WEB_SEARCH_LOG_WRITE_FAILED"
 
 # ---- RAG 子图状态（设计 §38/§47）----
 RAG_STATUS_SUCCESS = "SUCCESS"
@@ -53,8 +57,7 @@ NODE_LABELS: dict[str, str] = {
     "orchestrator_agent": "规划下一步",
     "action_router_node": "确定执行路径",
     "legal_rag_subgraph": "检索知识库",
-    "web_search_entry_node": "检查网络搜索",
-    "web_search_stub_node": "网络搜索（未开通）",
+    "web_search_entry_node": "联网搜索",
     "plugin_entry_node": "检查插件能力",
     "plugin_stub_node": "插件能力（未开通）",
     "direct_answer_agent": "生成回答",

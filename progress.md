@@ -1,182 +1,104 @@
 # progress.md -- 会话进度日志
 
 ## 当前已验证状态
-- 仓库根目录：`C:\Users\nnnnnn\Desktop\law_agent`（当前分支 feature/auto_coder）
-- 标准启动路径：`cd backend && docker start milvus-etcd milvus-minio milvus-standalone && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 标准验证路径：`cd backend && uv run pytest tests -q`（全量 226 个自动化测试，真实 Milvus 集成测试在服务不可达时跳过）；启动后 `curl http://127.0.0.1:8000/api/health`
-- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ Reranker 模型统一（BE-046）+ 低质量兜底 Agent 删除（BE-047）全部 passing：主图 + Local Legal RAG 子图 + Web/Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
-- 当前 Reranker：全项目统一使用 `cross-encoder/ms-marco-MiniLM-L-6-v2`；`check_rerank_local.py` 首次下载到根目录 `.model/cross-encoder/ms-marco-MiniLM-L-6-v2` 并执行 CPU 样本打分。本地 `.env` 已切换为该模型并开启 `RERANK_ENABLED=true`；无法使用时仍按既有故障降级契约记录 WARN。
+- 当前主工作树：`C:\Users\nnnnnn\Desktop\law_agent`（`feature/auto_coder`，真实评测边界提交 `71e71b4`，全项目审计提交 `09f4b64`）；`codex/archive-cleanup` 隔离 worktree 保留在历史提交 `73255d6`，未合并分支为空。
+- 标准启动路径：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`（`MILVUS_PROVIDER` 默认 `cloud` 读取 `MILVUS_CLOUD_*`；本地 standalone 必须显式设为 `local` 并启动 Docker）
+- 标准验证路径：`cd backend && uv run pytest tests -q -rs`；本轮 276 passed、5 skipped（Milvus 集成服务不可达）、1 warning；标准后端启动和 `/api/health` 均通过。
+- Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ llama serve Qwen3 Embedding/Reranker（BE-053）+ 低质量兜底 Agent 删除（BE-047）+ Tavily Remote MCP 搜索（BE-048/FE-017）全部完成当前代码验证：主图 + Local Legal RAG 子图 + Tavily Web Search + Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
+- 当前 Embedding/Reranker：两个独立 `llama serve` 进程分别加载 `Qwen3-Embedding-0.6B-Q8_0.gguf` 与 `qwen3-reranker-0.6b-q8_0.gguf`；默认端口固定为 Embedding `11436`、Reranker `11435`，与 Ollama 对话 `11434` 分离；路径、地址、`LLAMA_DEVICE` 和 `LLAMA_CONTEXT_SIZE` 均由 `.env` 配置，当前设备为 `Vulkan1`、上下文为 4096。启动器真实双服务验收通过，Embedding 返回 1024 维，Reranker 返回正确排序；服务请求失败仍按 RRF 降级。
 - 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；grounding 未通过且预算耗尽时直接进入 `final_answer_node`，不再调用额外兜底 LLM；其他重试机制不变
-- 当前最高优先级未完成功能：无——BE-001~047 与 FE-001~016 全部 passing 或 deprecated（BE-007/008/028/030 deprecated）
-- 当前 blocker：无
-- 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md（Session 001~030 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
+- BE-049 当前已完成：50 条真实案例 `completed=50/failed=0`，状态匹配率与 grounding 通过率均为 1.00，Judge 通过率为 1.00；优化后报告为 `backend/log/evaluation/20260920T074628Z-e10d1123/`。
+- 观测与清理已完成：Langfuse 对账 50/50 个 `evaluation-<case_id>` trace，结构化日志与报告均保留；评测临时导入的 5 个文档已按 ID 删除，未执行共享库 reset；当前无 blocker。
 
-### Session 044（添加 MIT 开源协议）
-- 日期：2026-09-14
-- 本轮目标：为仓库添加标准 MIT 开源协议并在 README 中声明。
-- 改动：新增根目录 `LICENSE`，版权主体标注为 `law_agent contributors`；README 增加 MIT License 链接。
-- 验证：许可证文件、README 链接和工作区状态检查通过；本轮未修改运行时代码，沿用上一轮全量 pytest 226 passed、1 warning。
+### Session 065（50 条真实 RAG 质量优化与验收）（2026-09-20）
+- 根据仓库内 5 份真实法律文档扩充评测集到 50 条，覆盖本地事实、多条件、对抗性、证据不足、能力边界和直接回答；ID 唯一，来源文件均存在。
+- 依据真实报告与 Langfuse trace 优化回答 Prompt、证据 Grader 边界、来源标记归一化、单/多法源排序和绝对范围判定；没有新增或删除 LangGraph 节点、边和路由流程。
+- 关键修复：多条件问题逐项回答；错误前提由直接法条纠正时不再误判证据不足；“基本限制”不要求穷尽旁支规定；统一 `【来源：文件名】` 标记；点名多法源时保留各法源，单法源问题保持来源上下文一致。
+- 全量回归：`276 passed、5 skipped、1 warning`。真实评测：50/50 完成、状态匹配率 1.00、grounding 1.00、Judge 1.00、Recall@5 0.92、MRR 0.92、引用精确率 0.895；报告 `backend/log/evaluation/20260920T074628Z-e10d1123/`。
+- Langfuse 对账：50/50 个 `evaluation-<case_id>` session 均可查询；trace 含节点 span、LLM generation 和 `evaluation_judge`，无观测 blocker。评测导入的 5 个临时文档已清理，未使用 `prepare --reset`。
 
-### Session 043（删除低质量 fallback_generator_agent）
-- 日期：2026-09-14
-- 本轮目标：删除实际效果不佳的 `fallback_generator_agent`，避免 grounding 预算耗尽后再次调用 LLM 覆盖已有回答。
-- 改动：删除 `FallbackGeneratorAgent`、独立 fallback Prompt、主图节点、节点标签及 fallback 条件边；预算耗尽直接进入确定性 `final_answer_node`；Web/Plugin 未开通说明迁移到 `capability_notice.py`。
-- 验证：Milvus 集合重置后，代码变更后的定向测试 22 passed、全量 pytest 226 passed、1 warning；后端启动与健康检查通过，路由和 Mermaid 图同步完成。SQLite 文件删除命令受执行环境破坏性操作策略拦截，未绕过该限制。
-- 风险/交接：预算耗尽时不再自动重写，收尾使用 `answer_generator_agent` 已生成的最后草稿；若需改善答案质量，应优化主回答/grounding Prompt 或预算策略，而不是恢复低质量兜底 Agent。
+### Session 064（解决 Ollama 与 Embedding 端口冲突）（2026-09-20）
+- 根因：Ollama 对话默认 `11434`，Embedding llama serve 也默认 `11434`；切换 `LLM_PROVIDER=ollama` 时两个服务无法同时绑定。
+- 最小修复：保留 Ollama `11434`，把 Embedding 默认与本地配置迁移到 `11436`，Reranker 保持 `11435`；同步 Settings、`.env.example`、README、ARCHITECTURE、端口回归测试和当前交接记录。
+- 验证：端口配置断言 19 passed；全量 pytest 268 passed、5 skipped、1 warning；Embedding `11436` 与 Reranker `11435` 真实双服务加载成功，Embedding 返回 1024 维、Reranker 排序正确；Settings 与 `.env.example` 仍为 43/43 字段覆盖。
+- 提交：`5f680d2 fix: separate ollama and embedding ports`；BE-049 真实质量评测边界不变。
 
-### Session 042（统一 MiniLM Reranker 与本地下载启动）
-- 日期：2026-09-14
-- 本轮目标：将全项目 Reranker 切换为 `check_rerank_local.py` 中的 `cross-encoder/ms-marco-MiniLM-L-6-v2`，并补齐模型下载、配置和启动说明。
-- 改动：Settings、装配点、`.env.example`、测试默认值、架构/产品文档和 README 全部同步；检查脚本统一负责下载到 `.model`、本地加载和样本打分；本机忽略配置切换到新模型并开启精排；新增 BE-046。
-- 验证：Milvus 健康检查通过；模型检查脚本复用本地目录并完成打分；后端全量测试 226 passed、1 warning；`git diff --check` 通过。
-- 风险/交接：首次下载需要访问 Hugging Face；CPU/GPU 设备由 `RERANKER_DEVICE` 配置，模型加载或推理异常仍会按既有契约降级为 RRF。
+### Session 063（切换 llama serve Qwen3 Embedding/Reranker）（2026-09-20）
+- 将 Embedding 从 Ollama 改为 `LlamaEmbeddingService`，调用 `/v1/embeddings`；将本地 MiniLM CrossEncoder 改为 `LlamaRerankScorer`，调用 `/v1/rerank`；两个适配器均保留响应校验和结构化日志，Reranker 请求失败继续降级 RRF。
+- 新增 `scripts/start_llama_servers.py`：从 `.env` 读取两个 GGUF 路径、地址、`LLAMA_DEVICE` 和 `LLAMA_CONTEXT_SIZE`，分别启动 `--embedding` / `--rerank`；设备为空不传 `--device`。默认上下文 4096 是双进程显存稳定性的部署参数，设为 0 可恢复模型默认值。
+- 删除 sentence-transformers/torch 等旧精排依赖并同步 `uv.lock`；同步 Settings、容器、评测快照、README、ARCHITECTURE、PRODUCT、RELIABILITY、`.env.example` 和功能清单。
+- 验证：24 个定向测试、268 个全量测试通过（5 个 Milvus 集成跳过、1 warning）；compileall、`uv lock --check` 通过；`Vulkan1` 真实双服务启动、Embedding 2 条/1024 维、Reranker 2 条且相关文档排名第一；后端 `/api/health` 返回 `ok`。
+- 风险：BE-049 尚未使用新模型重跑真实质量评测，不能把本轮协议/启动通过写成检索质量提升；commit `ac7ba5c`。
 
-### Session 041（修复精排状态误报）
-- 日期：2026-09-14
-- 本轮目标：排查“证据重排降级（精排不可用）”是否由 reranker 故障导致，并修复主动关闭精排时的误导性思考文案。
-- 根因与决策：工作区 `.env` 曾显式设置 `RERANK_ENABLED=false`，不是模型加载失败；本地 Qwen3-Reranker 快照实测可加载并返回分数，但 CPU 对 20 条候选超过 180s，因此恢复安全的 CPU 默认关闭，不把它改成会卡死请求的强制开启。
-- 改动：`RerankResult` 增 `disabled` 状态；EvidenceRankingNode 区分“精排已关闭”和“模型失败降级”；主动关闭记 INFO，模型失败仍记 WARN；启动日志增加 `rerank_enabled`/`reranker_device`；同步 PRODUCT/ARCHITECTURE/RELIABILITY 与 BE-045。
-- 验证：Milvus 集合重置；相关单测 37 passed；全量 `uv run pytest tests -q -rs` 为 **226 passed, 1 warning**；`frontend/npm run build` 通过；真实启动日志确认 `rerank_enabled=false`；上传专利法后提问“发明专利权的保护期限是多少年？”返回“二十年”、第四十二条来源 10 条，SSE 思考显示“证据按融合排序完成（精排已关闭）”。
-- 风险/交接：若要真实精排，请在 GPU 或可接受长延迟的机器设置 `RERANK_ENABLED=true`；当前 CPU 配置无需再把“精排已关闭”误判为项目故障。
+### Session 062（固定真实 RAG 质量评测 Provider 边界）（2026-09-19）
+- 文档与 CLI 明确真实质量评测固定使用 DeepSeek 主 LLM、当前 Milvus、MiniLM Reranker 和 Ollama Embedding；Ollama/GLM 对话 Provider 的通用协议测试不计入质量结论。
+- `run_workflow_evaluation` 在创建真实容器前校验 `LLM_PROVIDER=deepseek`、Milvus、`RERANK_ENABLED=true`，并限制 Judge 为 `follow/deepseek`；报告显式记录 `embedding_provider=ollama`。主图与 RAG 子图拓扑未改。
+- 全量 `uv run pytest tests -q -rs`：264 passed、5 skipped、1 warning；真实复评仍因本机无 Ollama embedding 服务未执行。提交：`71e71b4`。
 
-### Session 040（GitHub 发布版 README）
-- 日期：2026-09-14
-- 本轮目标：为仓库提供适合 GitHub 项目首页的中文 README，仅陈述当前代码与文档已经实现或明确标注的能力。
-- 改动：重写 `README.md`，补齐项目定位、技术亮点、两张 Mermaid 架构图、RAG/SSE 说明、真实仓库克隆地址、跨平台启动步骤、配置/API/目录结构、验证方式、已知边界、贡献说明与 License 状态；明确 Web/Plugin 仍为 Stub、MySQL 尚未接入以及法律免责声明。
-- 验证：逐项对照 `docs/ARCHITECTURE.md`、`docs/PRODUCT.md`、代码配置和 API 路由；本地链接 5 个均有效、2 个 Mermaid 代码块闭合；Milvus 集合重置后全量 pytest `225 passed, 1 warning`，前端 `npm run build` 通过，`git diff --check` 通过。
-- 状态：纯发布文档改进，不新增产品功能，`feature_list.json` 状态与证据无需变更；热层 Session 10 个、passing 条目 36 个，均未触发冷热沉降。
+### Session 060（Langfuse 驱动的 RAG 提示词与评测门控优化）（2026-09-19）
+- 根因：Langfuse LF-002 等 trace 显示恢复查询丢失专利法条号等精确锚点；`互联网` 被误判为联网意图；Judge 未把期望/实际状态纳入通过门槛，且对产品允许的来源文件引用过严。
+- 最小改动：恢复规划器把法条号、期限、主体和条件传入下一轮查询变体；混合召回由 20 扩至 30、精排候选上限为 32；路由增加显式联网意图守卫；证据 Grader 改为问题范围判断；回答按子问题逐项作答；Judge 对状态与 `【来源：文件名】` 协议统一评分；同步 EI-001 评测契约。主图和 RAG 子图拓扑未变，Langfuse 默认开启。
+- 验证：全量 `uv run pytest tests -q -rs` 为 259 passed、5 skipped、1 warning；compileall、JSON、`git diff --check` 通过；标准 `uv run uvicorn` 启动成功，`GET /api/health` 返回 200。
+- 真实复评：`prepare --reset` 在首份文档 embedding 阶段因本机无 Ollama 服务失败，已删除本次产生的失败元数据记录，未改写已有真实评测指标；下一轮需恢复 Ollama 后再验证质量变化。
+- 法律条文边界优先 Chunk 切分（BE-052）已 passing：识别行首法条标题，短法条可合并，超长法条保持原子性；普通文本仍使用原有段落与滑窗规则。
+- 冷数据归档：docs/archive/progress-archive-001-010.md、progress-archive-011-020.md、progress-archive-021-030.md、progress-archive-031-040.md（Session 001~040 历史记录；沉降规则：Session > 15 触发，每批沉 10 个，起止序号命名）
 
-### Session 039（收紧失败路径重试预算）
-- 日期：2026-09-14
-- 本轮目标：按用户要求减少 RAG 无对应文档时的恢复次数，以及主图总体重试预算；不改变架构、节点或 LangGraph 连线。
-- 改动：`LegalRAGConfig.max_retries` 从 2 调为 1；`AgentConfig.max_global_steps` 从 4 调为 2；同步 ARCHITECTURE、集成/单元测试和功能证据。
-- 验证：相关测试 22 passed；全量 `uv run pytest tests -q -rs` 为 225 passed、1 warning；`npm run build` 通过；`git diff --check` 通过。
-- 保持不变：Milvus 单查询异常重试 1 次、LLM 结构化输出解析重试 1 次；`max_global_steps=2` 下 grounding 失败会更快进入现有 fallback。
+### Session 061（全项目代码与文档一致性审计）（2026-09-19）
+- 修正架构文档的 RRF 预截断值（20→32）和测试统计（单元 186、集成 66、接口 12、自动化合计 264；本轮 259 passed/5 skipped/1 warning）；修正功能清单的 `LANGFUSE_BASE_URL` 字段名，并把交接文档旧快照明确标为历史。
+- 修正三个真实验证脚本的硬编码用户目录，改为按 `__file__` 定位 backend；README 克隆地址与当前 remote 同步为 `mark129873/law_agent.git`。
+- 验证：后端全量 pytest 259 passed、5 skipped、1 warning；前端 `npm run build` 通过；compileall、LangGraph 图导出、评测 CLI help、JSON 与 `git diff --check` 通过；Settings 与 `.env.example` 均覆盖 40 个配置字段，活动代码无旧 Planner Provider 引用。
 
+### Session 059（直调 RAG 评测接入 Langfuse）（2026-09-19）
+- 根因确认：`workflow` 评测直接调用 `QaWorkflow.ainvoke()`，原先绕过 `ChatService`，因此真实评测报告没有 Langfuse trace，只有工作流内置节点摘要。
+- 最小改动：评测运行器按案例建立 `evaluation-<case_id>` trace，把节点 span、LLM generation、流程事件和 `evaluation_judge` span 接入同一条链路；`EvaluationCaseResult` 保存 `trace_id`；Langfuse v4 使用一等 `session_id`，评测结束显式 shutdown 等待批量上报。
+- 真实验证：第二轮共享配置评测 23/23 完成、0 条 workflow failure、23/23 唯一 trace 可查询；Hit@5/Recall@5=0.913、MRR=0.8406、grounding=0.8696、Judge 通过率=0.5217、平均延迟 11.24s。报告：`backend/log/evaluation/20260919T053533Z-7f6b9aab/`。
+- Langfuse 取证：LF-002 首轮及恢复轮均显示缺少专利法第三十五至三十八条证据，导致状态不足和 Judge 完整性扣分；本轮未擅自修改检索算法、数据集预期或质量门槛。
+- 验证：trace/评测定向 16 passed；全量 `uv run pytest tests -q -rs` 为 258 passed、5 skipped、1 warning；compileall、JSON 与 `git diff --check` 通过；评测后已清理 SQLite 和 Milvus `law_chunks`。commit `a004376`。
 
-### Session 038（设计稿删除：核心约束并入 ARCHITECTURE §12）
-- 日期：2026-09-14
-- 本轮目标：应用户要求把 docs/archive/legal_agent_phase1_technical_design.md（2699 行）最核心内容按需并入 ARCHITECTURE.md 后删除该稿
-- 技术决策：删除前先普查代码引用——57 个不同设计 § 号（最高频 §47 错误处理 16 次）+ 约束 3~25 共 30 处"约束 N"引用；据此 ARCHITECTURE.md 新增 **§12「一期设计约束与 § 号速查」**：①原 §53 的 30 条强制实现约束逐条保编号收录（代码按约束号引用，编号不可变）；②设计 §号速查表（仅收录被引用章节，每行核心内容一句话 + 权威现落点：实现文件或本文档小节）；§52 实现顺序/未引用章节不收录
-- 运行过的验证：grep 全仓库设计稿引用仅剩 3 处有意保留（§12 标题出处说明 + feature_list/progress 各 1 处历史记录）；本轮纯文档+1 行注释改动，测试沿用 Session 034 基线（225）
-- 已记录证据：本轮为文档迁移，feature_list.json 无功能状态变化；设计稿自此无落地文件，"设计 §XX/约束 N"语义由 ARCHITECTURE §12 唯一承载
-- 已知风险或未解决问题：无新增
-- 下一步最佳动作：失败查询链路优化（方案已备）；OllamaProvider 重试/降级（Session 028 遗留）
+### Session 058（真实共享 RAG 评测与 clean-state 收尾）（2026-09-19）
+- 使用当前本地配置启动后端：主 LLM 为 DeepSeek、Judge `follow` 复用主 LLM，Embedding 为 Ollama，Milvus Cloud 使用 `law_chunks`，启用 MiniLM Reranker。
+- `prepare` 导入 5 份测试文档；`workflow` 运行 23 条案例，23/23 完成、0 条 workflow failure。结果：Hit@5/Recall@5=0.913、MRR=0.8623、grounding 通过率=0.8261、Judge 通过率=0.5217、平均延迟 11.0s；质量尚未达到 passing。
+- 报告：`backend/log/evaluation/20260919T051128Z-514ba54b/`；真实 Judge 使用 `deepseek-v4-flash`。评测后按 RELIABILITY 清理 SQLite（含临时评测库）和 Milvus `law_chunks`，保留报告工件。
+- 结论：BE-049 继续保持 `in_progress`。11 条状态预期不匹配、4 条 grounding 失败和 11 条 Judge 未通过案例需要后续区分数据集契约问题与检索/回答质量问题，未在本轮擅自改数据集或放宽门槛。
 
-### Session 037（全文文档优化：冷热沉降 + 设计稿入冷存 + 去重复 + 补 README）
-- 日期：2026-09-14
-- 本轮目标：应用户要求"对全文文档优化，保留核心信息、去除冗余信息"
-- 做了什么：
-  - **沉降（规则强制，Session 数 17>15）**：Session 021~030 整体搬入 docs/archive/progress-archive-021-030.md（行切割保证逐字不差，整条原样）；progress.md 356→116 行，热层归档指针同步，热层 Session 数 6
-  - **一期设计稿（2699 行）移入 docs/archive/**（git mv 保留历史）：as-built 已由 ARCHITECTURE.md 承载，但代码注释按"设计 §XX"引用故不删；ARCHITECTURE/agent/__init__ 两处"设计依据"引用补全路径
-  - **ARCHITECTURE.md 去重复**：§0 三条技术栈 bullet 与 §1 末尾详细栈合并；§2 目录树 database 长注释压缩（细节归 §3）；§9 测试表/§11 契约清单/§5 mermaid 图（用户明确要求固化）全部保留
-  - **RELIABILITY.md**：埋点示例块与级别表语义重复，压缩为一段（埋点清单语义零丢失）；121→108 行
-  - **README.md 原为空文件**：补 33 行极简版（简介 + 快速启动 + 文档索引）
-- 运行过的验证：冷分卷序号连续（001-010/011-020/021-030）；grep 设计稿引用无悬空；热层文档总量 3804→883 行；本轮纯文档改动，测试沿用 Session 034 基线（225）
-- 已记录证据：本轮为文档优化，feature_list.json 无功能状态变化；对账：Session 总数 36 = 热 6 + 冷 30
-- 已知风险或未解决问题：无新增（既有：失败查询链路优化待立项、OllamaProvider 重试遗留）
-- 下一步最佳动作：失败查询链路优化（方案已备）；OllamaProvider 重试/降级（Session 028 遗留）
+### Session 057（规划器与评测 Judge 配置收敛）（2026-09-19）
+- 规划器删除独立 Provider/模型配置，工作流构建器、RAG 子图和主图节点统一复用同一个主 LLM 实例；`PlannerProvider` 改为仅历史记录，代码配置移除。
+- RAG 评测新增并使用 `JudgeProvider`，保留 `follow` 默认复用主 LLM、显式 Provider/模型时构造独立 Judge；主 LLM 默认值同步为 DeepSeek。
+- 同步 `Settings`、容器装配、README、`.env.example`、ARCHITECTURE、PRODUCT 与配置测试；本地 `.env` 删除已废弃的 `PLANNER_*` 字段。
+- 验证：定向 25 passed；全量 `uv run pytest tests -q -rs` 为 257 passed、5 skipped、1 warning；compileall、图导出、JSON、`git diff --check` 和后端 `/api/health` 200 通过；commit `6934409`。
+- 风险：BE-049 仍为 `in_progress`，真实共享 Milvus/Embedding/LLM/Reranker/Judge 质量评测尚未重跑。
 
-### Session 036（文档修复：plan.md 悬空引用清理 + 契约/决策归档）
-- 日期：2026-09-14
-- 本轮目标：plan.md 被删除后（ce56bf8）遗留两类问题修复——①progress/session-handoff/feature_list 共 6 处 "详见 plan.md" 死指针；②plan.md 承载的三类内容无归档去处（BE-044 硬约束清单、D1~D12 决策表、Langfuse 设计摘要）
-- 技术决策：
-  - 只增小节不新增文件：**ARCHITECTURE.md 新增 §11「Prompt 与事件硬约束契约」**（9 角色标记词全列表 + 字面锚点 + JSON 契约键值域 + BE-044 优化要点 + think 节点→内容清单，注明为唯一权威清单）；**PRODUCT.md 新增 §6「已确认的产品决策记录（D1~D12）」**（决策留档防实现漂移）
-  - Langfuse 设计摘要经逐条比对确认 RELIABILITY.md「Langfuse 链路追踪」节已完整承载，不重复新增，引用改指该处
-- 运行过的验证：grep 热层文件 plan.md 引用仅剩 §11 标题中的出处说明（有意保留）；feature_list.json JSON 校验通过；本轮纯文档改动，测试沿用 Session 034 基线（225）
-- 已记录证据：本轮为文档修复，feature_list.json 无功能状态变化
-- 已知风险或未解决问题：**热层 Session 数 17 > 15，冷热分层沉降条件已触发待执行**（按规则沉 10 个最旧 Session 到 docs/archive/progress-archive-021-030.md，passing 条目 36+4 未超 40 暂不触发 feature_list 沉降）
-- 下一步最佳动作：执行 Session 沉降；失败查询链路优化（方案已备）；OllamaProvider 重试/降级（Session 028 遗留）
+### Session 055（archive-cleanup 合并收尾）（2026-09-19）
+- 从 `refs/codex/snapshots/bd9e467f0a2c692deaa8ed62908fd148d6ea2e54` 恢复 `codex/archive-cleanup`，与后续评测重构整合；保留 `corpus.py` 与 `prepare/workflow` 入口，不恢复已删除的 `api-smoke/http_smoke`。
+- 当前工作区 DeepSeek V4 Flash 配置已由 `898393a` 提交；archive-cleanup 合并提交 `c92e777` 已快进合入 `feature/auto_coder`。
+- 验证：全量 pytest 257 passed、5 skipped、1 warning；CLI help、compileall、JSON、冲突标记和 diff 检查通过。
+- BE-049 仍为 `in_progress`；真实共享 Milvus/LLM/Judge 质量评测尚未重跑，旧版基线不作为当前配置结论。
 
-### Session 035（文档清理：删除 ADR 目录与 glossary 术语表 + 全量引用清理）
-- 日期：2026-09-14
-- 本轮目标：应用户要求删除 docs/adr/（0001~0010，工作区先前已删未提交）与 docs/glossary.md，并全量清理仓库内引用（用户确认删除是有意的文档重组；ADR 承载的设计实质——双预算、SSE 契约、事件机制、grounding 双规则等——已由 docs/ARCHITECTURE.md 完整承载）
-- 做了什么：手动逐处清理 34 个文件——文档层 6 个（ARCHITECTURE/RELIABILITY/plan/progress/session-handoff/feature_list.json，失效路径指针改指 docs/ARCHITECTURE.md）+ 后端源码 20 个 + 测试 7 个 + backend/.env.example；"ADR-XXXX" 标签全量剥离，解释性正文（为什么这么做）一律保留；冷分卷 docs/archive/ 确认无引用，按只读约定未动
-- 运行过的验证：
-  - grep 全仓库（排除 archive/.git/.venv/node_modules）ADR/glossary 引用 = 0
-  - feature_list.json JSON 语法校验通过（node JSON.parse）
-  - **测试按用户指示本轮跳过**（纯文档/注释改动，未触任何运行时逻辑与断言；上一基线 2026-09-13 Session 034：225 passed）
-- 已记录证据：本轮为文档清理，feature_list.json 无功能状态变化（仅 description 与 BE-040/BE-033/BE-036/BE-043 条目内的引用文本清理）
-- 已知风险或未解决问题：ADR 编号自此无落地文件（git 历史提交信息中的 ADR 引用随历史保留）；后续文档/注释不得再新增 ADR-XXXX 引用
-- 下一步最佳动作：失败查询链路优化（本轮已完成量化评估未实施：最坏路径 20 次 LLM 调用/24 次 Milvus 检索/3 次重排，正常成功查询约 9 次 LLM；候选方案=恢复轮经济模式+零新增早退+同能力防重入护栏+预算参数 .env 可配）；或既有可选产品增强/MySQL/Web Search
+### Session 056（环境配置字段同步）（2026-09-19）
+- 按当前 `Settings` 同步本地 `backend/.env` 与 `backend/.env.example`：补齐服务、日志、数据库、Milvus、Planner/Judge、Reranker、Langfuse 和 Tavily 字段；保留本地密钥，不提交 `.env`。
+- 将 DeepSeek 默认模型、Tavily 搜索深度和 Reranker 示例路径说明同步到当前实现；README 与 ARCHITECTURE 的 DeepSeek 默认模型改为 `deepseek-v4-flash`。
+- 验证：42 个配置字段完整覆盖 `.env`/`.env.example`；Settings 实际解析通过；配置与评测相关测试 27 passed，`git diff --check` 通过。
 
-### Session 034（BE-044 全量 Prompt 优化：12 个 Prompt 五段结构化 + 编排器"不 finish"误诊修正）
-- 日期：2026-09-13
-- 本轮目标：应用户要求优化全部 Prompt（主图 6 + RAG 子图 6）。硬约束：9 个角色标记词（测试脚本化 Fake 分流依赖）、BE-017 字面锚点（优先依据/知识库中暂无相关依据/禁止/严禁虚构/【来源：）、JSON 键与值域零变更
-- 技术决策（Prompt 硬约束契约全列表见 docs/ARCHITECTURE.md §11）：
-  - **统一五段结构**：角色 → 任务 → 输出格式 → 规则 → 纪律；JSON 纪律升级为"以 { 开始以 } 结束、禁 markdown 代码块"（减少容错解析重试）；所有 JSON 示例加"值仅为格式示意"（消除锚定偏差，evidence_grader 的 sufficient:true 示例曾与代码安全默认反向）
-  - **answer_generator**：明确【来源：文件名】格式硬约束+示例（grounding 规则档按该字面检查，此前只说"注明来源文件"致 GLM 偶发漏写被打回）；补"简洁不重复、不堆砌无关条文"（E2E 实测回答有重复句）
-  - **grounding 校验器降误判**：RAG 档补"实质一致即可不要求逐字匹配"+"信息不足声明判通过"；GENERAL 档补"无关数字不算法律数据"+"宁可放行不可误杀"
-  - **direct_answer 避雷**：禁输出法条编号与精确法律数据（会触发校验）
-  - **重大误诊修正（Langfuse trace 取证）**：旧记录"闲聊被 judge 打回 3 次、judge 对 direct 路径过度敏感"是**误诊**——时间线显示真凶是编排器在 direct 已有结果后仍反复选 direct_answer 而非 finish，direct_answer 因 answer_draft 非空发 regenerating（think 文案又误标为"未通过校验"）。修复：编排器规则 3 改为"【最近能力】已执行且无校验反馈 → finish（严禁重复执行已完成的能力）"；direct think 文案改为与真实触发一致
-- 运行过的验证：
-  - 干净环境全量 pytest **225 passed**（脚本化 Fake 按 9 个标记词分流全绿——契约零破坏）
-  - 真实 E2E（GLM+Milvus+Langfuse）：verify_real_e2e.py 全断言通过，RAG 回答从优化前 65 字重复堆砌变为一句精准 +【来源：中华人民共和国专利法.txt】一次通过；闲聊 curl 实测
-  - **Langfuse 打回率对比**：RAG regenerating 2→0；闲聊 regenerating 3→0（编排器修复后）；judge verdict 留档确认
-  - 验证后已清理：law_chunks 集合 drop、backend/data 删除、后端进程停止
-- 已记录证据：feature_list.json BE-044（passing）；对账 60=40 热层（36 passing+4 deprecated）+20 archived
-- 已知风险或未解决问题：无新增（既有：RERANK 关闭、Ollama 路径 E2E 未跑、MySQL/Web Search 未接入）
-- 下一步最佳动作：可选产品增强（会话重命名/停止按钮/CORS 收敛）、MySQL 8.0 接入、或 Web Search 二期
+### Session 053（评测收敛为 RAG 生成质量）（2026-09-19）
+- 按用户确认删除 api-smoke 子命令、实现、专用测试和报告渲染；文档导入迁移到 `app/evaluation/corpus.py`，保留 prepare/workflow。
+- README 改为「RAG 评测」，说明 Judge 四维评分、门槛、辅助指标和报告；同步架构、产品、可靠性与功能清单，历史基线仅展示 RAG 质量结果。
+- 测试前确认当前 worktree 无 SQLite/WAL/SHM、无后端进程且未配置 Milvus；复用已有 Python 环境执行离线回归，不启动 Docker、不操作其他工作树知识库。
+- 验证：全量 pytest 256 passed、5 skipped、1 warning（含现有 API 集成测试）；CLI 三种 help、compileall、JSON 与 diff 检查通过。13 个热层 Session、23 个 passing 热条目、40 个归档条目，共 68 个功能，无需沉降。
+- 本轮开始前已有 13 个文件未提交，其中与当前修改存在重叠；保留原改动，不将其代为提交。真实服务启动和模型质量分数未在本轮重测。
 
-### Session 033（BE-043 Langfuse 全链路 trace：文档先行 → 实现 → 真实云端验证）
-- 日期：2026-09-13
-- 本轮目标：应用户要求接入 Langfuse 做 trace，开关作为配置放 .env 中（文档先行，随后实现与真实云端验证）
-- 技术决策（Langfuse 设计决策见 docs/RELIABILITY.md「Langfuse 链路追踪」节）：
-  - **可观测汇走领域端口**：domain/services/trace_sink.py 定义 TraceSink/TraceSpan 协议 + trace_sink_var（ContextVar，与既有事件机制同构）；langfuse 4.15.2 锁在 infrastructure/trace/（DDD 守护名单加 langfuse，domain/application 禁入）
-  - **三级采集各归其位**：trace 生命周期（start/end + plan/think/sources/regenerating 事件）归 ChatService（应用层唯一全景点）；节点 span 归 with_node_status 包装器（start_span 压栈/finally end 弹栈，子图复合节点天然父子嵌套，异常也 end）；LLM generation 归 LLMService（invoke/structured_invoke 含重试轮次/stream 三路径全覆盖，generation 挂当前节点 span）
-  - **配置与降级**：Settings 增 LANGFUSE_ENABLED（默认 false）/LANGFUSE_BASE_URL（命名与用户 .env 预置及 SDK 口径一致）/LANGFUSE_PUBLIC_KEY/SECRET_KEY；关闭=工厂 None 零导入零开销；开启但缺密钥=WARN 降级恒 None；sink 全方法吞异常 WARN（可观测故障不阻断业务）
-  - **踩坑记录**：①工厂实例注入但 ChatService 按可调用对象调用 → 工厂加 `__call__ = create` 别名；②pymilvus load_dotenv 把 .env 的 LANGFUSE_ENABLED=true 灌进测试环境 → test_api 夹具显式 `langfuse_enabled=False` 隔离；③langfuse v2 observations 查询 API 不带 fields 不返回 IO 字段——**数据其实一直在云端**，验证要用 trace.get 完整详情
-- 运行过的验证：
-  - 文档先行提交（0a14ca9）后实现；干净环境全量 pytest **225 passed**（+22 例：假客户端锁 sink 契约与降级、ChatService 生命周期序、LLMService 三路径 generation、包装器 span 压弹栈、Settings 默认值/开关、DDD 守护）
-  - **真实 Langfuse 云端验证通过**（用户 .env 预置密钥，jp.cloud.langfuse.com，server v4.35.0）：服务启用启动健康 → verify_real_e2e.py 全断言通过（回答引用第四十二条）→ 云端查询确认：1 条 trace（name=chat，input=问题原文，output=完整回答）、29 个节点 span（主图编排循环 + RAG 子图嵌套）、11 个 generation（model=glm-4.5-air，含 Prompt 消息与输出，metadata 带 attempt/schema/duration_ms）、15 条 flow:think + 2 条 flow:regenerating（本轮真实触发 2 次校验打回）
-  - 验证后已清理：law_chunks 集合 drop、backend/data 删除、后端进程停止
-- 已记录证据：feature_list.json BE-043（passing）；对账 59=39 热层（35 passing+4 deprecated）+20 archived
-- 已知风险或未解决问题：
-  - Langfuse SDK 后台批量上报（OTel exporter）：沙箱内曾见 export timeout 日志（网络受限场景），不影响业务（sink 吞异常）；网络通畅时无感
-  - session 归组目前放在 trace metadata（session_id 字段），未用 SDK propagate_attributes 跨任务传播——Langfuse UI 的 Sessions 视图暂不聚合，属可选增强
-  - 自托管 Langfuse 未验证（用户用云版）；MySQL/Web Search 等既有未验证项不变
-- 下一步最佳动作：可选产品增强（会话重命名/停止按钮/CORS 收敛）、MySQL 8.0 接入、或 Web Search 二期
+### Session 051（明确测试环境清理步骤）（2026-09-19）
+- 更新 `docs/RELIABILITY.md`：明确下次 Codex 测试前先删除当前 `SQLITE_DB_PATH` 对应的 SQLite 测试数据库及 WAL/SHM 文件，再执行 `uv run python scripts/reset_milvus.py --yes` 删除当前配置的 Milvus 测试集合。
+- 本轮仅更新测试运维文档，不改业务代码；已执行 diff 校验与 JSON 校验。
 
-### Session 032（全面测试基线 + 思考块 BE-042/FE-016：全面测试→用户样式反馈→当日实现与验证）
-- 日期：2026-09-13
-- 本轮目标：①按开工流程做全面测试（干净环境全量 pytest/前端 build/真实启动 smoke/真实 E2E）；②用户在浏览器看到 FE-015 平铺状态行后反馈"思考的样式不对，要豆包式可点开收起"→ 按 grilling 定稿（D6~D12）实现思考块并验证
-- 技术决策（决策 D6~D12 见 docs/PRODUCT.md §6）：
-  - think 事件：QaStreamEvent 扩展 type=think（node/label/text），text 后端 `truncate_text(120)` 统一截断（契约生产端保证）；`emit_think` 统一发射（label 复用 NODE_LABELS，DRY）
-  - 13 个节点接入：意图判定/编排决策（JSON 拼句）/选中检索与恢复策略/并发检索命中数/重排降级/证据评估结论/恢复计划/校验判定+理由（_verdict 统一出口）/兜底与重写流转（regenerating 同源）/Web+Plugin 未开通说明/引用来源条数
-  - 前端思考块（豆包式）：标题行「思考中…/已完成思考 · Ns」+ 箭头点击切换；manualOpen=null 跟随默认（生成中展开、完成自动收起，消息 id 换名触发重挂载实现自动收起）；AppContext nodeStatuses 升级为 ThoughtLine 统一列表（status 按节点合并 + think 追加）；检索策略面板并入思考块；出错保留思考快照（D12，onError 不再清空并给半截消息挂快照+固定 id）；闲聊同展示（D11）
-- 运行过的验证：
-  - 全面测试基线（实现前）：干净环境（data 不存在+reset_milvus）197 passed；前端 build 通过；真实启动 smoke（health/空列表/日志初始化序列含 BE-026 自愈）；真实 E2E 全断言通过（201 ready/plan 检索策略/16 节点 status/引用第四十二条/sources 持久化一致）；浏览器 RAG 路径 + grounding 打回→兜底路径真实触发
-  - 实现后：干净环境 203 passed（+6 例 think 单测：截断规则/契约拼装）；前端 build 通过；浏览器实操：RAG 生成中思考块默认展开（思考中…+意图判定/编排决策/选中检索策略/命中数实时滚动）→完成后自动收起「已完成思考 · 45.8s」→点击展开显示恢复循环全程（改写/拆解/扩展+校验打回理由+预算耗尽+兜底触发）→点击收回；闲聊路径思考块 10.6s 独立保留；截图确认左线缩进浅色样式
-  - 验证后已清理：law_chunks 集合 drop、backend/data 删除、前后端进程停止（vite 残留子进程 taskkill 清理）
-- 已记录证据：feature_list.json BE-042/FE-016（passing）；对账 58=38 热层（34 passing+4 deprecated）+20 archived
-- 已知风险或未解决问题：
-  - grounding judge 模型方差新增观察：闲聊"你能做什么"的能力介绍回答被 direct 规则档打回 3 次才通过（对"不得编造法条"过度敏感），预算耗尽强制收尾兜住——最终行为正确但 LLM 调用增多，建议后续调 direct 路径 judge Prompt 措辞
-  - IAB 自动化点击在该标签页系统性超时（fill/evaluate 正常），用 evaluate 程序化点击走 React 合成事件完成验证——自动化工具性问题，非产品缺陷
-  - 既有风险不变：每问题 LLM 调用 5~8 次；RERANK_ENABLED=false 降级；Ollama 真实 E2E 未跑
-- 下一步最佳动作：可选产品增强（会话重命名/停止按钮/CORS 收敛）、MySQL 8.0 接入、或 Web Search 二期（替换 Stub 即可）
+### Session 052（评测复用业务存储）（2026-09-19）
+- RAG 评测改为复用当前 `MILVUS_COLLECTION_NAME` 和 `SQLITE_DB_PATH`，删除 `law_agent_eval*` 集合强制校验及评测专用启动配置。
+- `prepare` 默认只追加测试文档；全量清理改为显式 `prepare --reset`，并在 README、PRODUCT、ARCHITECTURE、RELIABILITY 和 `.env.example` 标注其破坏性。
+- 历史真实结果保留在 `docs/evaluation-baseline.md`，明确它来自旧版隔离配置，不冒充当前共享知识库基线。
 
-### Session 031（一期 Agent 模块重写：BE-032~041 + FE-014/015 + BE-040 全部落地）
-- 日期：2026-09-13
-- 本轮目标：按 legal_agent_phase1_technical_design.md 对 agent 模块整体重写（主图 + 独立 Local Legal RAG 子图 + Web/Plugin Stub + 服务层），并按用户决策 D1~D5 实现检索策略全量展示、直接回答路径、节点状态流式展示（Codex 风格浅色小字）、rerank top-10
-- 技术决策（产品决策 D1~D5 见 docs/PRODUCT.md §6）：
-  - 主图 15 节点（意图路由/编排/动作路由/RAG 子图/Web+Plugin Stub/观察/直接回答/回答生成/grounding/兜底/收尾）+ 子图 10 节点（检索规划/策略路由/三查询变体/并发混合检索/证据重排/评估/恢复规划/结果）；预算 max_global_steps=4 与 max_retries=2 相互独立
-  - 服务层适配领域端口：MilvusService→VectorStore（不直连 SDK）、LLMService 结构化输出=JSON 容错+重试 1 次+安全默认、RerankerService=CrossEncoderScorer 懒加载+失败降级
-  - **重大实测发现：langgraph 1.2.11 子图节点 custom 事件不上浮父图 astream**（探针证实）→ 事件机制改为 ContextVar 注入式发射器，适配器 astream=ainvoke+队列排空
-  - **重大实测发现：本机 CPU（无 CUDA，8 线程）Qwen3-Reranker-0.6B 约 15s/对，一轮 20 对约 5 分钟**→ 粗排预截断 rerank_max_candidates=20 + RERANK_ENABLED 开关（默认 true 忠实设计；本机 .env 置 false 走 RRF 降级序，GPU 机器可开启）
-  - grounding 双规则：检索路径要求【来源：…】/信息不足声明；直接回答路径只查编造法条；Web/Plugin 未开通跳过校验
-  - SSE 契约向后兼容：新增 status 事件（node/label/phase/duration_ms，中文标签映射 constants.NODE_LABELS）；ChatService/SSE 路由补显式分支（status 不进 delta 聚合）
-  - 旧实现机械搬迁 _legacy/ 规避同名冲突（graph/nodes/prompts/state 四文件），BE-038 切换装配时删除；BE-030 置 deprecated
-- 运行过的验证：
-  - 每功能全量 pytest 保持绿：154→168→189→195→216→185（删旧 31 例）→197；干净环境重置后终验 **197 passed**（unit 127 含 agent 76 / integration 70 含 agent 12 / api 9；真实 Milvus 5 例不可达时跳过）
-  - 前端 npm run build 通过；浏览器实操（GLM+真实 Milvus+专利法）：法律问题生成中浅色状态行实时滚动（含"正在检索知识库…"与子图节点）+「检索策略（N 条查询）」面板→done 后 16 节点状态保留+「参考文档 10」；第二个法律问题一次成功引用第七十一条赔偿规则并标注来源；闲聊直接回答（无检索策略、无"暂无依据"声明、仅主图节点状态）；grounding 双打回→兜底谨慎回答路径真实触发一次
-  - 真实 E2E（verify_real_e2e.py，GLM+Milvus，RERANK 关闭）：上传 TXT/MD 均 201 ready→plan 携带检索策略→15 节点 status 贯通→回答正确引用第四十二条"二十年"并标注【来源】→sources 与持久化一致→事件序 plan<sources<delta
-  - 图可视化：export_qa_graph.py 桩依赖重导出 15 节点 Mermaid（docs/qa_graph.mmd，内嵌 ARCHITECTURE §5）
-  - 验证后已清理：law_chunks 集合 drop、backend/data 删除、前后端进程停止
-- 已记录证据：feature_list.json BE-032~041、FE-014/015、BE-040（passing）+ BE-030（deprecated）；对账 56=36 热层（32 passing+4 deprecated）+20 archived
-- 已知风险或未解决问题：
-  - Rerank 精排在 CPU 机器默认关闭（RERANK_ENABLED=false 降级 RRF 序）——功能已验证可跑通，GPU 机器开启即得精排
-  - grounding LLM judge 存在模型行为方差（GLM 偶发首答缺【来源】被规则档打回；重生成+兜底路径已验证兜住）
-  - 每问题 LLM 调用 5~8 次（忠实设计 D3），本地 Ollama 部署首字延迟明显（PLANNER_PROVIDER=glm 缓解规划环节）
-  - Ollama LLM 路径的真实模型 E2E 未跑（本轮 E2E 走 GLM 配置；图闭环行为由集成测试锁定）
-- 下一步最佳动作：可选产品增强（会话重命名/停止按钮/CORS 收敛）、MySQL 8.0 接入、或 Web Search 二期（替换 Stub 即可，suggested_external_queries 已透传备用）
+### Session 054（法律条文边界优先 Chunk 切分）
+- 日期：2026-09-19
+- 本轮目标：优化法律文档上传切分，避免法条被从中间截断。
+- 改动：`chunk_text` 识别行首“第 X 条”法条标题；短法条按目标长度合并，超长法条作为完整原子 chunk；普通文本保持原段落滑窗；同步 ARCHITECTURE、PRODUCT 与 BE-052。
+- 验证：Milvus 健康、后端 `/api/health`、20 个切分/入库定向测试、真实专利法第四十二条完整性探针、全量 pytest **227 passed、1 warning**；`git diff --check` 通过。
+- 风险：未识别到明确法条标题的扫描件或普通文本仍使用原滑窗规则。
 

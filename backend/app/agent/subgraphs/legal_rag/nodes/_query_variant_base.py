@@ -35,7 +35,12 @@ class QueryVariantAgent(ABC):
         """节点名（trace 用）。"""
 
     @abstractmethod
-    def _build_messages(self, original_query: str, normalized_query: str) -> list[ChatMessage]:
+    def _build_messages(
+        self,
+        original_query: str,
+        normalized_query: str,
+        missing_evidence: list[str],
+    ) -> list[ChatMessage]:
         """组装本变体的提示消息。"""
 
     @abstractmethod
@@ -50,8 +55,9 @@ class QueryVariantAgent(ABC):
         timer = Timer()
         original = state.get("original_query") or ""
         normalized = state.get("normalized_query") or original
+        missing_evidence = list(state.get("missing_evidence") or [])
         variants = await self._llm.structured_invoke(
-            self._build_messages(original, normalized),
+            self._build_messages(original, normalized, missing_evidence),
             QueryVariants,
             default=QueryVariants(),
         )

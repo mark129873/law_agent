@@ -12,7 +12,6 @@ graph TD;
 	plugin_entry_node(plugin_entry_node)
 	plugin_stub_node(plugin_stub_node)
 	web_search_entry_node(web_search_entry_node)
-	web_search_stub_node(web_search_stub_node)
 	observation_node(observation_node)
 	direct_answer_agent(direct_answer_agent)
 	answer_generator_agent(answer_generator_agent)
@@ -35,8 +34,7 @@ graph TD;
 	plugin_entry_node --> plugin_stub_node;
 	plugin_stub_node --> observation_node;
 	query_router_agent --> orchestrator_agent;
-	web_search_entry_node --> web_search_stub_node;
-	web_search_stub_node --> observation_node;
+	web_search_entry_node --> observation_node;
 	final_answer_node --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0

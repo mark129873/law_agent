@@ -31,6 +31,7 @@ from app.agent.subgraphs.legal_rag.nodes import (
     SubqueryGeneratorAgent,
     route_strategies,
 )
+from app.agent.subgraphs.legal_rag.prompts.query_expansion import build_expansion_messages
 from app.domain.entities.chunk import DocumentChunk, RetrievedChunk
 from app.domain.entities.llm import ChatMessage
 from app.domain.entities.message import MessageRole
@@ -261,18 +262,18 @@ def test_evidence_ranking_pre_truncates_candidates_by_rrf_before_rerank():
 
     scorer = CountingScorer()
     node = EvidenceRankingNode(RerankerService(scorer), CONFIG)
-    # 构造 30 个去重后的候选：rrf_score 从 0.30 递减到 0.01
+    # 构造 40 个去重后的候选：rrf_score 从 0.40 递减到 0.01
     candidates = [
-        {"chunk_id": f"c{i}", "content": f"内容{i}", "rrf_score": 0.3 - i * 0.01}
-        for i in range(30)
+        {"chunk_id": f"c{i}", "content": f"内容{i}", "rrf_score": 0.4 - i * 0.01}
+        for i in range(40)
     ]
     result = asyncio.run(node(_state(retrieval_candidates=candidates)))
-    # 只有 RRF 前 20 进入 rerank（配置默认 rerank_max_candidates=20）
+    # 只有 RRF 前 rerank_max_candidates 进入精排，避免全量候选拖慢 CPU。
     assert len(scorer.docs_seen) == CONFIG.rerank_max_candidates
-    # 预截断保留的是 RRF 高分档（c0..c19），低分档不占精排预算
+    # 预截断保留的是 RRF 高分档，低分档不占精排预算
     assert scorer.docs_seen[0] == "内容0"
     trace = result["rag_trace"][0]
-    assert trace["input_count"] == 30 and trace["pre_rerank_count"] == 20
+    assert trace["input_count"] == 40 and trace["pre_rerank_count"] == CONFIG.rerank_max_candidates
     assert len(result["ranked_evidence"]) <= CONFIG.rerank_top_k
 
 
@@ -291,6 +292,47 @@ def test_evidence_ranking_dedups_and_reranks_with_original_query():
     assert scorer.queries == ["违法解除劳动合同的赔偿标准？"]  # 约束 18：original_query 重排
     trace = result["rag_trace"][0]
     assert trace["input_count"] == 3 and trace["dedup_count"] == 2 and trace["reranker_degraded"] is False
+
+
+def test_evidence_ranking_preserves_explicit_multi_source_coverage():
+    """原问题点名多个法源时，top-k 不应被最高分的单一法源占满。"""
+    scorer = FakeScorer([0.99, 0.98, 0.10])
+    node = EvidenceRankingNode(RerankerService(scorer), CONFIG)
+    result = asyncio.run(
+        node(
+            _state(
+                original_query="网络安全法和民法典分别如何保护个人信息？",
+                normalized_query="网络安全法和民法典分别如何保护个人信息？",
+                current_plan={"target_evidence": ["网络安全法要求", "民法典要求"]},
+                retrieval_candidates=[
+                    {"chunk_id": "n1", "content": "网络安全法一", "source_name": "中华人民共和国网络安全法.txt", "rrf_score": 0.3},
+                    {"chunk_id": "n2", "content": "网络安全法二", "source_name": "中华人民共和国网络安全法.txt", "rrf_score": 0.2},
+                    {"chunk_id": "c1", "content": "民法典一", "source_name": "中华人民共和国民法典.md", "rrf_score": 0.1},
+                ],
+            )
+        )
+    )
+    sources = [item["source_name"] for item in result["ranked_evidence"]]
+    assert sources[:2] == ["中华人民共和国网络安全法.txt", "中华人民共和国民法典.md"]
+    assert result["rag_trace"][0]["source_diversity_enabled"] is True
+
+
+def test_evidence_ranking_keeps_coherent_single_source_context():
+    scorer = FakeScorer([0.99, 0.98, 0.10])
+    node = EvidenceRankingNode(RerankerService(scorer), CONFIG)
+    result = asyncio.run(
+        node(
+            _state(
+                retrieval_candidates=[
+                    {"chunk_id": "a1", "content": "甲一", "source_name": "甲法.txt", "rrf_score": 0.3},
+                    {"chunk_id": "a2", "content": "甲二", "source_name": "甲法.txt", "rrf_score": 0.2},
+                    {"chunk_id": "b1", "content": "乙一", "source_name": "乙法.txt", "rrf_score": 0.1},
+                ]
+            )
+        )
+    )
+    assert {item["source_name"] for item in result["ranked_evidence"]} == {"甲法.txt"}
+    assert result["rag_trace"][0]["source_coherence_enabled"] is True
 
 
 def test_evidence_ranking_distinguishes_disabled_from_failed_reranker(monkeypatch: pytest.MonkeyPatch):
@@ -327,6 +369,37 @@ def test_evidence_grader_parses_grade():
     assert result["evidence_confidence"] == 0.9
 
 
+def test_evidence_grader_rejects_unbounded_claim_with_local_scope_only():
+    raw = ('{"sufficient": true, "confidence": 0.9, "local_recovery_possible": false, '
+           '"missing_evidence": [], "conflicts": [], "suggested_external_queries": [], "reason": "可反驳"}')
+    agent = EvidenceGraderAgent(LLMService(FakeLLM([raw])), CONFIG)
+    result = asyncio.run(
+        agent(
+            _state(
+                original_query="每一家公司的所有数据是否一定永久保存？",
+                ranked_evidence=[{"chunk_id": "c1", "content": "仅规定特定主体的数据范围"}],
+            )
+        )
+    )
+    assert result["evidence_sufficient"] is False
+    assert result["missing_evidence"]
+
+
+def test_evidence_grader_does_not_treat_legal_term_as_absolute_scope():
+    raw = ('{"sufficient": true, "confidence": 0.9, "local_recovery_possible": false, '
+           '"missing_evidence": [], "conflicts": [], "suggested_external_queries": [], "reason": "已覆盖"}')
+    agent = EvidenceGraderAgent(LLMService(FakeLLM([raw])), CONFIG)
+    result = asyncio.run(
+        agent(
+            _state(
+                original_query="土地所有权、土地用途管制和土地转让分别有哪些基本限制？",
+                ranked_evidence=[{"chunk_id": "c1", "content": "土地所有权和用途管制", "source_name": "土地法"}],
+            )
+        )
+    )
+    assert result["evidence_sufficient"] is True
+
+
 def test_evidence_grader_defaults_to_insufficient():
     agent = EvidenceGraderAgent(LLMService(FakeLLM(["坏输出"])), CONFIG)
     result = asyncio.run(agent(_state(retry_count=0)))
@@ -343,6 +416,18 @@ def test_recovery_planner_parses_and_increments_retry():
     result = asyncio.run(agent(_state(retry_count=0, missing_evidence=["计算规则"])))
     assert result["retry_count"] == 1
     assert result["recovery_plan"]["actions"] == ["subquery"]
+    assert result["missing_evidence"] == ["计算规则"]
+
+
+def test_recovery_query_prompt_keeps_exact_missing_evidence_anchors():
+    messages = build_expansion_messages(
+        "专利申请流程",
+        "专利申请流程",
+        ["《专利法》第三十五条的实质审查请求", "七十二小时裁定期限"],
+    )
+    user_content = messages[-1].content
+    assert "第三十五条" in user_content
+    assert "七十二小时" in user_content
 
 
 def test_recovery_planner_default_avoids_executed_strategies():

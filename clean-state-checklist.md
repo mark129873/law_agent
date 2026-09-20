@@ -1,5 +1,14 @@
 # 干净收尾状态检查清单
 
+## Session 065 核对结果（2026-09-20）
+
+- [x] 标准后端启动路径、Embedding/Reranker 启动器和 `/api/health` 已验证
+- [x] 全量 `pytest`：276 passed、5 skipped、1 warning；跳过项仅为本机 Milvus 集成服务不可达
+- [x] 50 条真实 RAG 评测完成，报告与 Langfuse 50/50 trace 已对账
+- [x] 评测导入的 5 个临时文档已按精确 ID 删除；未执行共享库 reset
+- [x] `feature_list.json`、`progress.md`、`session-handoff.md`、README 和架构/产品文档已同步
+- [x] 本轮未新增敏感文件；`backend/log`、`.env` 等不纳入提交范围
+
 - 执行`init.md`的内容, 确保项目可正常构建或启动, 保证下一轮会话可以直接运行项目
 - 测试先根据 `docs/RELIABILITY.md` 进行测试干净环境管理, 再确认所有测试通过, 包括但不限于:
   - 单元测试

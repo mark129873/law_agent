@@ -14,8 +14,13 @@ class QueryExpansionAgent(QueryVariantAgent):
     def _node_name(self) -> str:
         return "query_expansion_agent"
 
-    def _build_messages(self, original_query: str, normalized_query: str) -> list[ChatMessage]:
-        return build_expansion_messages(original_query, normalized_query)
+    def _build_messages(
+        self,
+        original_query: str,
+        normalized_query: str,
+        missing_evidence: list[str],
+    ) -> list[ChatMessage]:
+        return build_expansion_messages(original_query, normalized_query, missing_evidence)
 
     def _state_key(self) -> str:
         return "expanded_queries"

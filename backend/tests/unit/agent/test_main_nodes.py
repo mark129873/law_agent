@@ -83,13 +83,32 @@ def test_query_router_parses_and_defaults():
     result = asyncio.run(QueryRouterAgent(LLMService(StreamingFakeLLM([raw])), CONFIG)(_state(question="被开除了怎么赔")))
     assert result["request_type"] == "local_rag"
     assert result["extracted_conditions"] == {"年限": "7年"}
-    assert result["web_search_enabled"] is False  # 配置默认（一期 Stub）
+    assert result["web_search_requested"] is False  # 默认按钮关闭
 
     # 解析失败 → 原问题透传 + legal_question 默认（宁可多检索）
     result_bad = asyncio.run(QueryRouterAgent(LLMService(StreamingFakeLLM(["坏输出"])), CONFIG)(
         _state(question="原样问题")))
     assert result_bad["normalized_query"] == "原样问题"
     assert result_bad["request_type"] == "local_rag"
+
+    # 按钮关闭但问题明确要求“搜索/最新”时，路由到 Web 能力以便提示开启；
+    # 真正是否调用远程服务仍由 web_search_requested 在入口节点二次守卫。
+    result_web_hint = asyncio.run(QueryRouterAgent(LLMService(StreamingFakeLLM([])), CONFIG)(
+        _state(question="请搜索最新法规")))
+    assert result_web_hint["request_type"] == "web"
+    assert result_web_hint["web_search_requested"] is False
+
+    # 模型把“现行法律”误判成联网请求时，产品只允许明确网络意图进入 Web；
+    # 否则应回到本地法律知识库，避免按钮关闭时丢掉可回答的问题。
+    implicit_web = json.dumps(
+        {"normalized_query": "我国现行法律是否规定数据必须境内存储",
+         "intent": "web_request", "request_type": "web"},
+        ensure_ascii=False,
+    )
+    guarded = asyncio.run(QueryRouterAgent(LLMService(StreamingFakeLLM([implicit_web])), CONFIG)(
+        _state(question="我国现行法律是否规定每家互联网公司的所有数据都必须永久存储在中国？")))
+    assert guarded["request_type"] == "local_rag"
+    assert guarded["trace"][0]["route_guarded"] is True
 
 
 # ---- OrchestratorAgent / ActionRouterNode ----
@@ -185,6 +204,33 @@ def test_answer_generator_rag_path_streams_with_context(monkeypatch: pytest.Monk
     system_user = llm.streamed[0][-1].content
     assert "【参考依据】" in system_user and "【来源：专利法.txt】" in system_user
     assert any(e.type == "delta" for e in events)
+
+
+def test_answer_generator_normalizes_legacy_source_marker():
+    result = asyncio.run(AnswerGeneratorAgent(LLMService(StreamingFakeLLM(
+        stream_text="依据如下。来源：【专利法.txt】"
+    )))(_state(
+        original_query="专利期限",
+        capability_result={"capability": "local_legal_rag", "status": CAPABILITY_SUCCESS,
+                           "evidence": [{"source_name": "专利法.txt", "content": "期限二十年"}],
+                           "citations": [], "metadata": {}},
+        evidence=[{"source_name": "专利法.txt", "content": "期限二十年"}],
+    )))
+    assert "【来源：专利法.txt】" in result["answer_draft"]
+
+
+def test_answer_generator_normalizes_plain_source_line():
+    result = asyncio.run(AnswerGeneratorAgent(LLMService(StreamingFakeLLM(
+        stream_text="依据如下。\n来源：中华人民共和国反家庭暴力法.txt"
+    )))(_state(
+        original_query="发现家庭暴力怎么办",
+        capability_result={"capability": "local_legal_rag", "status": CAPABILITY_SUCCESS,
+                           "evidence": [{"source_name": "中华人民共和国反家庭暴力法.txt",
+                                         "content": "应当报案"}],
+                           "citations": [], "metadata": {}},
+        evidence=[{"source_name": "中华人民共和国反家庭暴力法.txt", "content": "应当报案"}],
+    )))
+    assert "【来源：中华人民共和国反家庭暴力法.txt】" in result["answer_draft"]
 
 
 def test_answer_generator_not_implemented_generates_explanation(monkeypatch: pytest.MonkeyPatch):

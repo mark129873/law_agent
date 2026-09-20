@@ -25,7 +25,7 @@ class QaStreamEvent:
     零技术依赖，任何工作流引擎实现都必须以它为流式输出单位。
     """
 
-    # delta：一段增量回答文本；sources：本轮检索的参考来源（检索顺序即序号）；
+    # delta：一段增量回答文本；sources/web_sources：本轮检索的来源（检索顺序即序号）；
     # plan：规划器产出的检索查询列表（重规划时再次出现）；regenerating：
     # 校验未通过、回答将重新生成（前端据此清空已渲染增量）；
     # status：图节点执行状态（BE-041，phase=start/end + 中文 label + 耗时，
@@ -33,10 +33,22 @@ class QaStreamEvent:
     # think：节点内的思考内容行（BE-042：决策输出、运行细节、
     # 流转说明，text 已由后端截断 ≤120 字——与 status 互补：
     # status 表节点起止，think 表过程内容）
-    type: Literal["delta", "sources", "plan", "regenerating", "status", "think"]
+    type: Literal[
+        "delta",
+        "sources",
+        "web_sources",
+        "web_search_notice",
+        "plan",
+        "regenerating",
+        "status",
+        "think",
+    ]
     content: str = ""
-    # 每项 {"source": 文件名, "content": 命中内容}；用 tuple 保持不可变
-    sources: tuple[dict[str, str], ...] = ()
+    # 每项为本地或联网来源字典；用 tuple 保持领域事件不可变。
+    sources: tuple[dict[str, Any], ...] = ()
+    # web_search_notice 专用字段：避免把配置/远程错误误当成 delta 文本。
+    code: str = ""
+    message: str = ""
     # plan 事件携带的检索查询列表（数组顺序即执行顺序）
     sub_queries: tuple[str, ...] = ()
     # ---- status / think 事件专用字段（其余事件为空串/None）----

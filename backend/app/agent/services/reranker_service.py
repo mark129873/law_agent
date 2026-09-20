@@ -1,17 +1,17 @@
-"""统一重排服务：MiniLM CrossEncoder（BE-033，设计 §34）。
+"""统一重排服务：llama serve Qwen3 Reranker（BE-033，设计 §34）。
 
-为什么依赖注入打分器而非直接持有 CrossEncoder：测试注入脚本化
-打分器即可覆盖排序与降级逻辑，自动化测试不加载真实模型
-（测试封闭性约束）；生产适配器 CrossEncoderScorer 负责懒加载与
-线程池推理。
+为什么依赖注入打分器而非把 HTTP 细节写进节点：测试注入脚本化打分器
+即可覆盖排序与降级逻辑，自动化测试不访问真实模型；生产适配器
+LlamaRerankScorer 只负责 HTTP 协议，服务异常由上层统一降级为 RRF。
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Protocol
+
+import httpx
 
 from app.agent.subgraphs.legal_rag.state import EvidenceItem
 
@@ -46,9 +46,9 @@ class RerankerService:
     SubQuery 用于召回覆盖，Original Query 才代表用户真实意图的
     最终相关性——多路召回、单口径精排。
 
-    为什么有 enabled 开关：不同部署环境对 CPU/GPU 延迟的承受能力不同，
+    为什么有 enabled 开关：不同部署环境可能暂时不启动 Reranker 服务，
     关闭时仍保留 RRF 召回序，且通过 disabled 状态可观测；开启时使用
-    配置注入的 CrossEncoder，模型加载或推理失败才进入 degraded 降级。
+    配置注入的 llama serve 打分器，请求失败才进入 degraded 降级。
     """
 
     def __init__(self, scorer: RerankScorer, enabled: bool = True) -> None:
@@ -97,37 +97,61 @@ class RerankerService:
         return RerankResult(items=scored[:top_n], degraded=False)
 
 
-class CrossEncoderScorer:
-    """CrossEncoder 适配器：懒加载单例 + 可配置设备推理。
+class LlamaRerankScorer:
+    """llama serve `/v1/rerank` 适配器。
 
-    为什么懒加载：模型需要常驻内存，首次 rerank 才加载；asyncio.Lock
-    防并发首次调用重复加载。为什么 to_thread：模型加载与推理都是阻塞
-    调用，放线程池避免卡死事件循环（SSE 全异步）。
+    llama serve 返回按相关性排序的 ``results``，而 RerankerService 需要
+    与输入文档同位的分数，因此这里按 ``index`` 还原为输入顺序。
     """
 
-    def __init__(self, model_path: str, device: str = "cpu") -> None:
+    def __init__(
+        self,
+        base_url: str,
+        model_path: str,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
         self._model_path = model_path
-        self._device = device
-        self._model: object | None = None
-        self._lock = asyncio.Lock()
-
-    async def _ensure_model(self) -> None:
-        if self._model is None:
-            async with self._lock:
-                if self._model is None:  # 双重检查：锁内再验一次
-                    from sentence_transformers import CrossEncoder  # 局部导入：重依赖仅此路径触达
-
-                    logger.info(
-                        "Agent reranker model loading",
-                        extra={"service": "agent", "model_path": self._model_path, "device": self._device},
-                    )
-                    self._model = await asyncio.to_thread(
-                        CrossEncoder, self._model_path, device=self._device
-                    )
-                    logger.info("Agent reranker model loaded", extra={"service": "agent"})
+        # transport 仅供协议测试注入 MockTransport，生产路径保持 None。
+        self._transport = transport
 
     async def score(self, query: str, documents: list[str]) -> list[float]:
-        await self._ensure_model()
-        pairs = [(query, document) for document in documents]
-        scores = await asyncio.to_thread(self._model.predict, pairs)  # type: ignore[union-attr]
-        return [float(value) for value in scores]
+        if not documents:
+            return []
+        logger.info(
+            "Agent reranker requested",
+            extra={
+                "service": "agent",
+                "provider": "llama",
+                "model_path": self._model_path,
+                "doc_count": len(documents),
+            },
+        )
+        async with httpx.AsyncClient(timeout=120, transport=self._transport) as client:
+            response = await client.post(
+                f"{self._base_url}/v1/rerank",
+                json={
+                    "model": self._model_path,
+                    "query": query,
+                    "top_n": len(documents),
+                    "documents": documents,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+
+        results = payload.get("results") if isinstance(payload, dict) else None
+        if not isinstance(results, list) or len(results) != len(documents):
+            raise ValueError("llama serve Reranker 响应数量不匹配")
+        scores: list[float | None] = [None] * len(documents)
+        try:
+            for item in results:
+                index = int(item["index"])
+                if index < 0 or index >= len(documents) or scores[index] is not None:
+                    raise ValueError("llama serve Reranker 响应 index 非法或重复")
+                scores[index] = float(item["relevance_score"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("llama serve Reranker 响应格式非法") from error
+        if any(score is None for score in scores):
+            raise ValueError("llama serve Reranker 响应缺少文档分数")
+        return [score for score in scores if score is not None]

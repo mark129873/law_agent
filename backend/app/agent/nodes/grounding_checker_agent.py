@@ -5,8 +5,13 @@ from __future__ import annotations
 import logging
 
 from app.agent.constants import (
+    CAPABILITY_DISABLED,
     CAPABILITY_NOT_IMPLEMENTED,
     CAPABILITY_SUCCESS,
+    CAPABILITY_WEB_SEARCH_CONFIG_REQUIRED,
+    CAPABILITY_WEB_SEARCH_EMPTY,
+    CAPABILITY_WEB_SEARCH_ERROR,
+    CAPABILITY_WEB_SEARCH_LOG_WRITE_FAILED,
 )
 from app.agent.prompts.grounding_checker import build_grounding_messages
 from app.agent.schemas import GroundingCheck
@@ -49,7 +54,14 @@ class GroundingCheckerAgent:
         step_count = int(state.get("global_step_count") or 0) + 1
 
         # 未开通能力的说明性回答无需校验（没有事实断言）
-        if status in (CAPABILITY_NOT_IMPLEMENTED,):
+        if status in (
+            CAPABILITY_NOT_IMPLEMENTED,
+            CAPABILITY_DISABLED,
+            CAPABILITY_WEB_SEARCH_CONFIG_REQUIRED,
+            CAPABILITY_WEB_SEARCH_EMPTY,
+            CAPABILITY_WEB_SEARCH_ERROR,
+            CAPABILITY_WEB_SEARCH_LOG_WRITE_FAILED,
+        ):
             return self._verdict(state, GroundingCheck(passed=True, reason="未开通能力说明，跳过校验"),
                                  step_count, timer, skipped=True)
 
@@ -75,7 +87,12 @@ class GroundingCheckerAgent:
 
         # ---- LLM judge 档（groundedness 语义校验）----
         check = await self._llm.structured_invoke(
-            build_grounding_messages(question, context, answer),
+            build_grounding_messages(
+                question,
+                context,
+                answer,
+                web_search=(capability.get("capability") == "web_search"),
+            ),
             GroundingCheck,
             # 安全默认（设计 §47 精神）：判分失效不拦路——校验是增强而非闸门
             default=GroundingCheck(passed=True, reason="校验器输出不可解析，放行"),

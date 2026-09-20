@@ -1,12 +1,14 @@
-"""BE-013 真实 Ollama embedding 端到端验证脚本（临时使用）。
+"""Embedding 真实端到端验证脚本（临时使用）。
 
-真实链路：DocumentPipeline → OllamaEmbeddingService(nomic-embed-text) → 真实 Milvus
+真实链路：DocumentPipeline → llama serve Qwen3 Embedding → 真实 Milvus。
 运行前提：Milvus standalone 已启动（backend/docker-compose.yml）。
 """
 import asyncio
-import os
+import sys
+from pathlib import Path
 
-os.chdir(r"C:\Users\nnnnnn\Desktop\law_agent\backend")
+_BACKEND_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_BACKEND_ROOT))
 
 from app.common.logging import setup_logging
 from app.config.settings import Settings
@@ -23,14 +25,18 @@ COLLECTION = "verify_embedding_test"
 
 
 async def main() -> None:
-    container = create_container(Settings(_env_file=None))
+    container = create_container(Settings())
     pipeline = container.resolve(DocumentPipeline)
     embedding = container.resolve(EmbeddingService)
     store = container.resolve(VectorStore)
     # 注入独立集合名（等价于 MilvusVectorStore(uri, collection_name)）
     from app.infrastructure.vector_store.milvus import MilvusVectorStore
 
-    store = MilvusVectorStore(store._uri, collection_name=COLLECTION)
+    store = MilvusVectorStore(
+        store._uri,
+        collection_name=COLLECTION,
+        token=store._token,
+    )
     await store.initialize()
 
     service = KnowledgeIngestionService(pipeline, embedding, store)

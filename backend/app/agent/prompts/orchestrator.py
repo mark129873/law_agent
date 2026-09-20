@@ -27,7 +27,7 @@ ORCHESTRATOR_SYSTEM_PROMPT = (
     "# action 取值与语义\n"
     "1. local_rag：需要检索本地法律知识库；\n"
     "2. direct_answer：一般性对话，直接回答（无需检索/联网/插件）；\n"
-    "3. web_search：需要联网搜索（当前版本未开通，会得到未开通提示）；\n"
+    "3. web_search：用户已开启联网搜索，或问题明确需要网络信息；\n"
     "4. plugin：需要插件能力（当前版本未开通）；\n"
     "5. finish：能力执行完毕，汇总生成最终回答。\n"
     "\n"
@@ -37,12 +37,13 @@ ORCHESTRATOR_SYSTEM_PROMPT = (
     "3. 【最近能力】已执行过（不是『尚未执行任何能力』）且没有收到"
     "『回答依据校验未通过』的反馈 → finish。任何能力只要有了结果就收尾汇总，"
     "严禁重复执行已经完成的能力；\n"
-    "4. 检索结论为『LOCAL_EVIDENCE_INSUFFICIENT』→ finish"
+    "4. 联网搜索完成后必须 finish，不得重复调用网络搜索；Grounding 打回时复用已有网页依据；\n"
+    "5. 检索结论为『LOCAL_EVIDENCE_INSUFFICIENT』→ finish"
     "（回答环节会基于已有证据谨慎作答或声明信息不足，不要反复重试检索）；\n"
-    "5. 收到『回答依据校验未通过』的反馈时 → 按反馈修正："
+    "6. 收到『回答依据校验未通过』的反馈时 → 按反馈修正："
     "缺检索依据选 local_rag，表达/编造问题选 direct_answer；\n"
-    "6. 步数预算用尽必须选 finish；\n"
-    "7. reason 用一句中文概括，只输出 JSON 本身，不要任何其他内容。"
+    "7. 步数预算用尽必须选 finish；\n"
+    "8. reason 用一句中文概括，只输出 JSON 本身，不要任何其他内容。"
 )
 
 

@@ -28,13 +28,22 @@ QUERY_EXPANSION_SYSTEM_PROMPT = (
     "（如『辞退』→『解除劳动合同 违法解除 赔偿金 经济补偿』）；\n"
     "2. 覆盖同义表述与上位/下位概念，扩大召回面；\n"
     "3. 不偏离原意：不引入问题之外的新法律主题，不改变问题的事实前提；\n"
-    "4. 只输出 JSON 本身，不要任何其他内容。"
+    "4. 如果输入包含【本轮必须补齐的证据缺口】，每条查询必须保留其中的法条号、"
+    "期限/数字、主体等精确锚点，并围绕该锚点补充同义法律术语；不得只输出宽泛主题；\n"
+    "5. 只输出 JSON 本身，不要任何其他内容。"
 )
 
 
-def build_expansion_messages(original_query: str, normalized_query: str) -> list[ChatMessage]:
+def build_expansion_messages(
+    original_query: str,
+    normalized_query: str,
+    missing_evidence: list[str] | None = None,
+) -> list[ChatMessage]:
     """组装扩展器的消息列表。"""
+    user_content = f"【用户问题】\n{normalized_query or original_query}"
+    if missing_evidence:
+        user_content += "\n\n【本轮必须补齐的证据缺口】\n" + "；".join(missing_evidence)
     return [
         ChatMessage(role=MessageRole.SYSTEM, content=QUERY_EXPANSION_SYSTEM_PROMPT),
-        ChatMessage(role=MessageRole.USER, content=f"【用户问题】\n{normalized_query or original_query}"),
+        ChatMessage(role=MessageRole.USER, content=user_content),
     ]

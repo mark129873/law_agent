@@ -1,7 +1,8 @@
 # init.md -- 开始工作前，请验证项目可以正常无报错构建。
 
 1. 如果此次更新后端项目, 则验证后端项目可以正常构建与运行:
-  - 启动 Milvus：
+  - 默认使用 Milvus Cloud：确认 `backend/.env` 中 `MILVUS_PROVIDER=cloud`（可省略）以及 `MILVUS_CLOUD_URI`、`MILVUS_CLOUD_TOKEN`，再运行项目外部服务 smoke 或启动后端验证连接。
+  - 只有显式设置 `MILVUS_PROVIDER=local` 切换到本地 standalone 时才启动 Milvus：
     `cd backend && docker compose up -d`
     （若容器已存在但已停止，容器名会冲突，改用：`docker start milvus-etcd milvus-minio milvus-standalone`）
     就绪确认：`curl http://127.0.0.1:9091/healthz` 返回 OK

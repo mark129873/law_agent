@@ -8,7 +8,7 @@ stdout）；加 --png 可再导出 PNG 图片（依赖联网访问 mermaid.ink�
 为什么用桩依赖就能建图：build() 只是把节点实例注册进 StateGraph，
 不会执行任何节点——LLM/Embedding/向量库/Reranker 仅需"能被实例化
 进构造函数"即可。桩模式让本脚本不依赖 Milvus / Ollama / GLM /
-本地 rerank 模型，随时可跑，这也是依赖倒置（DIP）带来的可测试性收益。
+真实 llama serve 模型，随时可跑，这也是依赖倒置（DIP）带来的可测试性收益。
 
 怎么查看结果：
 - 把 docs/qa_graph.mmd 内容粘到 https://mermaid.live 或 VS Code
@@ -95,7 +95,6 @@ def build_graph():
     llm = LLMService(_StubLLM())
     return AgentGraphBuilder(
         llm=llm,
-        planner=LLMService(_StubLLM()),
         milvus=MilvusService(_StubEmbedding(), _StubVectorStore()),
         reranker=RerankerService(_StubScorer()),
     ).build()

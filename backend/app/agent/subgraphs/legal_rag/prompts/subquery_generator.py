@@ -28,13 +28,22 @@ SUBQUERY_GENERATOR_SYSTEM_PROMPT = (
     "3. few-shot 示例：违法解除劳动合同，工作7年，月薪3万，能赔多少？→\n"
     "   queries=[\"违法解除劳动合同的法律依据\", \"违法解除赔偿金计算规则\", "
     "\"工作年限对应赔偿月数\", \"高工资的赔偿上限规则\"]；\n"
-    "4. 只输出 JSON 本身，不要任何其他内容。"
+    "4. 恢复检索时若给出证据缺口，应优先把每个缺口拆成独立查询，"
+    "保留其中的法条号、期限/数字、主体等精确锚点，不得改成泛化主题；\n"
+    "5. 只输出 JSON 本身，不要任何其他内容。"
 )
 
 
-def build_subquery_messages(original_query: str, normalized_query: str) -> list[ChatMessage]:
+def build_subquery_messages(
+    original_query: str,
+    normalized_query: str,
+    missing_evidence: list[str] | None = None,
+) -> list[ChatMessage]:
     """组装子查询生成器的消息列表。"""
+    user_content = f"【用户问题】\n{normalized_query or original_query}"
+    if missing_evidence:
+        user_content += "\n\n【本轮必须补齐的证据缺口】\n" + "；".join(missing_evidence)
     return [
         ChatMessage(role=MessageRole.SYSTEM, content=SUBQUERY_GENERATOR_SYSTEM_PROMPT),
-        ChatMessage(role=MessageRole.USER, content=f"【用户问题】\n{normalized_query or original_query}"),
+        ChatMessage(role=MessageRole.USER, content=user_content),
     ]

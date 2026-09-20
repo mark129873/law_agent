@@ -44,6 +44,7 @@ class EvidenceItem(TypedDict, total=False):
 
     source_name: str
     source_type: str
+    source_url: str
 
     metadata: dict[str, Any]
     matched_queries: list[str]  # 多 Query 命中同一 chunk 的合并记录（设计 §33）

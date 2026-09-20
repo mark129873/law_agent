@@ -27,11 +27,12 @@ class AgentState(TypedDict, total=False):
     # ---- 输入（QaWorkflow 端口契约）----
     question: str               # 用户原始问题（original_query 的输入载体）
     history: list[ChatMessage]  # 会话历史快照
+    conversation_id: str        # 当前会话 id，用于搜索留档与请求追踪
 
     # ---- Query Router（设计 §6）----
     original_query: str
     normalized_query: str
-    web_search_enabled: bool
+    web_search_requested: bool  # 仅由前端按钮传入，是真正联网调用的唯一信号
     intent: str
     request_type: str
     extracted_conditions: dict[str, Any]
