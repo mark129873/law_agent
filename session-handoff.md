@@ -12,7 +12,7 @@
 - Settings 与 `.env.example` 43/43 字段覆盖；当前工作树未跟踪 `.env`，没有新增敏感文件。BE-049 仍未重跑真实质量评测。
 
 ### 代码交付
-- 提交号：收尾提交后补入。
+- 提交：`5f680d2 fix: separate ollama and embedding ports`。
 
 ## Session 063：切换 llama serve Qwen3 Embedding/Reranker（2026-09-20）
 

@@ -14,7 +14,7 @@
 - 根因：Ollama 对话默认 `11434`，Embedding llama serve 也默认 `11434`；切换 `LLM_PROVIDER=ollama` 时两个服务无法同时绑定。
 - 最小修复：保留 Ollama `11434`，把 Embedding 默认与本地配置迁移到 `11436`，Reranker 保持 `11435`；同步 Settings、`.env.example`、README、ARCHITECTURE、端口回归测试和当前交接记录。
 - 验证：端口配置断言 19 passed；全量 pytest 268 passed、5 skipped、1 warning；Embedding `11436` 与 Reranker `11435` 真实双服务加载成功，Embedding 返回 1024 维、Reranker 排序正确；Settings 与 `.env.example` 仍为 43/43 字段覆盖。
-- 提交号在本轮收尾提交后补入；BE-049 真实质量评测边界不变。
+- 提交：`5f680d2 fix: separate ollama and embedding ports`；BE-049 真实质量评测边界不变。
 
 ### Session 063（切换 llama serve Qwen3 Embedding/Reranker）（2026-09-20）
 - 将 Embedding 从 Ollama 改为 `LlamaEmbeddingService`，调用 `/v1/embeddings`；将本地 MiniLM CrossEncoder 改为 `LlamaRerankScorer`，调用 `/v1/rerank`；两个适配器均保留响应校验和结构化日志，Reranker 请求失败继续降级 RRF。
