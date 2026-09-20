@@ -172,10 +172,32 @@ Judge 通过条件为正确性 ≥4、完整性 ≥3、依据支持 ≥4；要�
 报告同时记录 grounding 校验结果、基于来源文件名的引用精确率/召回率，
 以及 Hit@K、Recall@K、MRR、耗时和失败案例，辅助定位生成质量问题。
 
+### 指标说明
+
+确定性指标不调用模型，直接根据测试集契约、检索来源和引用计算；Judge 指标用于评价最终回答的语义质量。报告中的汇总值是所有已完成案例的平均值。
+
+| 指标 | 报告字段 | 作用与解读 |
+| --- | --- | --- |
+| Hit@K | `retrieval_hit_at_1/3/5/10` | Top K 个检索来源中是否至少出现一个期望来源；衡量“能不能找到正确来源”。 |
+| Recall@K | `retrieval_recall_at_5`（单题还记录 1/3/10） | Top K 覆盖了多少个期望来源；衡量证据覆盖是否完整，期望来源越多越重要。 |
+| MRR | `retrieval_mrr` | 第一个期望来源的倒数排名；正确来源排第 1 名为 1.0，排第 2 名为 0.5，越靠前越好。 |
+| 引用精确率 | `citation_precision` | 实际引用中有多少是期望来源；衡量是否引用了无关材料。 |
+| 引用召回率 | `citation_recall` | 期望来源中有多少被实际引用；衡量回答是否把应引用的来源都标出来。 |
+| 状态匹配率 | `status_match_rate` / `status_match` | 实际状态是否符合数据集预期，例如成功回答、`LOCAL_EVIDENCE_INSUFFICIENT` 或禁用能力；衡量工作流契约和路由行为。 |
+| grounding 通过率 | `grounding_pass_rate` / `grounding_passed` | 内置 grounding 检查是否接受回答的证据支持、引用和“证据不足”处理；衡量回答是否落在可用证据范围内。 |
+| Judge 通过率 | `judge_pass_rate` / `judge.passed` | 同时满足状态匹配和 Judge 四项门槛的比例；是语义质量的综合门槛，不替代检索指标。 |
+| Judge 四项均分 | `judge_correctness_avg`、`judge_completeness_avg`、`judge_groundedness_avg`、`judge_citation_accuracy_avg` | 分别衡量正确性、完整性、依据支持和引用准确性；每题 0–5 分，便于定位回答质量短板。 |
+| 完成数 / 失败数 | `completed` / `failed` | 衡量评测链路是否稳定；失败案例没有质量分，命令成功退出也不等于质量达标。 |
+| 延迟 | `latency_ms.mean`、`latency_ms.p50`、`latency_ms.p95` | 衡量端到端耗时；P50 表示典型耗时，P95 反映较慢案例和尾延迟。 |
+
+检索和引用指标按来源文件名去重，因此衡量的是文件级来源，而不是 chunk 数量。`expected_sources` 为空表示该案例期望没有本地证据；这类案例只有在没有多余本地检索结果时才符合检索契约。`must_cite=false` 时，引用不足不会单独使 Judge 失败。
+
+这些指标只适合在相同数据集、配置和模型链路下比较。当前真实评测已切换到 Qwen3 Embedding/Reranker；切换模型后必须重新执行 `workflow` 生成新基线，旧报告中的分数不能直接作为当前基线。
+
 Judge 默认通过 `EVAL_JUDGE_PROVIDER=follow` 复用 DeepSeek 主 LLM；
-如需独立 Judge，则更改EVAL_JUDGE_PROVIDER, EVAL_JUDGE_MODEL
+如需独立 Judge，质量评测只允许设置 `EVAL_JUDGE_PROVIDER=deepseek`，并可用 `EVAL_JUDGE_MODEL` 覆盖模型名；Ollama/GLM 仅用于通用 Provider 测试。
 
-
+如果当前知识库尚未导入评测文档，先执行：
 ```bash
 cd backend
 uv run python scripts/evaluate_rag.py prepare --base-url http://127.0.0.1:8000
@@ -185,8 +207,7 @@ uv run python scripts/evaluate_rag.py prepare --base-url http://127.0.0.1:8000
 `prepare --reset`，该参数会删除当前 SQLite 数据库中的全部文档及其向量内容，不能当作普通评测前置步骤。
 
 结果写入 `backend/log/evaluation/<run_id>/`：`report.json` 保存逐题回答、证据和 Judge 评分，
-`report.md` 提供指标汇总与案例结果；
-
+`report.md` 提供指标汇总与案例结果。命令成功退出只表示报告生成成功，是否达标要以指标和失败案例为准。
 
 ## 许可证
 
