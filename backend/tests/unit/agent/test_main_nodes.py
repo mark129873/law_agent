@@ -206,6 +206,33 @@ def test_answer_generator_rag_path_streams_with_context(monkeypatch: pytest.Monk
     assert any(e.type == "delta" for e in events)
 
 
+def test_answer_generator_normalizes_legacy_source_marker():
+    result = asyncio.run(AnswerGeneratorAgent(LLMService(StreamingFakeLLM(
+        stream_text="依据如下。来源：【专利法.txt】"
+    )))(_state(
+        original_query="专利期限",
+        capability_result={"capability": "local_legal_rag", "status": CAPABILITY_SUCCESS,
+                           "evidence": [{"source_name": "专利法.txt", "content": "期限二十年"}],
+                           "citations": [], "metadata": {}},
+        evidence=[{"source_name": "专利法.txt", "content": "期限二十年"}],
+    )))
+    assert "【来源：专利法.txt】" in result["answer_draft"]
+
+
+def test_answer_generator_normalizes_plain_source_line():
+    result = asyncio.run(AnswerGeneratorAgent(LLMService(StreamingFakeLLM(
+        stream_text="依据如下。\n来源：中华人民共和国反家庭暴力法.txt"
+    )))(_state(
+        original_query="发现家庭暴力怎么办",
+        capability_result={"capability": "local_legal_rag", "status": CAPABILITY_SUCCESS,
+                           "evidence": [{"source_name": "中华人民共和国反家庭暴力法.txt",
+                                         "content": "应当报案"}],
+                           "citations": [], "metadata": {}},
+        evidence=[{"source_name": "中华人民共和国反家庭暴力法.txt", "content": "应当报案"}],
+    )))
+    assert "【来源：中华人民共和国反家庭暴力法.txt】" in result["answer_draft"]
+
+
 def test_answer_generator_not_implemented_generates_explanation(monkeypatch: pytest.MonkeyPatch):
     events = _events_of(monkeypatch, __import__("app.agent.nodes.answer_generator_agent", fromlist=["x"]))
     llm = StreamingFakeLLM(stream_text="网络搜索尚未开通")

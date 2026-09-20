@@ -203,8 +203,8 @@
       "id": "BE-049",
       "name": "RAG 端到端评测系统",
       "description": "基于现有法律测试文档和 QaWorkflow 评估 RAG 生成质量：固定复用主 LangGraph 的 DeepSeek + Milvus + llama serve Qwen3 Embedding/Reranker；工作流直调收集回答、证据、引用、grounding 与耗时，Judge 仅允许 follow/deepseek，输出 JSON/Markdown 与 Recall@K、MRR 等指标。仅保留 prepare/workflow，其他 LLM Provider 不纳入真实质量评测。",
-      "status": "in_progress",
-      "evidence": "2026-09-20：评测契约改为 DeepSeek+Milvus+llama serve Qwen3 Embedding/Reranker；真实质量复评待两个服务启动后完成，保持 in_progress。"
+      "status": "passing",
+      "evidence": "2026-09-20：50/50 真实案例完成；状态匹配/grounding/Judge 均 1.00，Recall@5 0.92、MRR 0.92、引用精确率 0.895；276 passed。报告 20260920T074628Z-e10d1123，Langfuse 50/50 trace。"
     },
     {
       "id": "BE-050",

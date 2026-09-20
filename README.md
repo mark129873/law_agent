@@ -190,6 +190,20 @@ Judge 通过条件为正确性 ≥4、完整性 ≥3、依据支持 ≥4；要�
 | 完成数 / 失败数 | `completed` / `failed` | 衡量评测链路是否稳定；失败案例没有质量分，命令成功退出也不等于质量达标。 |
 | 延迟 | `latency_ms.mean`、`latency_ms.p50`、`latency_ms.p95` | 衡量端到端耗时；P50 表示典型耗时，P95 反映较慢案例和尾延迟。 |
 
+### 当前 50 条真实评测结果
+
+2026-09-20 使用同一份 50 条数据、同一套 DeepSeek + Milvus + Qwen3 Embedding/Reranker
+链路完成优化前后对比。优化后报告为
+[`report.json`](backend/log/evaluation/20260920T074628Z-e10d1123/report.json)：
+
+| 阶段 | 状态匹配率 | grounding 通过率 | Judge 通过率 | Recall@5 | MRR | 引用精确率 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 优化前（50 条基线） | 0.92 | 1.00 | 0.88 | 0.91 | 0.92 | 0.785 |
+| 优化后（当前） | 1.00 | 1.00 | 1.00 | 0.92 | 0.92 | 0.895 |
+
+当前轮 `completed=50`、`failed=0`，Judge 正确性/完整性/依据支持/引用准确性均分为
+`4.94/4.84/4.98/5.00`；50 条案例均有 `evaluation-<case_id>` Langfuse trace，且可回查节点、LLM generation 和 `evaluation_judge`。平均延迟 `12.95s`，P95 `24.76s`。
+
 检索和引用指标按来源文件名去重，因此衡量的是文件级来源，而不是 chunk 数量。`expected_sources` 为空表示该案例期望没有本地证据；这类案例只有在没有多余本地检索结果时才符合检索契约。`must_cite=false` 时，引用不足不会单独使 Judge 失败。
 
 这些指标只适合在相同数据集、配置和模型链路下比较。当前真实评测已切换到 Qwen3 Embedding/Reranker；切换模型后必须重新执行 `workflow` 生成新基线，旧报告中的分数不能直接作为当前基线。

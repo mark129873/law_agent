@@ -1,5 +1,23 @@
 # 会话交接
 
+## Session 065：50 条真实 RAG 质量优化与验收（2026-09-20）
+
+### 本轮已完成
+- `backend/tests/evaluation/rag_cases.jsonl` 已扩充到 50 条真实案例，覆盖本地事实、多条件、对抗性、证据不足、能力边界和直接回答；5 份仓库法律文档均有对应来源。
+- 在不改变 LangGraph 主图和 Legal RAG 子图节点/边/路由的前提下，优化回答 Prompt、证据 Grader 的错误前提/范围边界、来源标记归一化、单/多法源证据排序和多条件回答规则。
+- Langfuse 与结构化日志均已验证可用；评测按 `evaluation-<case_id>` 建立 trace，含节点 span、LLM generation 和 `evaluation_judge`。
+
+### 验证与结论
+- 全量：`cd backend && uv run pytest tests -q -rs` → `276 passed、5 skipped、1 warning`。
+- 最终真实报告：`backend/log/evaluation/20260920T074628Z-e10d1123/`；50/50 完成、0 workflow failure、状态匹配率 1.00、grounding 通过率 1.00、Judge 通过率 1.00；Recall@5 0.92、MRR 0.92、引用精确率 0.895。
+- Langfuse 对账：50/50 个 session 均存在；抽查 LF-001、MC-005、EI-005 均可回查 `answer_generator_agent`、`evaluation_judge` 等观测。
+- 评测前用非破坏性 `prepare` 导入 5 份测试文档，评测结束仅按 prepare 返回的 5 个 ID 删除；API 复核剩余文档数为 0，未执行 `prepare --reset` 或 Milvus 全量 reset。
+- BE-049 已达到当前数据集质量验收，功能清单应保持 `passing`；剩余观察项是来源级 Recall@5 仍为 0.92，不是本轮质量门槛 blocker。
+
+### 后续注意
+- 后续改变 Prompt、Embedding/Reranker、Milvus 配置或数据集时，必须重新运行同一 50 条 `workflow` 并生成新报告；不要复用本轮指标。
+- 本地临时服务由本轮启动器拉起；如需关闭，只停止本轮启动的后端和两个 llama serve 进程，不要影响用户已有的 Ollama `11434` 服务。
+
 ## Session 064：解决 Ollama 与 Embedding 端口冲突（2026-09-20）
 
 ### 本轮已完成

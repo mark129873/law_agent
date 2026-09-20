@@ -3,12 +3,19 @@
 ## 当前已验证状态
 - 当前主工作树：`C:\Users\nnnnnn\Desktop\law_agent`（`feature/auto_coder`，真实评测边界提交 `71e71b4`，全项目审计提交 `09f4b64`）；`codex/archive-cleanup` 隔离 worktree 保留在历史提交 `73255d6`，未合并分支为空。
 - 标准启动路径：`cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`（`MILVUS_PROVIDER` 默认 `cloud` 读取 `MILVUS_CLOUD_*`；本地 standalone 必须显式设为 `local` 并启动 Docker）
-- 标准验证路径：`cd backend && uv run pytest tests -q -rs`；本轮 268 passed、5 skipped（Milvus 集成服务不可达）、1 warning；标准后端启动和 `/api/health` 均通过。
+- 标准验证路径：`cd backend && uv run pytest tests -q -rs`；本轮 276 passed、5 skipped（Milvus 集成服务不可达）、1 warning；标准后端启动和 `/api/health` 均通过。
 - Agent 模块一期重写（BE-032~041 + FE-014/015 + BE-040）+ 思考块增强（BE-042 + FE-016）+ Langfuse trace（BE-043）+ 全量 Prompt 优化（BE-044）+ 精排状态语义修复（BE-045）+ llama serve Qwen3 Embedding/Reranker（BE-053）+ 低质量兜底 Agent 删除（BE-047）+ Tavily Remote MCP 搜索（BE-048/FE-017）全部完成当前代码验证：主图 + Local Legal RAG 子图 + Tavily Web Search + Plugin Stub + 服务层 + 豆包式思考块 + Langfuse 全链路追踪（.env 开关）+ 12 个 Prompt 五段结构化；grounding 预算耗尽直接确定性收尾，架构决策见 docs/ARCHITECTURE.md
 - 当前 Embedding/Reranker：两个独立 `llama serve` 进程分别加载 `Qwen3-Embedding-0.6B-Q8_0.gguf` 与 `qwen3-reranker-0.6b-q8_0.gguf`；默认端口固定为 Embedding `11436`、Reranker `11435`，与 Ollama 对话 `11434` 分离；路径、地址、`LLAMA_DEVICE` 和 `LLAMA_CONTEXT_SIZE` 均由 `.env` 配置，当前设备为 `Vulkan1`、上下文为 4096。启动器真实双服务验收通过，Embedding 返回 1024 维，Reranker 返回正确排序；服务请求失败仍按 RRF 降级。
 - 当前失败路径预算：`AgentConfig.max_global_steps=2`、`LegalRAGConfig.max_retries=1`；grounding 未通过且预算耗尽时直接进入 `final_answer_node`，不再调用额外兜底 LLM；其他重试机制不变
-- 当前最高优先级未完成功能：BE-049 已完成一次共享知识库真实模型评测，但质量未达门槛；报告保留在 `backend/log/evaluation/20260919T053533Z-7f6b9aab/`，不能将本次结果写成 passing。
-- 当前 blocker：本轮完成的是新模型服务和协议/启动验收，尚未用新 Embedding/Reranker 重跑 23 条真实 RAG 质量评测，因此没有新的质量分数或质量收益结论；BE-049 继续 `in_progress`，前端未改动。
+- BE-049 当前已完成：50 条真实案例 `completed=50/failed=0`，状态匹配率与 grounding 通过率均为 1.00，Judge 通过率为 1.00；优化后报告为 `backend/log/evaluation/20260920T074628Z-e10d1123/`。
+- 观测与清理已完成：Langfuse 对账 50/50 个 `evaluation-<case_id>` trace，结构化日志与报告均保留；评测临时导入的 5 个文档已按 ID 删除，未执行共享库 reset；当前无 blocker。
+
+### Session 065（50 条真实 RAG 质量优化与验收）（2026-09-20）
+- 根据仓库内 5 份真实法律文档扩充评测集到 50 条，覆盖本地事实、多条件、对抗性、证据不足、能力边界和直接回答；ID 唯一，来源文件均存在。
+- 依据真实报告与 Langfuse trace 优化回答 Prompt、证据 Grader 边界、来源标记归一化、单/多法源排序和绝对范围判定；没有新增或删除 LangGraph 节点、边和路由流程。
+- 关键修复：多条件问题逐项回答；错误前提由直接法条纠正时不再误判证据不足；“基本限制”不要求穷尽旁支规定；统一 `【来源：文件名】` 标记；点名多法源时保留各法源，单法源问题保持来源上下文一致。
+- 全量回归：`276 passed、5 skipped、1 warning`。真实评测：50/50 完成、状态匹配率 1.00、grounding 1.00、Judge 1.00、Recall@5 0.92、MRR 0.92、引用精确率 0.895；报告 `backend/log/evaluation/20260920T074628Z-e10d1123/`。
+- Langfuse 对账：50/50 个 `evaluation-<case_id>` session 均可查询；trace 含节点 span、LLM generation 和 `evaluation_judge`，无观测 blocker。评测导入的 5 个临时文档已清理，未使用 `prepare --reset`。
 
 ### Session 064（解决 Ollama 与 Embedding 端口冲突）（2026-09-20）
 - 根因：Ollama 对话默认 `11434`，Embedding llama serve 也默认 `11434`；切换 `LLM_PROVIDER=ollama` 时两个服务无法同时绑定。

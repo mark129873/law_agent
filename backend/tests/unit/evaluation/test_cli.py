@@ -38,7 +38,7 @@ async def test_prepare_dispatch_keeps_reset_explicit(tmp_path, monkeypatch) -> N
 async def test_workflow_dispatch_loads_dataset_and_runs_quality_evaluation(tmp_path, monkeypatch) -> None:
     """复用真实数据集解析，只替换外部工作流执行，避免回归测试触发模型计费。"""
     dataset = Path(__file__).resolve().parents[2] / "evaluation" / "rag_cases.jsonl"
-    evaluate = AsyncMock(return_value=(SimpleNamespace(summary={"total": 23}), tmp_path))
+    evaluate = AsyncMock(return_value=(SimpleNamespace(summary={"total": 50}), tmp_path))
     monkeypatch.setattr("app.evaluation.runner.run_workflow_evaluation", evaluate)
     args = build_parser().parse_args([
         "workflow", "--cases", str(dataset), "--output-root", str(tmp_path),
@@ -47,5 +47,5 @@ async def test_workflow_dispatch_loads_dataset_and_runs_quality_evaluation(tmp_p
     assert await _run(args) == 0
     evaluate.assert_awaited_once()
     call = evaluate.await_args
-    assert len(call.args[0]) == 23
+    assert len(call.args[0]) == 50
     assert call.kwargs == {"dataset_path": str(dataset), "output_root": str(tmp_path)}

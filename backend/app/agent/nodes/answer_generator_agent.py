@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from app.agent.constants import (
     ACTION_DIRECT_ANSWER,
     CAPABILITY_DISABLED,
+    CAPABILITY_LOCAL_EVIDENCE_INSUFFICIENT,
     CAPABILITY_NOT_IMPLEMENTED,
     CAPABILITY_SUCCESS,
     CAPABILITY_WEB_SEARCH_CONFIG_REQUIRED,
@@ -27,6 +29,15 @@ from app.agent.utils.timing_utils import Timer
 from app.domain.services.qa_workflow import QaStreamEvent
 
 logger = logging.getLogger("app.agent.nodes.answer_generator")
+
+_REVERSED_SOURCE_MARKER = re.compile(r"(?:来源|出处)\s*[:：]\s*【([^】\n]+)】")
+_PLAIN_SOURCE_LINE = re.compile(r"(?m)^\s*(?:来源|出处)\s*[:：]\s*([^\n【】]+?)\s*$")
+
+
+def _normalize_source_markers(answer: str) -> str:
+    """把模型偶发的反向或裸来源标记统一为 grounding 约定的格式。"""
+    normalized = _REVERSED_SOURCE_MARKER.sub(r"【来源：\1】", answer)
+    return _PLAIN_SOURCE_LINE.sub(r"【来源：\1】", normalized)
 
 
 class AnswerGeneratorAgent:
@@ -81,12 +92,17 @@ class AnswerGeneratorAgent:
             mode = f"capability_notice:{feature}"
         else:
             # 情形 3/4：依据 BE-017 策略生成（context 为空走信息不足声明）
+            local_evidence_insufficient = (
+                capability.get("capability") == "local_legal_rag"
+                and status == CAPABILITY_LOCAL_EVIDENCE_INSUFFICIENT
+            )
             messages = build_answer_messages(
                 question=question,
                 context=context,
                 history=state.get("history"),
                 feedback="；".join(state.get("grounding_issues") or []) if is_retry else "",
                 web_search=state.get("last_capability") == "web_search",
+                local_evidence_insufficient=local_evidence_insufficient,
             )
             mode = (
                 "web_answer"
@@ -108,7 +124,9 @@ class AnswerGeneratorAgent:
         async for chunk in self._llm.stream(messages):
             chunks.append(chunk)
             emit_event(QaStreamEvent(type="delta", content=chunk))
-        answer = "".join(chunks)
+        # 输出层只做格式归一，不改写法律内容；这样可修复“来源：【文件名】”
+        # 这类不会影响语义、却会触发确定性 grounding 规则的模型排版偏差。
+        answer = _normalize_source_markers("".join(chunks))
         return {
             "answer_draft": answer,
             "trace": [

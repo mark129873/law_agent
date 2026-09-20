@@ -294,6 +294,47 @@ def test_evidence_ranking_dedups_and_reranks_with_original_query():
     assert trace["input_count"] == 3 and trace["dedup_count"] == 2 and trace["reranker_degraded"] is False
 
 
+def test_evidence_ranking_preserves_explicit_multi_source_coverage():
+    """原问题点名多个法源时，top-k 不应被最高分的单一法源占满。"""
+    scorer = FakeScorer([0.99, 0.98, 0.10])
+    node = EvidenceRankingNode(RerankerService(scorer), CONFIG)
+    result = asyncio.run(
+        node(
+            _state(
+                original_query="网络安全法和民法典分别如何保护个人信息？",
+                normalized_query="网络安全法和民法典分别如何保护个人信息？",
+                current_plan={"target_evidence": ["网络安全法要求", "民法典要求"]},
+                retrieval_candidates=[
+                    {"chunk_id": "n1", "content": "网络安全法一", "source_name": "中华人民共和国网络安全法.txt", "rrf_score": 0.3},
+                    {"chunk_id": "n2", "content": "网络安全法二", "source_name": "中华人民共和国网络安全法.txt", "rrf_score": 0.2},
+                    {"chunk_id": "c1", "content": "民法典一", "source_name": "中华人民共和国民法典.md", "rrf_score": 0.1},
+                ],
+            )
+        )
+    )
+    sources = [item["source_name"] for item in result["ranked_evidence"]]
+    assert sources[:2] == ["中华人民共和国网络安全法.txt", "中华人民共和国民法典.md"]
+    assert result["rag_trace"][0]["source_diversity_enabled"] is True
+
+
+def test_evidence_ranking_keeps_coherent_single_source_context():
+    scorer = FakeScorer([0.99, 0.98, 0.10])
+    node = EvidenceRankingNode(RerankerService(scorer), CONFIG)
+    result = asyncio.run(
+        node(
+            _state(
+                retrieval_candidates=[
+                    {"chunk_id": "a1", "content": "甲一", "source_name": "甲法.txt", "rrf_score": 0.3},
+                    {"chunk_id": "a2", "content": "甲二", "source_name": "甲法.txt", "rrf_score": 0.2},
+                    {"chunk_id": "b1", "content": "乙一", "source_name": "乙法.txt", "rrf_score": 0.1},
+                ]
+            )
+        )
+    )
+    assert {item["source_name"] for item in result["ranked_evidence"]} == {"甲法.txt"}
+    assert result["rag_trace"][0]["source_coherence_enabled"] is True
+
+
 def test_evidence_ranking_distinguishes_disabled_from_failed_reranker(monkeypatch: pytest.MonkeyPatch):
     """主动关闭精排只提示配置状态，不能误报为模型故障降级。"""
     messages: list[str] = []
@@ -326,6 +367,37 @@ def test_evidence_grader_parses_grade():
     result = asyncio.run(agent(_state(ranked_evidence=[{"chunk_id": "c1", "content": "x", "source_name": "法"}])))
     assert result["evidence_sufficient"] is True
     assert result["evidence_confidence"] == 0.9
+
+
+def test_evidence_grader_rejects_unbounded_claim_with_local_scope_only():
+    raw = ('{"sufficient": true, "confidence": 0.9, "local_recovery_possible": false, '
+           '"missing_evidence": [], "conflicts": [], "suggested_external_queries": [], "reason": "可反驳"}')
+    agent = EvidenceGraderAgent(LLMService(FakeLLM([raw])), CONFIG)
+    result = asyncio.run(
+        agent(
+            _state(
+                original_query="每一家公司的所有数据是否一定永久保存？",
+                ranked_evidence=[{"chunk_id": "c1", "content": "仅规定特定主体的数据范围"}],
+            )
+        )
+    )
+    assert result["evidence_sufficient"] is False
+    assert result["missing_evidence"]
+
+
+def test_evidence_grader_does_not_treat_legal_term_as_absolute_scope():
+    raw = ('{"sufficient": true, "confidence": 0.9, "local_recovery_possible": false, '
+           '"missing_evidence": [], "conflicts": [], "suggested_external_queries": [], "reason": "已覆盖"}')
+    agent = EvidenceGraderAgent(LLMService(FakeLLM([raw])), CONFIG)
+    result = asyncio.run(
+        agent(
+            _state(
+                original_query="土地所有权、土地用途管制和土地转让分别有哪些基本限制？",
+                ranked_evidence=[{"chunk_id": "c1", "content": "土地所有权和用途管制", "source_name": "土地法"}],
+            )
+        )
+    )
+    assert result["evidence_sufficient"] is True
 
 
 def test_evidence_grader_defaults_to_insufficient():

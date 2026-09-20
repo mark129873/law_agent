@@ -31,3 +31,19 @@ def test_without_context_question_passes_through() -> None:
     messages = build_answer_messages("试用期多长？", "")
     assert messages[-1].content == "试用期多长？"
     assert len(messages) == 2  # system + user，无多余内容
+
+
+def test_insufficient_rag_prompt_forbids_unrelated_legal_conclusions() -> None:
+    messages = build_answer_messages(
+        "晚上十点装修是否犯罪？",
+        "【来源：民法典.md】业主装修应遵守合理注意事项",
+        local_evidence_insufficient=True,
+    )
+    assert "LOCAL_EVIDENCE_INSUFFICIENT" in messages[0].content
+    assert "不得依据无关片段推断犯罪、刑期" in messages[0].content
+
+
+def test_answer_prompt_covers制度_and_direct_duties() -> None:
+    messages = build_answer_messages("网络运营者按照什么制度履行安全义务？", "网络安全等级保护制度；制定制度和采取防范措施")
+    assert "先回答制度名称" in messages[0].content
+    assert "不能只复述制度名称就结束" in messages[0].content

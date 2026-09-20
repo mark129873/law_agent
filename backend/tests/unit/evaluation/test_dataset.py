@@ -11,8 +11,8 @@ def test_repository_evaluation_dataset_is_complete_and_versioned() -> None:
     path = Path(__file__).resolve().parents[2] / "evaluation" / "rag_cases.jsonl"
     cases = load_cases(path)
 
-    assert len(cases) == 23
-    assert len({case.id for case in cases}) == 23
+    assert len(cases) == 50
+    assert len({case.id for case in cases}) == 50
     assert dataset_sha256(path)
     assert {case.category for case in cases} == {
         "local_factual",
