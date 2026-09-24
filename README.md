@@ -26,7 +26,7 @@ Law Agent 意图构建法律助手，已完成知识库问答场景（法条检�
 | 数据 | SQLAlchemy 2.0 Async + SQLite（当前启用；MySQL 预留端口） |
 | 检索 | Milvus Cloud（默认）或 Milvus Standalone（dense + 稀疏 BM25，服务端 `hybrid_search` + RRF） |
 | 模型 | Ollama 本地、智谱 GLM API 或 DeepSeek API；Embedding 使用 llama serve Qwen3 GGUF |
-| 重排 | llama serve Qwen3 Reranker GGUF；关闭或服务失败时使用 RRF 序 |
+| 重排 | llama serve Qwen3 Reranker GGUF；关闭或服务失败时使用 RRF  |
 | 观测 | 结构化 JSON 日志 + 可选 Langfuse 三级 trace |
 
 
